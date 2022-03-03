@@ -93,7 +93,7 @@ public:
     QWORD QwEngineFileId() const override {  AssertSz( fFalse, "NYI!" ); return 0; }
 #endif
 
-    TICK DtickIOElapsed( void* const pvIOContext ) const override { AssertSz( fFalse, "NYI!" ); return 0; }
+    TICK DtickIOElapsed( void* const pvIOContext ) override { AssertSz( fFalse, "NYI!" ); return 0; }
 
 private:
     BYTE  *m_pbBuffer;

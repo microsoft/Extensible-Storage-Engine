@@ -22,48 +22,77 @@ namespace Internal
 
                     public:
 
-                        BOOL FCacheEnabled() override;
-                        VOID CacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType ) override;
-                        VOID Path( __out_bcount( cbOSFSAPI_MAX_PATHW ) WCHAR* const wszAbsPath ) override;
-                        QWORD CbMaximumSize() override;
-                        double PctWrite() override;
+                        BOOL FCacheEnabled() override
+                        {
+                            return I()->IsCacheEnabled() ? fTrue : fFalse;
+                        }
+
+                        VOID CacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType ) override
+                        {
+                            Guid cacheType = I()->CacheType();
+
+                            array<Byte>^ cacheTypeBytes = cacheType.ToByteArray();
+                            pin_ptr<Byte> cacheTypeBytesT = &cacheTypeBytes[ 0 ];
+                            UtilMemCpy( rgbCacheType, cacheTypeBytesT, cbGuid );
+                        }
+
+                        VOID Path( __out_bcount( cbOSFSAPI_MAX_PATHW ) WCHAR* const wszAbsPath ) override
+                        {
+                            String^ absPath = I()->Path();
+                            pin_ptr<const Char> wszAbsPathT = PtrToStringChars( absPath );
+                            OSStrCbCopyW( wszAbsPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszAbsPathT );
+                        }
+
+                        QWORD CbMaximumSize() override
+                        {
+                            return I()->MaximumSize();
+                        }
+
+                        double PctWrite() override
+                        {
+                            return I()->PercentWrite();
+                        }
+
+                        QWORD CbJournalSegmentsMaximumSize() override
+                        {
+                            return I()->JournalSegmentsMaximumSize();
+                        }
+
+                        double PctJournalSegmentsInUse() override
+                        {
+                            return I()->PercentJournalSegmentsInUse();
+                        }
+
+                        QWORD CbJournalSegmentsMaximumCacheSize() override
+                        {
+                            return I()->JournalSegmentsMaximumCacheSize();
+                        }
+
+                        QWORD CbJournalClustersMaximumSize() override
+                        {
+                            return I()->JournalClustersMaximumSize();
+                        }
+
+                        QWORD CbCachingFilePerSlab() override
+                        {
+                            return I()->CachingFilePerSlab();
+                        }
+
+                        QWORD CbCachedFilePerSlab() override
+                        {
+                            return I()->CachedFilePerSlab();
+                        }
+
+                        QWORD CbSlabMaximumCacheSize() override
+                        {
+                            return I()->SlabMaximumCacheSize();
+                        }
+
+                        BOOL FAsyncWriteBackEnabled() override
+                        {
+                            return I()->IsAsyncWriteBackEnabled() ? fTrue : fFalse;
+                        }
                 };
-
-                template< class TM, class TN >
-                inline BOOL CCacheConfigurationWrapper<TM, TN>::FCacheEnabled()
-                {
-                    return I()->IsCacheEnabled() ? fTrue : fFalse;
-                }
-
-                template< class TM, class TN >
-                inline VOID CCacheConfigurationWrapper<TM, TN>::CacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType )
-                {
-                    Guid cacheType = I()->CacheType();
-
-                    array<Byte>^ cacheTypeBytes = cacheType.ToByteArray();
-                    pin_ptr<Byte> cacheTypeBytesT = &cacheTypeBytes[ 0 ];
-                    memcpy( rgbCacheType, cacheTypeBytesT, cbGuid );
-                }
-
-                template< class TM, class TN >
-                inline VOID CCacheConfigurationWrapper<TM, TN>::Path( __out_bcount( cbOSFSAPI_MAX_PATHW ) WCHAR* const wszAbsPath )
-                {
-                    String^ absPath = I()->Path();
-                    pin_ptr<const Char> wszAbsPathT = PtrToStringChars( absPath );
-                    OSStrCbCopyW( wszAbsPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszAbsPathT );
-                }
-
-                template< class TM, class TN >
-                inline QWORD CCacheConfigurationWrapper<TM, TN>::CbMaximumSize()
-                {
-                    return I()->MaximumSize();
-                }
-
-                template< class TM, class TN >
-                inline double CCacheConfigurationWrapper<TM, TN>::PctWrite()
-                {
-                    return I()->PercentWrite();
-                }
             }
         }
     }

@@ -32,7 +32,11 @@ class ICachedFileConfiguration  //  cfconfig
 
         //  The file number to use for cache telemetry.
 
-        virtual ULONG LCacheTelemetryFileNumber() = 0;
+        virtual ULONG UlCacheTelemetryFileNumber() = 0;
+
+        //  The size in bytes of the file to protect from write back.
+
+        virtual ULONG UlPinnedHeaderSizeInBytes() = 0;
 };
 
 //  Default Cached File Configuration.
@@ -49,7 +53,8 @@ class CDefaultCachedFileConfiguration : public ICachedFileConfiguration
         VOID CachingFilePath( __out_bcount( cbOSFSAPI_MAX_PATHW ) WCHAR* const wszAbsPath ) override;
         ULONG CbBlockSize() override;
         ULONG CConcurrentBlockWriteBackMax() override;
-        ULONG LCacheTelemetryFileNumber() override;
+        ULONG UlCacheTelemetryFileNumber() override;
+        ULONG UlPinnedHeaderSizeInBytes() override;
 
     protected:
 
@@ -57,7 +62,8 @@ class CDefaultCachedFileConfiguration : public ICachedFileConfiguration
         WCHAR   m_wszAbsPathCachingFile[ OSFSAPI_MAX_PATH ];
         ULONG   m_cbBlockSize;
         ULONG   m_cConcurrentBlockWriteBackMax;
-        ULONG   m_lCacheTelemetryFileNumber;
+        ULONG   m_ulCacheTelemetryFileNumber;
+        ULONG   m_ulPinnedHeaderSizeInBytes;
 };
 
 //  Cache Configuration Interface.
@@ -91,6 +97,38 @@ class ICacheConfiguration  //  cconfig
         //  The amount of this caching file dedicated to write back caching.
 
         virtual double PctWrite() = 0;
+
+        //  The maximum size of this caching file used by journal segments.
+
+        virtual QWORD CbJournalSegmentsMaximumSize() = 0;
+
+        //  The amount of the journal segments that should be in use.
+
+        virtual double PctJournalSegmentsInUse() = 0;
+
+        //  The maximum amount of cache memory used by journal segments.
+
+        virtual QWORD CbJournalSegmentsMaximumCacheSize() = 0;
+
+        //  The maximum size of this caching file used by journal clusters.
+
+        virtual QWORD CbJournalClustersMaximumSize() = 0;
+
+        //  The amount of caching file managed as a unit.
+
+        virtual QWORD CbCachingFilePerSlab() = 0;
+
+        //  The number of consecutive bytes of a cached file that land in the same caching unit.
+
+        virtual QWORD CbCachedFilePerSlab() = 0;
+
+        //  The maximum amount of cache memory used by slabs.
+
+        virtual QWORD CbSlabMaximumCacheSize() = 0;
+
+        //  Indicates if asynchronous write back is enabled.
+
+        virtual BOOL FAsyncWriteBackEnabled() = 0;
 };
 
 //  Default Cache Configuration.
@@ -108,6 +146,14 @@ class CDefaultCacheConfiguration : public ICacheConfiguration
         VOID Path( __out_bcount( cbOSFSAPI_MAX_PATHW ) WCHAR* const wszAbsPath ) override;
         QWORD CbMaximumSize() override;
         double PctWrite() override;
+        QWORD CbJournalSegmentsMaximumSize() override;
+        double PctJournalSegmentsInUse() override;
+        QWORD CbJournalSegmentsMaximumCacheSize() override;
+        QWORD CbJournalClustersMaximumSize() override;
+        QWORD CbCachingFilePerSlab() override;
+        QWORD CbCachedFilePerSlab() override;
+        QWORD CbSlabMaximumCacheSize() override;
+        BOOL FAsyncWriteBackEnabled() override;
 
     protected:
 
@@ -116,6 +162,14 @@ class CDefaultCacheConfiguration : public ICacheConfiguration
         WCHAR   m_wszAbsPathCachingFile[ OSFSAPI_MAX_PATH ];
         QWORD   m_cbMaximumSize;
         double  m_pctWrite;
+        QWORD   m_cbJournalSegmentsMaximumSize;
+        double  m_pctJournalSegmentsInUse;
+        QWORD   m_cbJournalSegmentsMaximumCacheSize;
+        QWORD   m_cbJournalClustersMaximumSize;
+        QWORD   m_cbCachingFilePerSlab;
+        QWORD   m_cbCachedFilePerSlab;
+        QWORD   m_cbSlabMaximumCacheSize;
+        BOOL    m_fAsyncWriteBackEnabled;
 };
 
 class IBlockCacheConfiguration  //  bcconfig

@@ -295,7 +295,7 @@ class COSFile  //  osf
         QWORD QwEngineFileId() const override { return m_p_osf->pfpapi->QwEngineFileId(); }
 #endif
 
-        TICK DtickIOElapsed( void* const pvIOContext ) const override;
+        TICK DtickIOElapsed( void* const pvIOContext ) override;
 
     private:
 

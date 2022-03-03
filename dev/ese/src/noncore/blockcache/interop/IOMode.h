@@ -23,27 +23,27 @@ namespace Internal
                     /// <summary>
                     /// A raw access of the underlying cached file.
                     /// </summary>
-                    Raw = 0,
+                    Raw = (int)::iomRaw,
 
                     /// <summary>
                     /// An access of the underlying cached file by the engine.
                     /// </summary>
-                    Engine = 1,
+                    Engine = (int)::iomEngine,
 
                     /// <summary>
                     /// A read from the underlying cached file by the cache to service a cache miss.
                     /// </summary>
-                    CacheMiss = 2,
+                    CacheMiss = (int)::iomCacheMiss,
 
                     /// <summary>
                     /// A write to the underlying cached file by the cache to service an uncached write or write through.
                     /// </summary>
-                    CacheWriteThrough = 3,
+                    CacheWriteThrough = (int)::iomCacheWriteThrough,
 
                     /// <summary>
                     /// A write to the underlying cached file by the cache to perform a write back.
                     /// </summary>
-                    CacheWriteBack = 4,
+                    CacheWriteBack = (int)::iomCacheWriteBack,
                 };
             }
         }

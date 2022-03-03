@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( IFileSystemConfiguration^% fsconfig, ::IFileSystemConfiguration** const ppfsconfig )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileSystemConfiguration,::IFileSystemConfiguration,CFileSystemConfigurationWrapper<IFileSystemConfiguration,::IFileSystemConfiguration>>( fsconfig, ppfsconfig );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileSystemConfiguration,::IFileSystemConfiguration,CFileSystemConfigurationWrapper<IFileSystemConfiguration,::IFileSystemConfiguration>, FileSystemConfigurationRemotable>( fsconfig, ppfsconfig );
                         }
 
                     public:

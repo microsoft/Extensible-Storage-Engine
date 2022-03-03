@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( IFileIdentification^% fident, ::IFileIdentification** const ppfident )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileIdentification, ::IFileIdentification, CFileIdentificationWrapper<IFileIdentification, ::IFileIdentification>>( fident, ppfident );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileIdentification, ::IFileIdentification, CFileIdentificationWrapper<IFileIdentification, ::IFileIdentification>, FileIdentificationRemotable>( fident, ppfident );
                         }
 
                     public:

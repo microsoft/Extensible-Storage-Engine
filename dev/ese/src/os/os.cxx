@@ -52,6 +52,7 @@ extern void OSTimePostterm();
 extern void OSSysinfoPostterm();
 extern void OSLibraryPostterm();
 extern void OSHaPublishPostterm();
+extern void OSBlockCachePostterm();
 
 void OSPostterm()
 {
@@ -59,6 +60,7 @@ void OSPostterm()
 
     //  terminate all OS subsystems in reverse dependency order
 
+    OSBlockCachePostterm();
     OSEdbgPostterm();
     OSEncryptionPostterm();
     OSEventTracePostterm();
@@ -112,6 +114,7 @@ extern BOOL FOSPerfmonPreinit();
 extern BOOL FOSEventTracePreinit();
 extern BOOL FOSEncryptionPreinit();
 extern BOOL FOSEdbgPreinit();
+extern BOOL FOSBlockCachePreinit();
 
 #ifdef RTM
 #define PREINIT_FAILURE_POINT 0
@@ -238,6 +241,8 @@ BOOL FOSPreinit()
             !FOSEncryptionPreinit() ||
             PREINIT_FAILURE_POINT ||
             !FOSEdbgPreinit() ||
+            PREINIT_FAILURE_POINT ||
+            !FOSBlockCachePreinit() ||
             PREINIT_FAILURE_POINT
             )
     {
@@ -438,17 +443,11 @@ BOOL COSLayerPreInit::FInitd()
 {
     return m_fInitedSuccessfully;
 }
-    
-extern CFileIdentification g_fident;
-extern CCacheRepository g_crep;
 
 COSLayerPreInit::~COSLayerPreInit()
 {
     if ( m_fInitedSuccessfully )
     {
-        g_fident.Cleanup();
-        g_crep.Cleanup();
-
         //  Post-term the OS Layer ...
         g_fDllUp = fFalse;
         OSPostterm();

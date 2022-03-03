@@ -3,176 +3,176 @@
 
 #pragma once
 
-#include <msclr\auto_gcroot.h>
-#include <vcclr.h>
+#include "Common.h"
 
-#define _CRT_RAND_S
-
-// needed for JET errors
-#if defined(BUILD_ENV_IS_NT) || defined(BUILD_ENV_IS_WPHONE)
-#include <esent_x.h>
-#endif
-#ifdef BUILD_ENV_IS_EX
-#include <jet.h>
-#endif
-
-#include <windows.h>
-#include <cstdio>
-#include <stdlib.h>
-
-#include <functional>
-
-
-#include <tchar.h>
-#include "os.hxx"
-
-#include "tcconst.hxx"
-
-
-using namespace System;
-using namespace System::Runtime::InteropServices;
-
-#using <Microsoft.Isam.Esent.Interop.dll> as_friend
-using namespace Microsoft::Isam::Esent::Interop;
-
-//  one last macro for old time's sake
-#define ExCall( f )                             \
-{                                               \
-    try                                         \
-    {                                           \
-        (f);                                    \
-        err = JET_errSuccess;                   \
-    }                                           \
-    catch( EsentErrorException^ ex )            \
-    {                                           \
-        err = (ERR)(int)ex->Error;              \
-    }                                           \
-    catch( Exception^ )                         \
-    {                                           \
-        Enforce( !"Unhandled C# exception" );   \
-    }                                           \
-    Call( err );                                \
-}
-
-INLINE EsentErrorException^ EseException( const JET_ERR err )
-{
-    return  err >= JET_errSuccess ? nullptr : EsentExceptionHelper::JetErrToException( (JET_err)err );
-}
-
+#include "IObjectMarshaller.h"
+#include "ObjectMarshaller.h"
+#include "CContainer.h"
 #include "CWrapper.h"
 #include "Base.h"
 
-#include "CachingPolicy.h"
+
 #include "FileId.h"
-#include "FileModeFlags.h"
-#include "FileQOS.h"
-#include "FileSerial.h"
-#include "FileSize.h"
-#include "IOMode.h"
 #include "VolumeId.h"
-
-#include "ICachedFileConfiguration.h"
-#include "ICacheConfiguration.h"
-#include "IBlockCacheConfiguration.h"
-
 #include "IFileIdentification.h"
-#include "IFile.h"
-#include "IFileFind.h"
-#include "IFileSystemConfiguration.h"
-#include "IFileSystem.h"
-#include "IFileSystemFilter.h"
-#include "IFileFilter.h"
-
-#include "ICache.h"
-#include "ICacheRepository.h"
-
-#include "CIOComplete.h"
-#include "IOComplete.h"
-
 #include "CFileIdentificationWrapper.h"
 #include "FileIdentificationBase.h"
+#include "FileIdentificationRemotable.h"
 #include "FileIdentification.h"
 
+#include "FileModeFlags.h"
+#include "FileQOS.h"
+#include "FileSize.h"
+#include "IFile.h"
+#include "IOComplete.h"
+#include "IOCompleteInverse.h"
 #include "CFileWrapper.h"
 #include "FileBase.h"
+#include "FileRemotable.h"
 #include "File.h"
 
+#include "IOMode.h"
+#include "FileSerial.h"
+#include "IFileFilter.h"
 #include "CFileFilterWrapper.h"
 #include "FileFilterBase.h"
+#include "FileFilterRemotable.h"
 #include "FileFilter.h"
 
+#include "IFileFind.h"
 #include "CFileFindWrapper.h"
 #include "FileFindBase.h"
+#include "FileFindRemotable.h"
 #include "FileFind.h"
 
+#include "ICachedFileConfiguration.h"
 #include "CCachedFileConfigurationWrapper.h"
 #include "CachedFileConfigurationBase.h"
+#include "CachedFileConfigurationRemotable.h"
 #include "CachedFileConfiguration.h"
 
+#include "ICacheConfiguration.h"
 #include "CCacheConfigurationWrapper.h"
 #include "CacheConfigurationBase.h"
+#include "CacheConfigurationRemotable.h"
 #include "CacheConfiguration.h"
 
+#include "IBlockCacheConfiguration.h"
 #include "CBlockCacheConfigurationWrapper.h"
 #include "BlockCacheConfigurationBase.h"
+#include "BlockCacheConfigurationRemotable.h"
 #include "BlockCacheConfiguration.h"
 
+#include "IFileSystemConfiguration.h"
 #include "CFileSystemConfigurationWrapper.h"
 #include "FileSystemConfigurationBase.h"
+#include "FileSystemConfigurationRemotable.h"
 #include "FileSystemConfiguration.h"
 
+#include "IFileSystem.h"
 #include "CFileSystemWrapper.h"
 #include "FileSystemBase.h"
+#include "FileSystemRemotable.h"
 #include "FileSystem.h"
 
+#include "IFileSystemFilter.h"
 #include "CFileSystemFilterWrapper.h"
 #include "FileSystemFilterBase.h"
+#include "FileSystemFilterRemotable.h"
 #include "FileSystemFilter.h"
 
-#include "CComplete.h"
+#include "CachingPolicy.h"
+#include "ICache.h"
 #include "Complete.h"
-
+#include "CompleteInverse.h"
 #include "CCacheWrapper.h"
 #include "CacheBase.h"
+#include "CacheRemotable.h"
 #include "Cache.h"
 
+#include "ICacheRepository.h"
 #include "CCacheRepositoryWrapper.h"
 #include "CacheRepositoryBase.h"
+#include "CacheRepositoryRemotable.h"
 #include "CacheRepository.h"
 
 #include "ICacheTelemetry.h"
 #include "CCacheTelemetryWrapper.h"
 #include "CacheTelemetryBase.h"
+#include "CacheTelemetryRemotable.h"
 #include "CacheTelemetry.h"
 
-#include "SegmentPosition.h"
 #include "RegionPosition.h"
-#include "JournalPosition.h"
-
+#include "SegmentPosition.h"
 #include "IJournalSegment.h"
-#include "IJournalSegmentManager.h"
-#include "IJournal.h"
-
-#include "CVisitRegion.h"
 #include "VisitRegion.h"
-
-#include "CSealed.h"
+#include "VisitRegionInverse.h"
 #include "Sealed.h"
-
+#include "SealedInverse.h"
 #include "CJournalSegmentWrapper.h"
 #include "JournalSegmentBase.h"
+#include "JournalSegmentRemotable.h"
 #include "JournalSegment.h"
 
-#include "CVisitSegment.h"
+#include "IJournalSegmentManager.h"
 #include "VisitSegment.h"
-
+#include "VisitSegmentInverse.h"
 #include "CJournalSegmentManagerWrapper.h"
 #include "JournalSegmentManagerBase.h"
+#include "JournalSegmentManagerRemotable.h"
 #include "JournalSegmentManager.h"
 
-#include "CVisitEntry.h"
+#include "JournalPosition.h"
+#include "IJournal.h"
 #include "VisitEntry.h"
-
+#include "VisitEntryInverse.h"
 #include "CJournalWrapper.h"
 #include "JournalBase.h"
+#include "JournalRemotable.h"
 #include "Journal.h"
+
+#include "CachedBlockWriteCount.h"
+#include "ICachedBlockWriteCountsManager.h"
+#include "CCachedBlockWriteCountsManagerWrapper.h"
+#include "CachedBlockWriteCountsManagerBase.h"
+#include "CachedBlockWriteCountsManagerRemotable.h"
+#include "CachedBlockWriteCountsManager.h"
+
+#include "CachedBlockNumber.h"
+#include "CachedBlockId.h"
+#include "ClusterNumber.h"
+#include "UpdateNumber.h"
+#include "CachedBlock.h"
+#include "ChunkNumber.h"
+#include "SlotNumber.h"
+#include "CachedBlockSlot.h"
+#include "CachedBlockSlotState.h"
+
+#include "ICachedBlockSlab.h"
+#include "ClusterWritten.h"
+#include "ClusterWrittenInverse.h"
+#include "ClusterRead.h"
+#include "ClusterReadInverse.h"
+#include "ConsiderUpdate.h"
+#include "ConsiderUpdateInverse.h"
+#include "VisitSlot.h"
+#include "VisitSlotInverse.h"
+#include "SlabSaved.h"
+#include "SlabSavedInverse.h"
+#include "CCachedBlockSlabWrapper.h"
+#include "CachedBlockSlabBase.h"
+#include "CachedBlockSlabRemotable.h"
+#include "CachedBlockSlab.h"
+
+#include "ICachedBlockSlabManager.h"
+#include "VisitSlab.h"
+#include "VisitSlabInverse.h"
+#include "CCachedBlockSlabManagerWrapper.h"
+#include "CachedBlockSlabManagerBase.h"
+#include "CachedBlockSlabManagerRemotable.h"
+#include "CachedBlockSlabManager.h"
+
+#include "IBlockCacheFactory.h"
+#include "CBlockCacheFactoryWrapper.h"
+#include "BlockCacheFactoryBase.h"
+#include "BlockCacheFactory.h"

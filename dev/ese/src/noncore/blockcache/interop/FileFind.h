@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( IFileFind^% ff, IFileFindAPI** const ppffapi )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileFind,IFileFindAPI,CFileFindWrapper<IFileFind,IFileFindAPI>>( ff, ppffapi );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileFind,IFileFindAPI,CFileFindWrapper<IFileFind,IFileFindAPI>, FileFindRemotable>( ff, ppffapi );
                         }
 
                     public:

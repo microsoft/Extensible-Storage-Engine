@@ -3796,22 +3796,42 @@ class CDynamicHashTable
 template< class CKey, class CEntry >
 inline CDynamicHashTable< CKey, CEntry >::
 CDynamicHashTable( const NativeCounter rankDHTrwlBucket )
-    :   m_semPolicy( CSyncBasicInfo( "CDynamicHashTable::m_semPolicy" ) )
-{
-#ifdef DEBUG
-    m_fInit = fFalse;
-
-    //  zero-out this memory so the debugger won't print garbage
-
-    memset( m_rgbRsvdNever, 0, sizeof( m_rgbRsvdNever ) );
-    memset( m_rgbRsvdOften, 0, sizeof( m_rgbRsvdOften ) );
-    memset( m_rgbRsvdAlways, 0, sizeof( m_rgbRsvdAlways ) );
+    :   m_cLoadFactor( 0 ),
+        m_centryBucket( 0 ),
+        m_cbBucket( 0 ),
+        m_rankDHTrwlBucket( rankDHTrwlBucket ),
+        m_rghs( NULL ),
+        m_chs( 0 ),
+        m_cbucketMin( 0 ),
+        m_rgbRsvdNever { },
+        m_dirptrs { },
+        m_rgrgBucket { },
+        m_cOpSensitivity( 0 ),
+        m_cBucketPreferred( 0 ),
+        m_stateCur( stateNil ),
+        m_rgbRsvdOften { },
+        m_semPolicy( CSyncBasicInfo( "CDynamicHashTable::m_semPolicy" ) ),
+        m_cCompletions( 0 ),
+        m_rgbRsvdAlways { }
 #ifdef DHT_STATS
-    memset( m_rgbRsvdPerf, 0, sizeof( m_rgbRsvdPerf ) );
-#endif  //  DHT_STATS
-
+        ,
+        m_cBucketOverflowInsert( 0 ),
+        m_cBucketOverflowDelete( 0 ),
+        m_cBucketSplit( 0 ),
+        m_cBucketMerge( 0 ),
+        m_cDirSplit( 0 ),
+        m_cDirMerge( 0 ),
+        m_cTransition( 0 ),
+        m_cSelection( 0 ),
+        m_cSplitContend( 0 ),
+        m_cMergeContend( 0 ),
+        m_rgbRsvdPerf { }
 #endif
-
+#ifdef DEBUG
+        ,
+        m_fInit( fFalse )
+#endif
+{
     //  we should be on a 32-bit or 64-bit system
 
 #ifdef _WIN64
@@ -3819,12 +3839,6 @@ CDynamicHashTable( const NativeCounter rankDHTrwlBucket )
 #else   //  _!WIN64
     DHTAssert( 4 == sizeof( NativeCounter ) );
 #endif  //  _WIN64
-
-    //  capture the rank for each bucket
-
-    m_rankDHTrwlBucket = rankDHTrwlBucket;
-
-    //  prepare each semaphore so it can have 1 owner
 
     m_semPolicy.Release();
 }
@@ -3836,6 +3850,7 @@ template< class CKey, class CEntry >
 inline CDynamicHashTable< CKey, CEntry >::
 ~CDynamicHashTable()
 {
+    Term();
 }
 
 

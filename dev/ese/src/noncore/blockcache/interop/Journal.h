@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( IJournal^% j, ::IJournal** const ppj )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<IJournal, ::IJournal, CJournalWrapper<IJournal, ::IJournal>>( j, ppj );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<IJournal, ::IJournal, CJournalWrapper<IJournal, ::IJournal>, JournalRemotable>( j, ppj );
                         }
 
                     public:

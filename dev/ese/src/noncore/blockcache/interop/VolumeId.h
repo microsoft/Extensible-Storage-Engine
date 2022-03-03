@@ -23,7 +23,7 @@ namespace Internal
                     /// <summary>
                     /// An invalid VolumeId.
                     /// </summary>
-                    Invalid = 0,
+                    Invalid = (int)::volumeidInvalid,
                 };
             }
         }

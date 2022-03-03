@@ -23,12 +23,17 @@ namespace Internal
                     /// <summary>
                     /// Don't cache the request.
                     /// </summary>
-                    DontCache = 0,
+                    DontCache = (int)::cpDontCache,
 
                     /// <summary>
                     /// Perform best effort caching of the request.
                     /// </summary>
-                    BestEffort = 1,
+                    BestEffort = (int)::cpBestEffort,
+
+                    /// <summary>
+                    /// Caching required and writeback is not allowed.
+                    /// </summary>
+                    Pinned = (int)::cpPinned,
                 };
             }
         }

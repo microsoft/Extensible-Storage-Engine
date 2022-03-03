@@ -23,7 +23,7 @@ namespace Internal
                     /// <summary>
                     /// An invalid JournalPosition.
                     /// </summary>
-                    Invalid = Int64::MaxValue,
+                    Invalid = (Int64)::jposInvalid,
                 };
             }
         }

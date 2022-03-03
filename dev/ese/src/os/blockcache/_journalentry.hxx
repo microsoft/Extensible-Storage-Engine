@@ -25,17 +25,55 @@ class TJournalEntry  //  je
 
             if ( jb.Cb() < sizeof( TJournalEntry ) )
             {
-                Error( ErrERRCheck( JET_errInternalError ) );
+                BlockCacheInternalError( "JournalEntryTooSmall" );
             }
 
             //  fail if this journal entry buffer is smaller than the declared size of the journal entry
 
             if ( jb.Cb() < pje->Cb() )
             {
-                Error( ErrERRCheck( JET_errInternalError ) );
+                BlockCacheInternalError( "JournalEntrySizeMismatch" );
             }
 
         HandleError:
+            return err;
+        }
+
+        static ERR ErrExtract( _In_ const CJournalBuffer jb, _Out_ const TJournalEntry** const ppje )
+        {
+            ERR                     err = JET_errSuccess;
+            void*                   pv  = NULL;
+            const TJournalEntry<T>* pje = NULL;
+
+            *ppje = NULL;
+
+            //  verify that this is a valid journal entry
+
+            Call( ErrValidate( jb ) );
+
+            //  copy the journal entry contents
+
+            Alloc( pv = PvOSMemoryHeapAlloc( jb.Cb() ) );
+            UtilMemCpy( pv, jb.Rgb(), jb.Cb() );
+
+            //  get the journal entry
+
+            pje = (const TJournalEntry<T>*)pv;
+            pv = NULL;
+
+            //  return the journal entry
+
+            *ppje = pje;
+            pje = NULL;
+
+        HandleError:
+            delete pje;
+            OSMemoryHeapFree( pv );
+            if ( err < JET_errSuccess )
+            {
+                delete *ppje;
+                *ppje = NULL;
+            }
             return err;
         }
 
@@ -114,16 +152,17 @@ static NTOSFuncNtStd( g_pfnRtlCompressBuffer, g_mwszzNtdllLibs, RtlCompressBuffe
 
 NTSTATUS
 NTAPI
-RtlDecompressBuffer(
+RtlDecompressBufferEx(
     _In_ USHORT CompressionFormat,
     _Out_writes_bytes_to_( UncompressedBufferSize, *FinalUncompressedSize ) PUCHAR UncompressedBuffer,
     _In_ ULONG UncompressedBufferSize,
     _In_reads_bytes_( CompressedBufferSize ) PUCHAR CompressedBuffer,
     _In_ ULONG CompressedBufferSize,
-    _Out_ PULONG FinalUncompressedSize
+    _Out_ PULONG FinalUncompressedSize,
+    _In_opt_ PVOID WorkSpace
 );
 
-static NTOSFuncNtStd( g_pfnRtlDecompressBuffer, g_mwszzNtdllLibs, RtlDecompressBuffer, oslfExpectedOnWin5x );
+static NTOSFuncNtStd( g_pfnRtlDecompressBufferEx, g_mwszzNtdllLibs, RtlDecompressBufferEx, oslfExpectedOnWin8 );
 
 //PERSISTED
 template<class T, T JETYPCOMPRESSED>
@@ -158,6 +197,8 @@ class TCompressedJournalEntry : public TJournalEntryBase<T, JETYPCOMPRESSED>  //
 
     private:
 
+        static USHORT                                       s_rgusCompressionFormats[];
+
         const UnalignedLittleEndian<CompressionAlgorithm>   m_le_ca;                //  compression algorithm
         const UnalignedLittleEndian<ULONG>                  m_le_cbUncompressed;    //  uncompressed size of the journal entry
         const UnalignedLittleEndian<ULONG>                  m_le_crc32Uncompressed; //  crc32 of uncompressed journal entry
@@ -173,7 +214,7 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrCreate(  _In_    cons
     ERR                     err                 = JET_errSuccess;
     void*                   pv                  = NULL;
     CompressionAlgorithm    ca                  = caInvalid;
-    USHORT                  compressionFormat   = COMPRESSION_FORMAT_NONE;
+    USHORT                  compressionFormat   = s_rgusCompressionFormats[ (int)caInvalid ];
     NTSTATUS                status              = 0;
     ULONG                   cbWorkspace         = 0;
     ULONG                   cbUnused            = 0;
@@ -191,7 +232,7 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrCreate(  _In_    cons
     //  determine our compression algorithm
 
     ca = caLegacyXpressHuffman;
-    compressionFormat = COMPRESSION_FORMAT_XPRESS_HUFF | COMPRESSION_ENGINE_STANDARD;
+    compressionFormat = s_rgusCompressionFormats[ (int)(CompressionAlgorithm)ca ];
 
     //  allocate our workspace for compression
 
@@ -205,7 +246,7 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrCreate(  _In_    cons
 
     if ( status >= 0 )
     {
-        status = g_pfnRtlCompressBuffer( compressionFormat,
+        status = g_pfnRtlCompressBuffer(    compressionFormat,
                                             (PUCHAR)pje,
                                             pje->Cb(),
                                             (PUCHAR)((CCompressedJournalEntry*)pv)->m_rgbCompressed,
@@ -233,7 +274,7 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrCreate(  _In_    cons
 
     else
     {
-        memcpy( pv, (void*)pje, pje->Cb() );
+        UtilMemCpy( pv, (void*)pje, pje->Cb() );
         pjeCompressed = (TJournalEntry<T>*)pv;
         pv = NULL;
     }
@@ -259,11 +300,16 @@ template<class T, T JETYPCOMPRESSED>
 INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrExtract( _In_    const CJournalBuffer            jb,
                                                                     _Out_   const TJournalEntry<T>** const  ppje )
 {
-    ERR                                     err             = JET_errSuccess;
-    const CCompressedJournalEntry* const    pcje            = (const CCompressedJournalEntry*)jb.Rgb();
-    void*                                   pv              = NULL;
-    NTSTATUS                                status          = 0;
-    ULONG                                   cbUncompressed  = 0;
+    ERR                                     err                 = JET_errSuccess;
+    const CCompressedJournalEntry* const    pcje                = (const CCompressedJournalEntry*)jb.Rgb();
+    void*                                   pv                  = NULL;
+    USHORT                                  compressionFormat   = s_rgusCompressionFormats[ (int)caInvalid ];
+    NTSTATUS                                status              = 0;
+    ULONG                                   cbWorkspace         = 0;
+    ULONG                                   cbUnused            = 0;
+    BYTE*                                   rgbWorkspace        = NULL;
+    ULONG                                   cbUncompressed      = 0;
+    const TJournalEntry<T>*                 pje                 = NULL;
 
     *ppje = NULL;
 
@@ -283,34 +329,52 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrExtract( _In_    cons
 
         if ( pcje->m_le_ca == caLegacyXpressHuffman )
         {
-            status = g_pfnRtlDecompressBuffer( COMPRESSION_FORMAT_XPRESS_HUFF | COMPRESSION_ENGINE_STANDARD,
-                (PUCHAR)pv,
-                pcje->m_le_cbUncompressed,
-                (PUCHAR)pcje->m_rgbCompressed,
-                pcje->CbCompressed(),
-                &cbUncompressed );
+            //  determine our compression algorithm
+
+            compressionFormat = s_rgusCompressionFormats[ (int)(CompressionAlgorithm)pcje->m_le_ca ];
+
+            //  allocate our workspace for compression
+
+            status = g_pfnRtlGetCompressionWorkSpaceSize( compressionFormat, &cbWorkspace, &cbUnused );
+            if ( status >= 0 )
+            {
+                Alloc( rgbWorkspace = new BYTE[ cbWorkspace ] );
+            }
+
+            status = g_pfnRtlDecompressBufferEx(    compressionFormat,
+                                                    (PUCHAR)pv,
+                                                    pcje->m_le_cbUncompressed,
+                                                    (PUCHAR)pcje->m_rgbCompressed,
+                                                    pcje->CbCompressed(),
+                                                    &cbUncompressed,
+                                                    rgbWorkspace );
 
             if ( status < 0 )
             {
-                Error( ErrERRCheck( JET_errInternalError ) );
+                BlockCacheInternalError( "CompressedJournalEntryDecompressionFailure" );
             }
             if ( cbUncompressed != pcje->m_le_cbUncompressed )
             {
-                Error( ErrERRCheck( JET_errInternalError ) );
+                BlockCacheInternalError( "CompressedJournalEntrySizeMismatch" );
             }
             if ( Crc32Checksum( (const BYTE*)pv, pcje->m_le_cbUncompressed ) != pcje->m_le_crc32Uncompressed )
             {
-                Error( ErrERRCheck( JET_errInternalError ) );
+                BlockCacheInternalError( "CompressedJournalEntryChecksumMismatch" );
             }
             Call( ErrValidate( CJournalBuffer( pcje->m_le_cbUncompressed, (const BYTE*)pv ) ) );
-            if ( pcje->Jetyp() == JETYPCOMPRESSED )
+            if ( ((const TJournalEntry<T>*)pv)->Jetyp() == JETYPCOMPRESSED )
             {
-                Error( ErrERRCheck( JET_errInternalError ) );
+                BlockCacheInternalError( "CompressedJournalEntryTypeMismatch" );
             }
+
+            //  get the journal entry
+
+            pje = (const TJournalEntry<T>*)pv;
+            pv = NULL;
         }
         else
         {
-            Error( ErrERRCheck( JET_errInternalError ) );
+            BlockCacheInternalError( "CompressedJournalEntryUnknownAlgorithm" );
         }
     }
 
@@ -318,17 +382,18 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrExtract( _In_    cons
 
     else
     {
-        Alloc( pv = PvOSMemoryHeapAlloc( jb.Cb() ) );
-        memcpy( pv, jb.Rgb(), jb.Cb() );
+        Call( TJournalEntry<T>::ErrExtract( jb, &pje ) );
     }
 
-    //  return the decompressed journal entry
+    //  return the uncompressed journal entry
 
-    *ppje = (const TJournalEntry<T>*)pv;
-    pv = NULL;
+    *ppje = pje;
+    pje = NULL;
 
 HandleError:
+    delete pje;
     OSMemoryHeapFree( pv );
+    delete[] rgbWorkspace;
     if ( err < JET_errSuccess )
     {
         delete *ppje;
@@ -348,5 +413,17 @@ INLINE TCompressedJournalEntry<T, JETYPCOMPRESSED>::TCompressedJournalEntry(    
         m_rgbCompressed { }
 {
 }
+
+//PERSISTED
+template<class T, T JETYPCOMPRESSED>
+USHORT TCompressedJournalEntry<T, JETYPCOMPRESSED>::s_rgusCompressionFormats[] =
+{
+    //  caInvalid
+    COMPRESSION_FORMAT_NONE,
+
+    //  caLegacyXpressHuffman
+    COMPRESSION_FORMAT_XPRESS_HUFF | COMPRESSION_ENGINE_STANDARD,
+};
+
 
 #pragma warning (pop)

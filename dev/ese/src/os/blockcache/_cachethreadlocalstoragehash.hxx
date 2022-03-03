@@ -10,17 +10,17 @@ class CCacheThreadLocalStorageKey
     public:
 
         CCacheThreadLocalStorageKey()
-            :   m_dwTid( 0 )
+            :   m_ctid( ctidInvalid )
         {
         }
 
-        CCacheThreadLocalStorageKey( _In_ const DWORD dwTid )
-            :   m_dwTid( dwTid )
+        CCacheThreadLocalStorageKey( _In_ const CacheThreadId ctid )
+            :   m_ctid( ctid )
         {
         }
 
-        CCacheThreadLocalStorageKey( _In_ CCacheThreadLocalStorageKey* const pctls )
-            : CCacheThreadLocalStorageKey( pctls->DwTid() )
+        CCacheThreadLocalStorageKey( _In_ CCacheThreadLocalStorageBase* const pctls )
+            :   CCacheThreadLocalStorageKey( pctls->Ctid() )
         {
         }
 
@@ -31,17 +31,17 @@ class CCacheThreadLocalStorageKey
 
         const CCacheThreadLocalStorageKey& operator=( _In_ const CCacheThreadLocalStorageKey& src )
         {
-            m_dwTid = src.m_dwTid;
+            m_ctid = src.m_ctid;
 
             return *this;
         }
 
-        DWORD DwTid() const { return m_dwTid; }
-        UINT UiHash() const { return CCacheThreadLocalStorageBase::UiHash( m_dwTid ); }
+        CacheThreadId Ctid() const { return m_ctid; }
+        UINT UiHash() const { return CCacheThreadLocalStorageBase::UiHash( m_ctid ); }
 
     private:
 
-        DWORD m_dwTid;
+        CacheThreadId m_ctid;
 };
 
 //  Cache Thread Local Storage entry.
@@ -105,7 +105,7 @@ INLINE BOOL CCacheThreadLocalStorageHash::CKeyEntry::FEntryMatchesKey( _In_ cons
         return fFalse;
     }
 
-    if ( m_entry.Pctls()->DwTid() != key.DwTid() )
+    if ( m_entry.Pctls()->Ctid() != key.Ctid() )
     {
         return fFalse;
     }

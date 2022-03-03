@@ -23,7 +23,7 @@ namespace Internal
                     /// <summary>
                     /// An invalid FileSerial.
                     /// </summary>
-                    Invalid = 0,
+                    Invalid = (Int32)::fileserialInvalid,
                 };
             }
         }

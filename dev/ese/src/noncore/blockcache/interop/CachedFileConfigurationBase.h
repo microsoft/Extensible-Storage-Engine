@@ -33,6 +33,8 @@ namespace Internal
                         virtual int MaxConcurrentBlockWriteBacks();
 
                         virtual int CacheTelemetryFileNumber();
+
+                        virtual int PinnedHeaderSizeInBytes();
                 };
 
                 template< class TM, class TN, class TW >
@@ -66,7 +68,13 @@ namespace Internal
                 template< class TM, class TN, class TW >
                 inline int CachedFileConfigurationBase<TM, TN, TW>::CacheTelemetryFileNumber()
                 {
-                    return Pi->LCacheTelemetryFileNumber();
+                    return Pi->UlCacheTelemetryFileNumber();
+                }
+
+                template< class TM, class TN, class TW >
+                inline int CachedFileConfigurationBase<TM, TN, TW>::PinnedHeaderSizeInBytes()
+                {
+                    return Pi->UlPinnedHeaderSizeInBytes();
                 }
             }
         }

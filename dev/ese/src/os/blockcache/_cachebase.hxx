@@ -47,7 +47,15 @@ class TCacheBase  //  c
         IBlockCacheConfiguration* Pbcconfig() const { return m_pbcconfig; }
         ICacheConfiguration* Pcconfig() const { return m_pcconfig; }
         IFileFilter* PffCaching() const { return m_pffCaching; }
-        
+
+        ERR ErrValidateOffsets( _In_ CFTE* const    pcfte,
+                                _In_ const QWORD    ibOffset,
+                                _In_ const QWORD    cbData );
+
+        ERR ErrValidateFile(    _In_    const VolumeId      volumeid,
+                                _In_    const FileId        fileid,
+                                _In_    const FileSerial    fileserial );
+
         ERR ErrGetCachedFile(   _In_    const VolumeId      volumeid,
                                 _In_    const FileId        fileid,
                                 _In_    const FileSerial    fileserial,
@@ -124,8 +132,7 @@ class TCacheBase  //  c
         {
             public:
 
-                CRequest(   _In_                    const BOOL                          fHeap,
-                            _In_                    const BOOL                          fRead,
+                CRequest(   _In_                    const BOOL                          fRead,
                             _In_                    TCacheBase<I, CFTE, CTLS>* const    pc,
                             _In_                    const TraceContext&                 tc,
                             _Inout_                 CFTE** const                        ppcfte,
@@ -134,14 +141,12 @@ class TCacheBase  //  c
                             _In_reads_( cbData )    const BYTE* const                   pbData,
                             _In_                    const OSFILEQOS                     grbitQOS,
                             _In_                    const ICache::CachingPolicy         cp,
-                            _In_                    const ICache::PfnComplete           pfnComplete,
-                            _In_                    const DWORD_PTR                     keyComplete )
-                    :   m_fHeap( fHeap ),
-                        m_fRead( fRead ),
+                            _In_opt_                const ICache::PfnComplete           pfnComplete,
+                            _In_opt_                const DWORD_PTR                     keyComplete )
+                    :   m_fRead( fRead ),
                         m_pc( pc ),
                         m_pcfte( *ppcfte ),
-                        m_ibOffset( ibOffset ),
-                        m_cbData( cbData ),
+                        m_offsets( COffsets( ibOffset, ibOffset - 1 + cbData ) ),
                         m_pbData( pbData ),
                         m_grbitQOS( grbitQOS ),
                         m_cp( cp ),
@@ -149,27 +154,32 @@ class TCacheBase  //  c
                         m_keyComplete( keyComplete ),
                         m_cref( 1 ),
                         m_err( JET_errSuccess ),
-                        m_grbitQOSComplete( 0 )
+                        m_grbitQOSComplete( 0 ),
+                        m_preleasewaiter( NULL )
                 {
                     GetCurrUserTraceContext getutc;
                     m_ftc.DeepCopy( getutc.Utc(), tc );
 
                     *ppcfte = NULL;
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s R=0x%016I64x F=%s Request %s %s ib=%llu cb=%llu Start",
+                                            OSFormatFileId( Pc() ),
+                                            QWORD( this ),
+                                            OSFormatFileId( Pcfte()->Pff() ),
+                                            FSync() ? "Sync" : "Async",
+                                            FRead() ? "Read" : "Write",
+                                            Offsets().IbStart(),
+                                            Offsets().Cb() ) );
                 }
 
                 BOOL FRead() const { return m_fRead; }
                 TCacheBase<I, CFTE, CTLS>* Pc() const { return m_pc; }
                 CFTE* Pcfte() const { return m_pcfte; }
-                QWORD IbOffset() const { return m_ibOffset; }
-                DWORD CbData() const { return m_cbData; }
+                const COffsets& Offsets() const { return m_offsets; }
                 const BYTE* const PbData() const { return m_pbData; }
                 ICache::CachingPolicy Cp() const { return m_cp; }
                 BOOL FSync() const { return m_pfnComplete == NULL; }
-
-                void Release( _In_ const ERR err )
-                {
-                    Finish( err );
-                }
 
                 ERR ErrRead(    _In_                    IFileFilter* const          pff,
                                 _In_                    const QWORD                 ibOffset,
@@ -216,19 +226,156 @@ class TCacheBase  //  c
                     return err;
                 }
 
+                static ERR ErrRelease( _Inout_ CRequest** const pprequest, _In_ const ERR errIn )
+                {
+                    CRequest* const prequest    = *pprequest;
+                    ERR             err         = errIn;
+
+                    *pprequest = NULL;
+
+                    if ( prequest )
+                    {
+                        err = prequest->ErrRelease( err );
+                    }
+
+                    return err;
+                }
+
+            public:
+
+                //  Trace context scope
+
+                class CTraceContextScope : public ::CTraceContextScope
+                {
+                    public:
+
+                        CTraceContextScope( _In_ const CRequest* const prequest )
+                            :   ::CTraceContextScope( prequest->m_ftc )
+                        {
+                        }
+
+                        CTraceContextScope( CTraceContextScope&& rvalue )
+                            :   ::CTraceContextScope( std::move( rvalue ) )
+                        {
+                        }
+
+                    private:
+
+                        CTraceContextScope( const CTraceContextScope& tc ) = delete;
+                        const CTraceContextScope& operator=( const CTraceContextScope& tc ) = delete;
+                };
+
             protected:
 
                 virtual ~CRequest()
                 {
                     m_pc->ReleaseCachedFile( &m_pcfte );
+
+                    if ( m_preleasewaiter )
+                    {
+                        m_preleasewaiter->Release( m_err );
+                    }
                 }
 
                 virtual void Start()
                 {
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s R=0x%016I64x F=%s Start",
+                                            OSFormatFileId( Pc() ),
+                                            QWORD( this ),
+                                            OSFormatFileId( Pcfte()->Pff() ) ) );
+
                     AddRef();
                 }
                 
                 virtual void Finish( _In_ const ERR err )
+                {
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s R=0x%016I64x F=%s Finish %d",
+                                            OSFormatFileId( Pc() ),
+                                            QWORD( this ),
+                                            OSFormatFileId( Pcfte()->Pff() ),
+                                            err ) );
+
+                    FinishInternal( err );
+                }
+
+                ERR ErrStatus() const { return m_err; }
+
+                void Fail( _In_ const ERR err )
+                {
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s R=0x%016I64x F=%s Fail %d",
+                                            OSFormatFileId( Pc() ),
+                                            QWORD( this ),
+                                            OSFormatFileId( Pcfte()->Pff() ),
+                                            err ) );
+
+                    RecordResult( err );
+                }
+
+                ERR ErrRelease( _In_ const ERR err )
+                {
+                    CReleaseWaiter  releasewaiter( this );
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s R=0x%016I64x F=%s Release %d",
+                                            OSFormatFileId( Pc() ),
+                                            QWORD( this ),
+                                            OSFormatFileId( Pcfte()->Pff() ),
+                                            err ) );
+
+                    FinishInternal( err );
+
+                    return releasewaiter.ErrWait();
+                }
+
+            private:
+
+                class CReleaseWaiter
+                {
+                    public:
+
+                        CReleaseWaiter( _In_ CRequest* const prequest )
+                            :   m_msig( CSyncBasicInfo( "TCacheBase<I, CFTE, CTLS>::CRequest::CReleaseWaiter" ) ),
+                                m_err( JET_errSuccess )
+                        {
+                            if ( !prequest->FSync() )
+                            {
+                                m_msig.Set();
+                            }
+                            else
+                            {
+                                prequest->m_preleasewaiter = this;
+                            }
+                        }
+
+                        ERR ErrWait()
+                        {
+                            m_msig.Wait();
+                            return m_err;
+                        }
+
+                        void Release( _In_ const ERR err )
+                        {
+                            m_err = err;
+                            m_msig.Set();
+                        }
+
+                    private:
+
+                        CManualResetSignal  m_msig;
+                        ERR                 m_err;
+                };
+
+            private:
+
+                CRequest( const CRequest& other ) = delete;
+
+                void AddRef() { AtomicIncrement( (LONG*)&m_cref ); }
+                BOOL FRelease() { return AtomicDecrement( (LONG*)&m_cref ) == 0; }
+
+                void FinishInternal( _In_ const ERR err )
                 {
                     RecordResult( err );
 
@@ -238,47 +385,50 @@ class TCacheBase  //  c
                     }
                 }
 
-            private:
-
-                CRequest( const CRequest& other ) = delete;
-
-                void AddRef() { AtomicIncrement( (LONG*)&m_cref ); }
-                BOOL FRelease() { return AtomicDecrement( (LONG*)&m_cref ) == 0; }
-
                 void RecordResult( _In_ const ERR err )
                 {
-                    AtomicCompareExchange( (LONG*)&m_err, JET_errSuccess, err );
+                    AtomicCompareExchange( (LONG*)&m_err, JET_errSuccess, err < JET_errSuccess ? err : JET_errSuccess );
                 }
 
                 void Complete()
                 {
+                    const VolumeId      volumeid    = m_pcfte->Volumeid();
+                    const FileId        fileid      = m_pcfte->Fileid();
+                    const FileSerial    fileserial  = m_pcfte->Fileserial();
+
+                    m_pc->ReleaseCachedFile( &m_pcfte );
+
                     if ( m_pfnComplete )
                     {
                         m_pfnComplete(  m_err,
-                                        m_pcfte->Volumeid(),
-                                        m_pcfte->Fileid(),
-                                        m_pcfte->Fileserial(),
+                                        volumeid,
+                                        fileid,
+                                        fileserial,
                                         m_ftc,
                                         ( m_grbitQOS & ~qosIOCompleteMask ) | m_grbitQOSComplete,
-                                        m_ibOffset,
-                                        m_cbData,
+                                        m_offsets.IbStart(),
+                                        (DWORD)m_offsets.Cb(),
                                         m_pbData,
                                         m_keyComplete );
                     }
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s R=0x%016I64x F=%s Request %s %s ib=%llu cb=%llu Complete %d",
+                                            OSFormatFileId( Pc() ),
+                                            QWORD( this ),
+                                            OSFormat( volumeid, fileid, fileserial ),
+                                            FSync() ? "Sync" : "Async",
+                                            FRead() ? "Read" : "Write",
+                                            Offsets().IbStart(),
+                                            Offsets().Cb(),
+                                            m_err ) );
 
                     Release();
                 }
 
                 void Release()
                 {
-                    if ( m_fHeap )
-                    {
-                        delete this;
-                    }
-                    else
-                    {
-                        this->~CRequest();
-                    }
+                    delete this;
                 }
 
                 static void IOComplete_(    _In_                    const ERR               err,
@@ -317,21 +467,20 @@ class TCacheBase  //  c
 
             private:
 
-                const BOOL                          m_fHeap;
                 const BOOL                          m_fRead;
                 TCacheBase<I, CFTE, CTLS>* const    m_pc;
                 CFTE*                               m_pcfte;
-                const QWORD                         m_ibOffset;
-                const DWORD                         m_cbData;
+                const COffsets                      m_offsets;
                 const BYTE* const                   m_pbData;
                 const OSFILEQOS                     m_grbitQOS;
                 const ICache::CachingPolicy         m_cp;
                 const ICache::PfnComplete           m_pfnComplete;
                 const DWORD_PTR                     m_keyComplete;
                 FullTraceContext                    m_ftc;
-                int                                 m_cref;
+                volatile int                        m_cref;
                 ERR                                 m_err;
                 OSFILEQOS                           m_grbitQOSComplete;
+                CReleaseWaiter*                     m_preleasewaiter;
         };
 
     private:
@@ -349,11 +498,13 @@ class TCacheBase  //  c
         CInitOnceCachedFileTable                                                m_initOnceCachedFileTable;
         CCachedFileHash                                                         m_cachedFileHash;
         TCacheThreadLocalStorage<CTLS>                                          m_cacheThreadLocalStorage;
+        BOOL                                                                    m_fTerm;
 };
 
 template< class I, class CFTE, class CTLS >
 TCacheBase<I, CFTE, CTLS>::~TCacheBase()
 {
+    m_fTerm = fTrue;
     delete m_pch;
     delete m_pffCaching;
     delete m_pcconfig;
@@ -364,7 +515,7 @@ TCacheBase<I, CFTE, CTLS>::~TCacheBase()
 template< class I, class CFTE, class CTLS >
 ERR TCacheBase<I, CFTE, CTLS>::ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType )
 {
-    memcpy( rgbCacheType, m_pch->RgbCacheType(), cbGuid );
+    UtilMemCpy( rgbCacheType, m_pch->RgbCacheType(), cbGuid );
 
     return JET_errSuccess;
 }
@@ -376,7 +527,7 @@ ERR TCacheBase<I, CFTE, CTLS>::ErrGetPhysicalId(    _Out_                   Volu
 {
     *pvolumeid = m_pch->Volumeid();
     *pfileid = m_pch->Fileid();
-    memcpy( rgbUniqueId, m_pch->RgbUniqueId(), cbGuid );
+    UtilMemCpy( rgbUniqueId, m_pch->RgbUniqueId(), cbGuid );
 
     return JET_errSuccess;
 }
@@ -411,12 +562,65 @@ TCacheBase<I, CFTE, CTLS>::TCacheBase(  _In_    IFileSystemFilter* const        
         m_pctm( pctm ),
         m_pffCaching( *ppffCaching ),
         m_pch( *ppch ),
-        m_cachedFileHash( rankCachedFileHash )
+        m_cachedFileHash( rankCachedFileHash ),
+        m_fTerm( fFalse )
 {
     *ppbcconfig = NULL;
     *ppcconfig = NULL;
     *ppffCaching = NULL;
     *ppch = NULL;
+}
+
+template< class I, class CFTE, class CTLS >
+ERR TCacheBase<I, CFTE, CTLS>::ErrValidateOffsets(  _In_ CFTE* const    pcfte,
+                                                    _In_ const QWORD    ibOffset,
+                                                    _In_ const QWORD    cbData )
+{
+    ERR err = JET_errSuccess;
+
+    if ( ibOffset % pcfte->CbBlockSize() != 0 )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    if ( cbData == 0 )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    if ( cbData % pcfte->CbBlockSize() != 0 )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+HandleError:
+    return err;
+}
+
+template< class I, class CFTE, class CTLS >
+ERR TCacheBase<I, CFTE, CTLS>::ErrValidateFile( _In_    const VolumeId      volumeid,
+                                                _In_    const FileId        fileid,
+                                                _In_    const FileSerial    fileserial )
+{
+    ERR err = JET_errSuccess;
+
+    if ( volumeid == volumeidInvalid )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    if ( fileid == fileidInvalid )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    if ( fileserial == fileserialInvalid )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+HandleError:
+    return err;
 }
         
 template< class I, class CFTE, class CTLS >
@@ -430,6 +634,10 @@ ERR TCacheBase<I, CFTE, CTLS>::ErrGetCachedFile(    _In_    const VolumeId      
     CFTE*   pcfte   = NULL;
 
     *ppcfte = NULL;
+
+    //  validate the requested file
+
+    Call( ErrValidateFile( volumeid, fileid, fileserial ) );
 
     //  create/open the cached file table entry for this file
 
@@ -464,6 +672,8 @@ void TCacheBase<I, CFTE, CTLS>::ReleaseCachedFile( _Inout_ CFTE** const ppcfte )
     {
         return;
     }
+
+    Assert( !m_fTerm );
 
     if ( pcfte->FReleaseIfNotLastReference() )
     {
@@ -567,7 +777,7 @@ ERR TCacheBase<I, CFTE, CTLS>::ErrInitCachedFileTable()
 
     if ( m_cachedFileHash.ErrInit( 5.0, 1.0 ) == CCachedFileHash::ERR::errOutOfMemory )
     {
-        Call( ErrERRCheck( JET_errOutOfMemory ) );
+        Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
 HandleError:
@@ -622,15 +832,18 @@ ERR TCacheBase<I, CFTE, CTLS>::ErrGetCachedFileTableEntry(  _In_    const Volume
     fReadLocked = fTrue;
 
     errCachedFileHash = m_cachedFileHash.ErrRetrieveEntry( &lock, &entry );
-    if ( errCachedFileHash == CCachedFileHash::ERR::errSuccess && !entry.Pcfte()->FWaitersForExternalClose() )
+    if ( errCachedFileHash == CCachedFileHash::ERR::errSuccess )
     {
-        pcfteExisting = static_cast<CFTE*>( entry.Pcfte() );
-
-        pcfteExisting->AddRef();
-
-        if ( !fInternalOpen )
+        if ( !entry.Pcfte()->FWaitersForExternalClose() )
         {
-            pcfteExisting->SetExternalOpen();
+            pcfteExisting = static_cast<CFTE*>( entry.Pcfte() );
+
+            pcfteExisting->AddRef();
+
+            if ( !fInternalOpen )
+            {
+                pcfteExisting->SetExternalOpen();
+            }
         }
     }
     else
@@ -696,13 +909,13 @@ ERR TCacheBase<I, CFTE, CTLS>::ErrGetCachedFileTableEntrySlowly(    _In_    cons
     {
         Assert( errCachedFileHash == CCachedFileHash::ERR::errEntryNotFound );
 
-        Alloc( pcfteExisting = pcfteNew = new CFTE( volumeid, fileid, fileserial ) );
+        Alloc( pcfteExisting = pcfteNew = new CFTE( this, volumeid, fileid, fileserial ) );
 
         entry = CCachedFileEntry( pcfteNew );
         errCachedFileHash = m_cachedFileHash.ErrInsertEntry( &lock, entry );
         if ( errCachedFileHash == CCachedFileHash::ERR::errOutOfMemory )
         {
-            Call( ErrERRCheck( JET_errOutOfMemory ) );
+            Error( ErrERRCheck( JET_errOutOfMemory ) );
         }
         Assert( errCachedFileHash == CCachedFileHash::ERR::errSuccess );
         fRemove = fTrue;
@@ -727,18 +940,6 @@ ERR TCacheBase<I, CFTE, CTLS>::ErrGetCachedFileTableEntrySlowly(    _In_    cons
         }
     }
 
-    //  if this is an internal open and someone is waiting for an external close then reject the internal open to
-    //  facilitate completion of the close.  the internal opens are only used for cache write back which can be
-    //  stalled for a bit
-
-    else
-    {
-        if ( pcfteExisting->FWaitersForExternalClose() )
-        {
-            Error( ErrERRCheck( errDiskTilt ) );
-        }
-    }
-
     if ( fWriteLocked )
     {
         m_cachedFileHash.WriteUnlockKey( &lock );
@@ -746,6 +947,7 @@ ERR TCacheBase<I, CFTE, CTLS>::ErrGetCachedFileTableEntrySlowly(    _In_    cons
     }
 
     *ppcfte = pcfteExisting;
+    pcfteExisting = NULL;
 
 HandleError:
     if ( fRemove )
@@ -758,6 +960,7 @@ HandleError:
     {
         m_cachedFileHash.WriteUnlockKey( &lock );
     }
+    ReleaseCachedFile( &pcfteExisting );
     if ( err < JET_errSuccess )
     {
         ReleaseCachedFile( ppcfte );

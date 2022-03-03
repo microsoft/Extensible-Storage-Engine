@@ -66,7 +66,7 @@ namespace Internal
                     /// <param name="ioHandoff">An optional IO handoff delegate.</param>
                     void Read(
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data,
+                        MemoryStream^ data,
                         FileQOS fileQOS,
                         IOMode ioMode,
                         IOComplete^ ioComplete,
@@ -107,7 +107,7 @@ namespace Internal
                     /// <param name="ioHandoff">An optional IO handoff delegate.</param>
                     void Write(
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data,
+                        MemoryStream^ data,
                         FileQOS fileQOS,
                         IOMode ioMode,
                         IOComplete^ ioComplete,
@@ -118,6 +118,12 @@ namespace Internal
                     /// </summary>
                     /// <param name="ioMode">IO operation mode.</param>
                     void Issue( IOMode ioMode );
+
+                    /// <summary>
+                    /// Flushes all data previously written for the current file.
+                    /// </summary>
+                    /// <param name="ioMode">IO operation mode.</param>
+                    void Flush( IOMode ioMode );
                 };
             }
         }

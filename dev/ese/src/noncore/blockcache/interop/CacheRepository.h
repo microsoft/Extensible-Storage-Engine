@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( ICacheRepository^% crep, ::ICacheRepository** const ppcrep )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<ICacheRepository, ::ICacheRepository, CCacheRepositoryWrapper<ICacheRepository, ::ICacheRepository>>( crep, ppcrep );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<ICacheRepository, ::ICacheRepository, CCacheRepositoryWrapper<ICacheRepository, ::ICacheRepository>, CacheRepositoryRemotable>( crep, ppcrep );
                         }
 
                     public:

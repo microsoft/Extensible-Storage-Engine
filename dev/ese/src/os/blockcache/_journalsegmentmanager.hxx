@@ -3,6 +3,12 @@
 
 #pragma once
 
+//  Journal Full Constants
+
+const size_t cbJournalFull = 3 * cbJournalSegment;
+const size_t cbJournalFullAndDurable = 2 * cbJournalSegment;
+
+
 //  TJournalSegmentManager:  implementation of IJournalSegmentManager and its derivatives.
 //
 //  I:  IJournalSegmentManager or derivative
@@ -32,9 +38,11 @@ class TJournalSegmentManager  //  jsm
 
     public:  //  IJournalSegmentManager
 
-        ERR ErrGetProperties(   _Out_opt_ SegmentPosition* const    psposReplay,
+        ERR ErrGetProperties(   _Out_opt_ SegmentPosition* const    psposFirst,
+                                _Out_opt_ SegmentPosition* const    psposReplay,
                                 _Out_opt_ SegmentPosition* const    psposDurable,
-                                _Out_opt_ SegmentPosition* const    psposLast ) override;
+                                _Out_opt_ SegmentPosition* const    psposLast,
+                                _Out_opt_ SegmentPosition* const    psposFull ) override;
 
         ERR ErrVisitSegments(   _In_ const IJournalSegmentManager::PfnVisitSegment  pfnVisitSegment,
                                 _In_ const DWORD_PTR                                keyVisitSegment ) override;
@@ -53,8 +61,6 @@ class TJournalSegmentManager  //  jsm
                                 _In_    const QWORD         cb );
 
     private:
-
-        enum { cbSegment = sizeof( CJournalSegmentHeader ) };
 
         ERR ErrFindLastSegmentWithBinarySearch( _Out_ QWORD* const              pibLast,
                                                 _Out_ IJournalSegment** const   ppjsLast,
@@ -87,30 +93,33 @@ class TJournalSegmentManager  //  jsm
                                 _In_    const SegmentPosition   sposDurable,
                                 _Out_   IJournalSegment** const ppjs );
 
-        ERR ErrIgnoreVerificationErrors( _In_ const ERR err );
-
     private:
 
         class CSegmentInfo
         {
             public:
 
-                CSegmentInfo( _In_ const SegmentPosition spos, _In_ const SegmentPosition sposReplay )
-                    :   m_spos( spos ),
-                        m_sposReplay( sposReplay )
+                CSegmentInfo(   _In_ const SegmentPosition  sposReplay,
+                                _In_ const SegmentPosition  sposDurable,
+                                _In_ const SegmentPosition  spos )
+                    :   m_sposReplay( sposReplay ),
+                        m_sposDurable( sposDurable ),
+                        m_spos( spos )
                 {
                 }
 
-                SegmentPosition Spos() const { return m_spos; }
                 SegmentPosition SposReplay() const { return m_sposReplay; }
+                SegmentPosition SposDurable() const { return m_sposDurable; }
+                SegmentPosition Spos() const { return m_spos; }
 
                 static SIZE_T OffsetOfILE() { return OffsetOf( CSegmentInfo, m_ile ); }
 
             private:
 
                 typename CInvasiveList< CSegmentInfo, OffsetOfILE >::CElement   m_ile;
-                const SegmentPosition                                           m_spos;
                 const SegmentPosition                                           m_sposReplay;
+                const SegmentPosition                                           m_sposDurable;
+                const SegmentPosition                                           m_spos;
         };
 
     private:
@@ -178,10 +187,17 @@ HandleError:
 }
 
 template< class I  >
-INLINE ERR TJournalSegmentManager<I>::ErrGetProperties( _Out_opt_ SegmentPosition* const    psposReplay,
+INLINE ERR TJournalSegmentManager<I>::ErrGetProperties( _Out_opt_ SegmentPosition* const    psposFirst,
+                                                        _Out_opt_ SegmentPosition* const    psposReplay,
                                                         _Out_opt_ SegmentPosition* const    psposDurable,
-                                                        _Out_opt_ SegmentPosition* const    psposLast )
+                                                        _Out_opt_ SegmentPosition* const    psposLast,
+                                                        _Out_opt_ SegmentPosition* const    psposFull )
 {
+    if ( psposFirst )
+    {
+        *psposFirst = m_sposFirst;
+    }
+
     if ( psposReplay )
     {
         *psposReplay = m_sposReplayMax;
@@ -197,6 +213,11 @@ INLINE ERR TJournalSegmentManager<I>::ErrGetProperties( _Out_opt_ SegmentPositio
         *psposLast = m_sposLast;
     }
 
+    if ( psposFull )
+    {
+        *psposFull = m_sposFirst + m_cb;
+    }
+
     return JET_errSuccess;
 }
 
@@ -210,11 +231,11 @@ INLINE ERR TJournalSegmentManager<I>::ErrVisitSegments( _In_ const IJournalSegme
     QWORD               ib                      = 0;
     IJournalSegment*    pjs                     = NULL;
     SegmentPosition     sposActual              = sposInvalid;
-    DWORD               dwUniqueIdPrev          = 0;
+    DWORD               dwUniqueId              = 0;
     DWORD               dwUniqueIdPrevActual    = 0;
     DWORD               dwUniqueIdPrevExpected  = 0;
 
-    for ( spos = m_sposFirst; spos <= m_sposLast; spos += cbSegment )
+    for ( spos = m_sposFirst; spos <= m_sposLast; spos += cbJournalSegment )
     {
         //  release any previously loaded segment
 
@@ -242,14 +263,14 @@ INLINE ERR TJournalSegmentManager<I>::ErrVisitSegments( _In_ const IJournalSegme
 
             //  validate the unique id.  if this is wrong then this segment is beyond the end of the journal
 
-            Call( pjs->ErrGetProperties( NULL, &dwUniqueIdPrev, &dwUniqueIdPrevActual, NULL, NULL, NULL ) );
+            Call( pjs->ErrGetProperties( NULL, &dwUniqueId, &dwUniqueIdPrevActual, NULL, NULL, NULL ) );
 
             if ( spos > m_sposFirst && dwUniqueIdPrevActual != dwUniqueIdPrevExpected )
             {
                 errSegment = ErrERRCheck( JET_errReadVerifyFailure );
             }
 
-            dwUniqueIdPrevExpected = dwUniqueIdPrev;
+            dwUniqueIdPrevExpected = dwUniqueId;
         }
 
         //  ensure that if there are any validation errors that we do not provide the segment
@@ -287,15 +308,19 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
     ERR                     err             = JET_errSuccess;
     QWORD                   ib              = 0;
     CSegmentInfo*           pseginfoDurable = NULL;
+    QWORD                   ibDurable       = 0;
+    IJournalSegment*        pjsDurable      = NULL;
+    CSegmentInfo*           pseginfoLE      = NULL;
+    QWORD                   cbTotal         = 0;
     QWORD                   cbUsed          = 0;
-    const SegmentPosition   sposPrev        = spos - cbSegment;
+    QWORD                   cbAvailable     = 0;
+    const SegmentPosition   sposPrev        = spos - cbJournalSegment;
     QWORD                   ibPrev          = 0;
     IJournalSegment*        pjsPrev         = NULL;
     DWORD                   dwUniqueIdPrev  = 0;
     IJournalSegment*        pjs             = NULL;
     CSegmentInfo*           pseginfoAppend  = NULL;
     DWORD                   dwUniqueId      = 0;
-    CSegmentInfo*           pseginfoLE      = NULL;
 
     *ppjs = NULL;
 
@@ -313,7 +338,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
-    if ( spos > m_sposLast + cbSegment )
+    if ( spos > m_sposLast + cbJournalSegment )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
@@ -346,8 +371,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
 
     Call( ErrGetSegmentOffset( spos, &ib ) );
 
-    //  determine if it is safe to add the segment w/o running out of space.  the amount of segments needed by the
-    //  journal is the distance between the proposed segment's durable segment's replay segment and the last segment
+    //  find the metadata for the proposed segment's durable segment
 
     for (   pseginfoDurable = m_ilSegmentInfo.PrevMost();
             pseginfoDurable != NULL && pseginfoDurable->Spos() != sposDurable;
@@ -357,29 +381,55 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
 
     if ( !pseginfoDurable )
     {
-        Error( ErrERRCheck( JET_errInternalError ) );
+        SegmentPosition sposReplayT;
+        SegmentPosition sposDurableT;
+
+        Call( ErrGetSegmentOffset( sposDurable, &ibDurable ) );
+        Call( ErrLoadSegment( ibDurable, &pjsDurable ) );
+        Call( pjsDurable->ErrGetProperties( NULL, NULL, NULL, &sposReplayT, &sposDurableT, NULL ) );
+
+        Alloc( pseginfoDurable = new CSegmentInfo( sposReplayT, sposDurableT, sposDurable ) );
+
+        for (   pseginfoLE = m_ilSegmentInfo.NextMost();
+                pseginfoLE != NULL && pseginfoLE->Spos() > pseginfoDurable->Spos();
+                pseginfoLE = m_ilSegmentInfo.Prev( pseginfoLE ) )
+        {
+        }
+
+        m_ilSegmentInfo.Insert( pseginfoDurable, pseginfoLE ? m_ilSegmentInfo.Next( pseginfoLE ) : m_ilSegmentInfo.PrevMost() );
     }
 
-    cbUsed = spos - pseginfoDurable->SposReplay();
-    if ( cbUsed + 2 * cbSegment >= m_cb )
+    //  determine if it is safe to add the segment w/o running out of space
+
+    cbTotal = m_cb;
+    cbUsed = m_sposLast - m_sposFirst + cbJournalSegment;
+    cbAvailable = cbTotal - cbUsed;
+
+    if ( cbAvailable <= cbJournalFull )
     {
-        if ( sposReplay <= pseginfoDurable->SposReplay() )
+        //  we need to advance the durable pointer to recover from journal full
+
+        if ( sposDurable <= m_sposDurableMax )
         {
             Error( ErrERRCheck( JET_errDiskFull ) );
         }
+    }
 
-        if ( cbUsed + 1 * cbSegment >= m_cb )
+    if ( cbAvailable == cbJournalFullAndDurable )
+    {
+        //  we need to advance the replay pointer to recover from journal full
+
+        if ( sposReplay <= m_sposReplayMax )
         {
-            if ( sposDurable + cbSegment <= spos )
-            {
-                Error( ErrERRCheck( JET_errDiskFull ) );
-            }
-
-            if ( cbUsed >= m_cb )
-            {
-                Error( ErrERRCheck( JET_errInternalError ) );
-            }
+            Error( ErrERRCheck( JET_errDiskFull ) );
         }
+    }
+
+    if ( cbAvailable <= 0 || cbAvailable > m_cb )
+    {
+        //  we failed to recover from journal full
+
+        BlockCacheInternalError( "JournalFullUnrecoverable" );
     }
 
     //  find the unique id of the segment prior to the append segment
@@ -400,9 +450,14 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
 
     //  update our state
 
-    Alloc( pseginfoAppend = new CSegmentInfo( spos, sposReplay ) );
+    Alloc( pseginfoAppend = new CSegmentInfo( sposReplay, sposDurable, spos ) );
 
     Call( pjs->ErrGetProperties( NULL, &dwUniqueId, NULL, NULL, NULL, NULL ) );
+
+    if ( m_sposFirst > pseginfoDurable->SposReplay() )
+    {
+        BlockCacheInternalError( "JournalReplayPointerLTFirst" );
+    }
 
     m_sposFirst = pseginfoDurable->SposReplay();
     m_ibLast = spos > m_sposLast ? ib : m_ibLast;
@@ -425,7 +480,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
     {
     }
 
-    m_ilSegmentInfo.Insert( pseginfoAppend, pseginfoLE ? m_ilSegmentInfo.Next( pseginfoLE ) : NULL );
+    m_ilSegmentInfo.Insert( pseginfoAppend, pseginfoLE ? m_ilSegmentInfo.Next( pseginfoLE ) : m_ilSegmentInfo.PrevMost() );
 
     if ( pseginfoLE && pseginfoLE->Spos() == pseginfoAppend->Spos() )
     {
@@ -444,6 +499,7 @@ HandleError:
     delete pseginfoAppend;
     delete pjs;
     delete pjsPrev;
+    delete pjsDurable;
     if ( err < JET_errSuccess )
     {
         delete *ppjs;
@@ -550,7 +606,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrFindLastSegmentWithBinarySearch(   _Out
 
     while ( ibMin < ibMax )
     {
-        ibMid = rounddn( ibMin + ( ibMax - ibMin ) / 2, cbSegment );
+        ibMid = rounddn( ibMin + ( ibMax - ibMin ) / 2, cbJournalSegment );
 
         delete pjsMid;
         pjsMid = NULL;
@@ -637,7 +693,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrFindLastSegmentWithLinearSearch(   _Out
 
     //  perform a linear scan of every possible segment
 
-    for ( QWORD ib = m_ib; ib < m_ib + m_cb; ib += cbSegment )
+    for ( QWORD ib = m_ib; ib < m_ib + m_cb; ib += cbJournalSegment )
     {
         //  try to load the current segment
 
@@ -692,9 +748,8 @@ HandleError:
 template<class I>
 INLINE ERR TJournalSegmentManager<I>::ErrInitEmptyJournal()
 {
-    ERR                 err         = JET_errSuccess;
-    CSegmentInfo*       pseginfo    = NULL;
-    IJournalSegment*    pjs         = NULL;
+    ERR                 err = JET_errSuccess;
+    IJournalSegment*    pjs = NULL;
 
     //  if there are no valid segments in the journal then we will setup the journal to start at the first segment.
     //  this is required to allow our binary search algorithm to work with a partially used journal because we use
@@ -709,18 +764,13 @@ INLINE ERR TJournalSegmentManager<I>::ErrInitEmptyJournal()
     m_sposReplayMax = m_sposFirst;
     m_sposDurableMax = m_sposFirst;
 
-    Alloc( pseginfo = new CSegmentInfo( m_sposFirst, m_sposFirst ) );
-    m_ilSegmentInfo.InsertAsPrevMost( pseginfo );
-    pseginfo = NULL;
-
-    Call( CJournalSegment::ErrCreate( m_pff, m_ibLast, m_sposLast, 0, m_sposLast, m_sposLast, &pjs ) );
+    Call( CJournalSegment::ErrCreate( m_pff, m_ibLast, m_sposFirst, 0, m_sposFirst, m_sposFirst, &pjs ) );
     Call( pjs->ErrGetProperties( NULL, &m_dwUniqueIdPrev, NULL, NULL, NULL, NULL ) );
     Call( pjs->ErrSeal( NULL, NULL ) );
     Call( ErrFlush() );
 
 HandleError:
     delete pjs;
-    delete pseginfo;
     return err;
 }
 
@@ -730,13 +780,11 @@ INLINE ERR TJournalSegmentManager<I>::ErrInitExistingJournal(   _In_ const QWORD
 {
     ERR                 err                     = JET_errSuccess;
     SegmentPosition     sposLast                = sposInvalid;
-    SegmentPosition     sposLastDurable         = sposInvalid;
-    QWORD               ibLastDurable           = 0;
-    IJournalSegment*    pjsLastDurable          = NULL;
+    SegmentPosition     sposReplay              = sposInvalid;
+    SegmentPosition     sposDurableForWriteBack = sposInvalid;
+    QWORD               ibDurableForWriteBack   = 0;
+    IJournalSegment*    pjsDurableForWriteBack  = NULL;
     SegmentPosition     sposFirst               = sposInvalid;
-    DWORD               dwUniqueIdLastDurable   = 0;
-    QWORD               ibFirst                 = 0;
-    CSegmentInfo*       pseginfo                = NULL;
 
     //  we were given the segment with the highest segment position.  this segment contains the segment position of the
     //  last known durable segment.  the segment containing the replay pointer in the last durable segment is the
@@ -744,31 +792,22 @@ INLINE ERR TJournalSegmentManager<I>::ErrInitExistingJournal(   _In_ const QWORD
     //
     //  NOTE:  if the last durable segment cannot be accessed then the journal is corrupt and cannot mount
 
-    Call( pjsLast->ErrGetProperties( &sposLast, NULL, NULL, NULL, &sposLastDurable, NULL ) );
+    Call( pjsLast->ErrGetProperties( &sposLast, NULL, NULL, &sposReplay, &sposDurableForWriteBack, NULL ) );
 
-    Call( ErrGetSegmentOffset( ibLast, sposLast, sposLastDurable, &ibLastDurable ) );
+    Call( ErrGetSegmentOffset( ibLast, sposLast, sposDurableForWriteBack, &ibDurableForWriteBack ) );
 
-    Call( ErrLoadSegment( ibLastDurable, &pjsLastDurable ) );
+    Call( ErrLoadSegment( ibDurableForWriteBack, &pjsDurableForWriteBack ) );
 
-    Call( pjsLastDurable->ErrGetProperties( NULL, &dwUniqueIdLastDurable, NULL, &sposFirst, NULL, NULL ) );
-
-    Call( ErrGetSegmentOffset( ibLast, sposLast, sposFirst, &ibFirst ) );
+    Call( pjsDurableForWriteBack->ErrGetProperties( NULL, NULL, NULL, &sposFirst, NULL, NULL ) );
 
     m_sposFirst = sposFirst;
     m_ibLast = ibLast;
     m_sposLast = sposLast;
-    m_sposUniqueIdPrev = sposLastDurable;
-    m_dwUniqueIdPrev = dwUniqueIdLastDurable;
-    m_sposReplayMax = sposFirst;
-    m_sposDurableMax = sposLastDurable;
-
-    Alloc( pseginfo = new CSegmentInfo( sposLastDurable, sposFirst ) );
-    m_ilSegmentInfo.InsertAsPrevMost( pseginfo );
-    pseginfo = NULL;
+    m_sposReplayMax = sposReplay;
+    m_sposDurableMax = sposDurableForWriteBack;
 
 HandleError:
-    delete pseginfo;
-    delete pjsLastDurable;
+    delete pjsDurableForWriteBack;
     return err;
 }
 
@@ -796,7 +835,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrGetSegmentOffset(  _In_    const QWORD 
 
     if ( ib < (LONG64)m_ib || ib >= (LONG64)( m_ib + m_cb ) )
     {
-        Error( ErrERRCheck( JET_errInternalError ) );
+        BlockCacheInternalError( "JournalSegmentIllegalOffset" );
     }
 
     *pib = ib;
@@ -843,6 +882,13 @@ INLINE ERR TJournalSegmentManager<I>::ErrLoadSegmentForRecovery(    _In_    cons
         Call( pjs->ErrGetProperties( &spos, NULL, NULL, NULL, NULL, NULL ) );
     }
 
+    //  verify that the segment we loaded should be at this offset
+
+    if ( m_ib + ( ( (QWORD)spos / cbJournalSegment ) % ( m_cb / cbJournalSegment ) ) * cbJournalSegment != ib )
+    {
+        Error( ErrERRCheck( JET_errReadVerifyFailure ) );
+    }
+
     //  return the information
 
     *ppjs = pjs;
@@ -870,20 +916,6 @@ INLINE ERR TJournalSegmentManager<I>::ErrCreateSegment( _In_    const QWORD     
                                                         _Out_   IJournalSegment** const ppjs )
 {
     return CJournalSegment::ErrCreate( m_pff, ib, spos, dwUniqueIdPrev, sposReplay, sposDurable, ppjs );
-}
-
-template<class I>
-INLINE ERR TJournalSegmentManager<I>::ErrIgnoreVerificationErrors( _In_ const ERR err )
-{
-    switch ( err )
-    {
-        case JET_errReadVerifyFailure:
-        case JET_errPageNotInitialized:
-        case JET_errDiskReadVerificationFailure:
-            return JET_errSuccess;
-    }
-
-    return err;
 }
 
 //  CJournalSegmentManager:  concrete TJournalSegmentManager<IJournalSegmentManager>

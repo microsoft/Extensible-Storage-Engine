@@ -19,7 +19,7 @@ namespace Internal
 
                     static ERR ErrWrap( ICacheTelemetry^% ctm, ::ICacheTelemetry** const ppctm )
                     {
-                        return Internal::Ese::BlockCache::Interop::ErrWrap<ICacheTelemetry, ::ICacheTelemetry, CCacheTelemetryWrapper<ICacheTelemetry, ::ICacheTelemetry>>( ctm, ppctm );
+                        return Internal::Ese::BlockCache::Interop::ErrWrap<ICacheTelemetry, ::ICacheTelemetry, CCacheTelemetryWrapper<ICacheTelemetry, ::ICacheTelemetry>, CacheTelemetryRemotable>( ctm, ppctm );
                     }
 
                 public:

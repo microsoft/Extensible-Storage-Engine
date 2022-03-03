@@ -26,7 +26,8 @@ namespace Internal
                         VOID CachingFilePath( __out_bcount( cbOSFSAPI_MAX_PATHW ) WCHAR* const wszAbsPath ) override;
                         ULONG CbBlockSize() override;
                         ULONG CConcurrentBlockWriteBackMax() override;
-                        ULONG LCacheTelemetryFileNumber() override;
+                        ULONG UlCacheTelemetryFileNumber() override;
+                        ULONG UlPinnedHeaderSizeInBytes() override;
                 };
 
                 template< class TM, class TN >
@@ -56,9 +57,15 @@ namespace Internal
                 }
 
                 template< class TM, class TN >
-                inline ULONG CCachedFileConfigurationWrapper<TM, TN>::LCacheTelemetryFileNumber()
+                inline ULONG CCachedFileConfigurationWrapper<TM, TN>::UlCacheTelemetryFileNumber()
                 {
                     return I()->CacheTelemetryFileNumber();
+                }
+
+                template< class TM, class TN >
+                inline ULONG CCachedFileConfigurationWrapper<TM, TN>::UlPinnedHeaderSizeInBytes()
+                {
+                    return I()->PinnedHeaderSizeInBytes();
                 }
             }
         }

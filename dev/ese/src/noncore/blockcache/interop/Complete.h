@@ -13,11 +13,11 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class Complete
+                ref class Complete : MarshalByRefObject
                 {
                     public:
 
-                        Complete(   const bool                  isWrite,
+                        Complete(   const BOOL                  isWrite,
                                     BYTE* const                 pbData,
                                     const ::ICache::PfnComplete pfnComplete,
                                     const DWORD_PTR             keyComplete )
@@ -35,11 +35,33 @@ namespace Internal
                             FileSerial fileserial,
                             FileQOS fileQOS,
                             Int64 offsetInBytes,
-                            ArraySegment<byte> data );
+                            MemoryStream^ data )
+                        {
+                            ERR                 err = ex == nullptr ? JET_errSuccess : (ERR)ex->Error;
+                            FullTraceContext    fullTc;
+
+                            if ( !this->isWrite && data != nullptr && data->Length > 0 )
+                            {
+                                array<byte>^ bytes = data->ToArray();
+                                pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                                UtilMemCpy( this->pbData, (const BYTE*)rgbData, bytes->Length );
+                            }
+
+                            this->pfnComplete(  err,
+                                                (::VolumeId)volumeid,
+                                                (::FileId)fileid,
+                                                (::FileSerial)fileserial,
+                                                fullTc,
+                                                (OSFILEQOS)fileQOS,
+                                                offsetInBytes,
+                                                data == nullptr ? 0 : (DWORD)data->Length,
+                                                this->pbData,
+                                                this->keyComplete );
+                        }
 
                     private:
 
-                        const bool                  isWrite;
+                        const BOOL                  isWrite;
                         BYTE* const                 pbData;
                         const ::ICache::PfnComplete pfnComplete;
                         const DWORD_PTR             keyComplete;

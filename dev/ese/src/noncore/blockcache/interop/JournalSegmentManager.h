@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( IJournalSegmentManager^% jsm, ::IJournalSegmentManager** const ppjsm )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<IJournalSegmentManager, ::IJournalSegmentManager, CJournalSegmentManagerWrapper<IJournalSegmentManager, ::IJournalSegmentManager>>( jsm, ppjsm );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<IJournalSegmentManager, ::IJournalSegmentManager, CJournalSegmentManagerWrapper<IJournalSegmentManager, ::IJournalSegmentManager>, JournalSegmentManagerRemotable>( jsm, ppjsm );
                         }
 
                     public:

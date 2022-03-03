@@ -27,7 +27,9 @@ namespace Internal
                         virtual void GetProperties(
                             [Out] JournalPosition% journalPositionReplay,
                             [Out] JournalPosition% journalPositionDurableForWriteBack,
-                            [Out] JournalPosition% journalPositionDurable );
+                            [Out] JournalPosition% journalPositionDurable,
+                            [Out] JournalPosition% journalPositionAppend,
+                            [Out] JournalPosition% journalPositionFull );
 
                         virtual void VisitEntries( IJournal::VisitEntry^ visitEntry );
 
@@ -46,22 +48,34 @@ namespace Internal
                 inline void JournalBase<TM, TN, TW>::GetProperties(
                     [Out] JournalPosition% journalPositionReplay,
                     [Out] JournalPosition% journalPositionDurableForWriteBack,
-                    [Out] JournalPosition% journalPositionDurable )
+                    [Out] JournalPosition% journalPositionDurable,
+                    [Out] JournalPosition% journalPositionAppend,
+                    [Out] JournalPosition% journalPositionFull )
                 {
                     ERR                 err                     = JET_errSuccess;
                     ::JournalPosition   jposReplay              = ::jposInvalid;
                     ::JournalPosition   jposDurableForWriteBack = ::jposInvalid;
                     ::JournalPosition   jposDurable             = ::jposInvalid;
+                    ::JournalPosition   jposAppend              = ::jposInvalid;
+                    ::JournalPosition   jposFull                = ::jposInvalid;
 
                     journalPositionReplay = JournalPosition::Invalid;
                     journalPositionDurableForWriteBack = JournalPosition::Invalid;
                     journalPositionDurable = JournalPosition::Invalid;
+                    journalPositionAppend = JournalPosition::Invalid;
+                    journalPositionFull = JournalPosition::Invalid;
 
-                    Call( Pi->ErrGetProperties( &jposReplay, &jposDurableForWriteBack, &jposDurable ) );
+                    Call( Pi->ErrGetProperties( &jposReplay, 
+                                                &jposDurableForWriteBack,
+                                                &jposDurable, 
+                                                &jposAppend, 
+                                                &jposFull ) );
 
                     journalPositionReplay = (JournalPosition)jposReplay;
                     journalPositionDurableForWriteBack = (JournalPosition)jposDurableForWriteBack;
                     journalPositionDurable = (JournalPosition)jposDurable;
+                    journalPositionAppend = (JournalPosition)jposAppend;
+                    journalPositionFull = (JournalPosition)jposFull;
 
                     return;
 
@@ -69,22 +83,27 @@ namespace Internal
                     journalPositionReplay = JournalPosition::Invalid;
                     journalPositionDurableForWriteBack = JournalPosition::Invalid;
                     journalPositionDurable = JournalPosition::Invalid;
+                    journalPositionAppend = JournalPosition::Invalid;
+                    journalPositionFull = JournalPosition::Invalid;
                     throw EseException( err );
                 }
 
                 template<class TM, class TN, class TW>
                 inline void JournalBase<TM, TN, TW>::VisitEntries( IJournal::VisitEntry^ visitEntry )
                 {
-                    ERR             err         = JET_errSuccess;
-                    CVisitEntry*    pvisitentry = NULL;
+                    ERR                 err                 = JET_errSuccess;
+                    VisitEntryInverse^  visitEntryInverse   = nullptr;
 
-                    Alloc( pvisitentry = new CVisitEntry( visitEntry ) );
+                    if ( visitEntry != nullptr )
+                    {
+                        visitEntryInverse = gcnew VisitEntryInverse( visitEntry );
+                    }
 
-                    Call( Pi->ErrVisitEntries(  ::IJournal::PfnVisitEntry( CVisitEntry::VisitEntry_ ),
-                                                DWORD_PTR( pvisitentry ) ) );
+                    Call( Pi->ErrVisitEntries(  visitEntryInverse == nullptr ? NULL : visitEntryInverse->PfnVisitEntry,
+                                                visitEntryInverse == nullptr ? NULL : visitEntryInverse->KeyVisitEntry ) );
 
                 HandleError:
-                    delete pvisitentry;
+                    delete visitEntryInverse;
                     if ( err < JET_errSuccess )
                     {
                         throw EseException( err );
@@ -147,7 +166,7 @@ namespace Internal
                     journalPositionEnd = (JournalPosition)jposEnd;
                     
                 HandleError:
-                    if ( rgjb != NULL )
+                    if ( rgjb )
                     {
                         for ( int ijb = 0; ijb < cjb; ijb++ )
                         {

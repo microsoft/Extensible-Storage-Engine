@@ -36,7 +36,7 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
                             _In_ IFileFilter* const                 pff,
                             _In_ CPRINTF* const                     pcprintf );
 
-        void operator delete( _In_ void* const pv );
+        void operator delete( _In_opt_ void* const pv );
 
         FileSerial Fileserial() const { return m_le_serialNumber; }
 
@@ -55,9 +55,9 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
         void* operator new( _In_ const size_t cb );
         void* operator new( _In_ const size_t cb, _In_ const void* const pv );
 
-        ERR ErrValidate(    _In_ const ERR                          errInvalidType,
-                            _In_ IFileSystemConfiguration* const    pfsconfig, 
-                            _In_ IFileFilter* const                 pff             = NULL );
+        ERR ErrValidate(    _In_        const ERR                          errInvalidType,
+                            _In_        IFileSystemConfiguration* const    pfsconfig, 
+                            _In_opt_    IFileFilter* const                 pff             = NULL );
 
     private:
 
@@ -203,23 +203,14 @@ INLINE BOOL CCachedFileHeader::FValid(  _In_                    IFileSystemConfi
                                         _In_                    const DWORD                     cbHeader )
 {
     ERR                 err                     = JET_errSuccess;
-    BOOL                fCleanUpStateSaved      = fFalse;
-    BOOL                fRestoreCleanupState    = fFalse;
     CCachedFileHeader*  pcfh                    = NULL;
     BOOL                fValid                  = fFalse;
-
-    fCleanUpStateSaved = FOSSetCleanupState( fFalse );
-    fRestoreCleanupState = fTrue;
 
     Call( CCachedFileHeader::ErrLoad( pfsconfig, pbHeader, cbHeader, &pcfh ) );
 
     fValid = fTrue;
 
 HandleError:
-    if ( fRestoreCleanupState )
-    {
-        FOSSetCleanupState( fCleanUpStateSaved );
-    }
     delete pcfh;
     return fValid;
 }
@@ -249,9 +240,8 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
     CallS( pff->ErrPath( wszAbsPath ) );
     CallS( pff->ErrGetPhysicalId( &volumeid, &fileid, &fileserial ) );
 
-    (*pcprintf)(    "CACHED FILE HEADER:\n" );
+    (*pcprintf)(    "Cached File Header:\n" );
     (*pcprintf)(    "\n" );
-    (*pcprintf)(    "Fields:\n" );
     (*pcprintf)(    "          Checksum:  0x%08lx\n", LONG( pcfh->m_le_ulChecksum ) );
     (*pcprintf)(    "              Type:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
                     *((DWORD*)&pcfh->m_rgbHeaderType[ 0 ]),
@@ -282,7 +272,7 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
     (*pcprintf)(    "        FileSerial:  0x%08x\n", DWORD( FileSerial( pcfh->m_le_serialNumber ) ) );
     (*pcprintf)(    "    Cache VolumeId:  0x%08x\n", DWORD( VolumeId( pcfh->m_le_volumeidCache ) ) );
     (*pcprintf)(    "      Cache FileId:  0x%016I64x\n", QWORD( FileId( pcfh->m_le_fileidCache ) ) );
-    (*pcprintf)(    "        Cache Path:  %S\n", wszAnyAbsPath[0] ? wszAnyAbsPath : L"???" );
+    (*pcprintf)(    "        Cache Path:  %ws\n", wszAnyAbsPath[0] ? wszAnyAbsPath : L"???" );
     (*pcprintf)(    "    Cache UniqueId:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
                     *((DWORD*)&pcfh->m_rgbUniqueIdCache[ 0 ]),
                     *((WORD*)&pcfh->m_rgbUniqueIdCache[ 4 ]),
@@ -295,10 +285,10 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 13 ]),
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 14 ]),
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 15 ]) );
-    (*pcprintf)(    "           File Type:  %d\n", LONG( pcfh->m_le_filetype ) );
+    (*pcprintf)(    "         File Type:  %d\n", LONG( pcfh->m_le_filetype ) );
     (*pcprintf)(    "\n" );
     (*pcprintf)(    "Current File Properties:\n" );
-    (*pcprintf)(    "              Path:  %S\n", wszAbsPath );
+    (*pcprintf)(    "              Path:  %ws\n", wszAbsPath );
     (*pcprintf)(    "          VolumeId:  0x%08x\n", DWORD( volumeid ) );
     (*pcprintf)(    "            FileId:  0x%016I64x\n", QWORD( fileid ) );
     (*pcprintf)(    "\n" );
@@ -322,25 +312,25 @@ INLINE void* CCachedFileHeader::operator new( _In_ const size_t cb, _In_ const v
     return (void*)pv;
 }
 
-INLINE void CCachedFileHeader::operator delete( _In_ void* const pv )
+INLINE void CCachedFileHeader::operator delete( _In_opt_ void* const pv )
 {
     OSMemoryPageFree( pv );
 }
 
-INLINE ERR CCachedFileHeader::ErrValidate(  _In_ const ERR                          errInvalidType,
-                                            _In_ IFileSystemConfiguration* const    pfsconfig, 
-                                            _In_ IFileFilter* const                 pff )
+INLINE ERR CCachedFileHeader::ErrValidate(  _In_        const ERR                          errInvalidType,
+                                            _In_        IFileSystemConfiguration* const    pfsconfig, 
+                                            _In_opt_    IFileFilter* const                 pff )
 {
     ERR err = JET_errSuccess;
 
     if ( m_le_filetype != JET_filetypeCachedFile )
     {
-        Call( ErrERRCheck( errInvalidType ) );
+        Error( ErrERRCheck( errInvalidType ) );
     }
 
     if ( memcmp( m_rgbHeaderType, c_rgbCachedFileHeaderV1, cbGuid ) )
     {
-        Call( ErrERRCheck( errInvalidType ) );
+        Error( ErrERRCheck( errInvalidType ) );
     }
 
     if ( pff )

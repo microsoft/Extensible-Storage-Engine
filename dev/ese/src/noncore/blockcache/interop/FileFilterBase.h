@@ -31,7 +31,7 @@ namespace Internal
 
                         virtual void Read(
                             Int64 offsetInBytes,
-                            ArraySegment<byte> data,
+                            MemoryStream^ data,
                             FileQOS fileQOS,
                             IOMode ioMode,
                             IFile::IOComplete^ ioComplete,
@@ -39,13 +39,15 @@ namespace Internal
 
                         virtual void Write(
                             Int64 offsetInBytes,
-                            ArraySegment<byte> data,
+                            MemoryStream^ data,
                             FileQOS fileQOS,
                             IOMode ioMode,
                             IFile::IOComplete^ ioComplete,
                             IFile::IOHandoff^ ioHandoff );
 
                         virtual void Issue( IOMode ioMode );
+
+                        virtual void Flush( IOMode ioMode );
                 };
 
                 template< class TM, class TN, class TW >
@@ -81,131 +83,112 @@ namespace Internal
                 template< class TM, class TN, class TW >
                 inline void FileFilterBase<TM,TN,TW>::Read(
                     Int64 offsetInBytes,
-                    ArraySegment<byte> data,
+                    MemoryStream^ data,
                     FileQOS fileQOS,
                     IOMode ioMode,
                     IFile::IOComplete^ ioComplete,
                     IFile::IOHandoff^ ioHandoff )
                 {
-                    ERR                 err             = JET_errSuccess;
-                    const DWORD         cbBlock         = OSMemoryPageCommitGranularity();
-                    DWORD               cbBuffer        = ( ( data.Count - 1 + cbBlock ) / cbBlock ) * cbBlock;
-                    VOID*               pvBuffer        = NULL;
-                    BOOL                fReleaseBuffer  = fTrue;
-                    TraceContextScope   tcScope;
-                    CIOComplete*        piocomplete     = NULL;
+                    ERR                 err                 = JET_errSuccess;
+                    const DWORD         cbData              = data == nullptr ? 0 : (DWORD)data->Length;
+                    void*               pvBuffer            = NULL;
+                    IOCompleteInverse^  ioCompleteInverse   = nullptr;
+                    TraceContextScope   tcScope( iorpBlockCache );
 
-                    Alloc( pvBuffer = PvOSMemoryPageAlloc( cbBuffer, NULL ) );
+                    if ( cbData )
+                    {
+                        Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
+                        array<byte>^ bytes = data->ToArray();
+                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
+                    }
 
                     if ( ioComplete != nullptr || ioHandoff != nullptr )
                     {
-                        if ( ioComplete != nullptr )
-                        {
-                            Alloc( piocomplete = new CIOComplete( fTrue, this, fFalse, data.Array, data.Offset, data.Count, ioComplete, ioHandoff, pvBuffer ) );
-                        }
-                        else
-                        {
-                            piocomplete = new( _alloca( sizeof( CIOComplete ) ) ) CIOComplete( fFalse, this, fFalse, data.Array, data.Offset, data.Count, ioComplete, ioHandoff, pvBuffer );
-                        }
-
-                        fReleaseBuffer = fFalse;
+                        ioCompleteInverse = gcnew IOCompleteInverse( this, false, data, ioComplete, ioHandoff, &pvBuffer );
                     }
-
-                    pin_ptr<const byte> rgbDataIn = &data.Array[ data.Offset ];
-                    UtilMemCpy( pvBuffer, (const BYTE*)rgbDataIn, data.Count );
 
                     Call( Pi->ErrRead(  *tcScope,
                                         offsetInBytes,
-                                        data.Count,
-                                        (BYTE*)pvBuffer,
+                                        cbData,
+                                        (BYTE*)( ioCompleteInverse == nullptr ? pvBuffer : ioCompleteInverse->PvBuffer ),
                                         (OSFILEQOS)fileQOS,
                                         (::IFileFilter::IOMode)ioMode,
-                                        ioComplete != nullptr ? IFileAPI::PfnIOComplete( CIOComplete::Complete ) : NULL,
-                                        DWORD_PTR( piocomplete ),
-                                        piocomplete ? IFileAPI::PfnIOHandoff( CIOComplete::Handoff ) : NULL,
+                                        ioCompleteInverse == nullptr ? NULL : ioCompleteInverse->PfnIOComplete,
+                                        ioCompleteInverse == nullptr ? NULL : ioCompleteInverse->KeyIOComplete,
+                                        ioCompleteInverse == nullptr ? NULL : ioCompleteInverse->PfnIOHandoff,
                                         NULL ) );
 
                 HandleError:
+                    if ( ioComplete == nullptr && cbData )
+                    {
+                        array<byte>^ bytes = gcnew array<byte>( cbData );
+                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        UtilMemCpy( (BYTE*)rgbData, ioCompleteInverse == nullptr ? pvBuffer : ioCompleteInverse->PvBuffer, cbData );
+                        data->Position = 0;
+                        data->Write( bytes, 0, bytes->Length );
+                    }
+                    OSMemoryPageFree( pvBuffer );
                     if ( ioComplete == nullptr )
                     {
-                        pin_ptr<byte> rgbData = &data.Array[ data.Offset ];
-                        UtilMemCpy( (BYTE*)rgbData, pvBuffer, data.Count );
+                        delete ioCompleteInverse;
                     }
-                    if ( piocomplete && ( ioComplete == nullptr || err < JET_errSuccess ) )
+                    if ( err < JET_errSuccess )
                     {
-                        piocomplete->Release();
+                        delete ioCompleteInverse;
+                        throw EseException( err );
                     }
-                    if ( fReleaseBuffer )
-                    {
-                        OSMemoryPageFree( pvBuffer );
-                    }
-                    if ( err >= JET_errSuccess )
-                    {
-                        return;
-                    }
-                    throw EseException( err );
                 }
 
                 template< class TM, class TN, class TW >
                 inline void FileFilterBase<TM,TN,TW>::Write(
                     Int64 offsetInBytes,
-                    ArraySegment<byte> data,
+                    MemoryStream^ data,
                     FileQOS fileQOS,
                     IOMode ioMode,
                     IFile::IOComplete^ ioComplete,
                     IFile::IOHandoff^ ioHandoff )
                 {
-                    ERR                 err             = JET_errSuccess;
-                    const DWORD         cbBlock         = OSMemoryPageCommitGranularity();
-                    DWORD               cbBuffer        = ( ( data.Count - 1 + cbBlock ) / cbBlock ) * cbBlock;
-                    VOID*               pvBuffer        = NULL;
-                    BOOL                fReleaseBuffer  = fTrue;
-                    TraceContextScope   tcScope;
-                    CIOComplete*        piocomplete     = NULL;
+                    ERR                 err                 = JET_errSuccess;
+                    const DWORD         cbData              = data == nullptr ? 0 : (DWORD)data->Length;
+                    void*               pvBuffer            = NULL;
+                    IOCompleteInverse^  ioCompleteInverse   = nullptr;
+                    TraceContextScope   tcScope( iorpBlockCache );
 
-                    Alloc( pvBuffer = PvOSMemoryPageAlloc( cbBuffer, NULL ) );
+                    if ( cbData )
+                    {
+                        Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
+                        array<byte>^ bytes = data->ToArray();
+                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
+                    }
 
                     if ( ioComplete != nullptr || ioHandoff != nullptr )
                     {
-                        if ( ioComplete != nullptr )
-                        {
-                            Alloc( piocomplete = new CIOComplete( fTrue, this, fTrue, data.Array, data.Offset, data.Count, ioComplete, ioHandoff, pvBuffer ) );
-                        }
-                        else
-                        {
-                            piocomplete = new( _alloca( sizeof( CIOComplete ) ) ) CIOComplete( fFalse, this, fTrue, data.Array, data.Offset, data.Count, ioComplete, ioHandoff, pvBuffer );
-                        }
-
-                        fReleaseBuffer = fFalse;
+                        ioCompleteInverse = gcnew IOCompleteInverse( this, true, data, ioComplete, ioHandoff, &pvBuffer );
                     }
-
-                    pin_ptr<const byte> rgbData = &data.Array[ data.Offset ];
-                    UtilMemCpy( pvBuffer, (const BYTE*)rgbData, data.Count );
 
                     Call( Pi->ErrWrite( *tcScope,
                                         offsetInBytes,
-                                        data.Count,
-                                        (const BYTE*)pvBuffer,
+                                        cbData,
+                                        (const BYTE*)( ioCompleteInverse == nullptr ? pvBuffer : ioCompleteInverse->PvBuffer ),
                                         (OSFILEQOS)fileQOS,
                                         (::IFileFilter::IOMode)ioMode,
-                                        ioComplete != nullptr ? IFileAPI::PfnIOComplete( CIOComplete::Complete ) : NULL,
-                                        DWORD_PTR( piocomplete ),
-                                        piocomplete ? IFileAPI::PfnIOHandoff( CIOComplete::Handoff ) : NULL ) );
+                                        ioCompleteInverse == nullptr ? NULL : ioCompleteInverse->PfnIOComplete,
+                                        ioCompleteInverse == nullptr ? NULL : ioCompleteInverse->KeyIOComplete,
+                                        ioCompleteInverse == nullptr ? NULL : ioCompleteInverse->PfnIOHandoff ) );
 
                 HandleError:
-                    if ( piocomplete && ( ioComplete == nullptr || err < JET_errSuccess ) )
+                    OSMemoryPageFree( pvBuffer );
+                    if ( ioComplete == nullptr )
                     {
-                        piocomplete->Release();
+                        delete ioCompleteInverse;
                     }
-                    if ( fReleaseBuffer )
+                    if ( err < JET_errSuccess )
                     {
-                        OSMemoryPageFree( pvBuffer );
+                        delete ioCompleteInverse;
+                        throw EseException( err );
                     }
-                    if ( err >= JET_errSuccess )
-                    {
-                        return;
-                    }
-                    throw EseException( err );
                 }
 
                 template< class TM, class TN, class TW >
@@ -214,6 +197,19 @@ namespace Internal
                     ERR err = JET_errSuccess;
 
                     Call( Pi->ErrIssue( (::IFileFilter::IOMode)ioMode ) );
+
+                    return;
+
+                HandleError:
+                    throw EseException( err );
+                }
+
+                template< class TM, class TN, class TW >
+                inline void FileFilterBase<TM, TN, TW>::Flush( IOMode ioMode )
+                {
+                    ERR err = JET_errSuccess;
+
+                    Call( Pi->ErrFlush( (IOFLUSHREASON)0, (::IFileFilter::IOMode)ioMode ) );
 
                     return;
 

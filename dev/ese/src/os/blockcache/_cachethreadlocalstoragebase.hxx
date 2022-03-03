@@ -3,20 +3,31 @@
 
 #pragma once
 
+//  Cache Thread Id.
+
+enum class CacheThreadId  //  ctid
+{
+    ctidInvalid = 0,
+};
+
+constexpr CacheThreadId ctidInvalid = CacheThreadId::ctidInvalid;
+
 //  A cache thread local storage base class.
 
 class CCacheThreadLocalStorageBase  //  ctls
 {
     public:
 
-        CCacheThreadLocalStorageBase( _In_ const DWORD dwTid )
-            :   m_dwTid( dwTid ),
+        CCacheThreadLocalStorageBase( _In_ const CacheThreadId ctid )
+            :   m_ctid( ctid ),
                 m_cref( 1 )
         {
         }
 
-        DWORD DwTid() const { return m_dwTid; }
-        UINT UiHash() const { return CCacheThreadLocalStorageBase::UiHash( m_dwTid ); }
+        CacheThreadId Ctid() const { return m_ctid; }
+        UINT UiHash() const { return CCacheThreadLocalStorageBase::UiHash( m_ctid ); }
+
+        BOOL FOwner() { return Ctid() == CtidCurrentThread(); }
 
         void AddRef() { AddRefInternal(); }
 
@@ -26,13 +37,19 @@ class CCacheThreadLocalStorageBase  //  ctls
             
             *ppctls = NULL;
 
-            if ( pctls && pctls->FReleaseInternal() )
+            if ( pctls )
             {
-                delete pctls;
+                if ( pctls->FReleaseInternal() )
+                {
+                    delete pctls;
+                }
             }
         }
 
-        static UINT UiHash( _In_ const DWORD dwTid ) { return (UINT)( dwTid ); }
+        static CacheThreadId CtidCurrentThread();
+        static BOOL IsThreadAlive( _In_ const CacheThreadId ctid );
+
+        static UINT UiHash( _In_ const CacheThreadId ctid ) { return (UINT)( ctid ); }
 
         static SIZE_T OffsetOfILE() { return OffsetOf( CCacheThreadLocalStorageBase, m_ile ); }
 
@@ -51,6 +68,33 @@ class CCacheThreadLocalStorageBase  //  ctls
     private:
 
         typename CInvasiveList<CCacheThreadLocalStorageBase, OffsetOfILE>::CElement m_ile;
-        const DWORD                                                                 m_dwTid;
+        const CacheThreadId                                                         m_ctid;
         volatile int                                                                m_cref;
 };
+
+INLINE CacheThreadId CCacheThreadLocalStorageBase::CtidCurrentThread()
+{
+    const DWORD         dwTid = GetCurrentThreadId();
+    const CacheThreadId ctid = (CacheThreadId)dwTid;
+
+    Assert( ctid != ctidInvalid );
+
+    return ctid;
+}
+
+INLINE BOOL CCacheThreadLocalStorageBase::IsThreadAlive( _In_ const CacheThreadId ctid )
+{
+    const DWORD dwTid = (DWORD)ctid;
+    HANDLE      hThread = INVALID_HANDLE_VALUE;
+    BOOL        fAlive = fFalse;
+
+    hThread = OpenThread( SYNCHRONIZE, FALSE, dwTid );
+    fAlive = hThread && hThread != INVALID_HANDLE_VALUE && WaitForSingleObject( hThread, 0 ) == WAIT_TIMEOUT;
+
+    if ( hThread && hThread != INVALID_HANDLE_VALUE )
+    {
+        CloseHandle( hThread );
+    }
+
+    return fAlive;
+}

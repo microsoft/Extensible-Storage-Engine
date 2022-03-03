@@ -26,64 +26,89 @@ namespace Internal
 
                     public:
 
-                        virtual bool IsCacheEnabled();
+                        virtual bool IsCacheEnabled()
+                        {
+                            return Pi->FCacheEnabled() ? true : false;
+                        }
 
-                        virtual Guid CacheType();
+                        virtual Guid CacheType()
+                        {
+                            GUID guidNative = { 0 };
 
-                        virtual String^ Path();
+                            Pi->CacheType( (BYTE*)&guidNative );
 
-                        virtual Int64 MaximumSize();
+                            return Guid(    guidNative.Data1,
+                                            guidNative.Data2,
+                                            guidNative.Data3,
+                                            guidNative.Data4[ 0 ],
+                                            guidNative.Data4[ 1 ],
+                                            guidNative.Data4[ 2 ],
+                                            guidNative.Data4[ 3 ],
+                                            guidNative.Data4[ 4 ],
+                                            guidNative.Data4[ 5 ],
+                                            guidNative.Data4[ 6 ],
+                                            guidNative.Data4[ 7 ] );
+                        }
 
-                        virtual double PercentWrite();
+                        virtual String^ Path()
+                        {
+                            WCHAR   wszPath[ OSFSAPI_MAX_PATH ] = { 0 };
+
+                            Pi->Path( wszPath );
+
+                            return gcnew String( wszPath );
+                        }
+
+                        virtual Int64 MaximumSize()
+                        {
+                            return Pi->CbMaximumSize();
+                        }
+
+                        virtual double PercentWrite()
+                        {
+                            return Pi->PctWrite();
+                        }
+
+                        virtual Int64 JournalSegmentsMaximumSize()
+                        {
+                            return Pi->CbJournalSegmentsMaximumSize();
+                        }
+
+                        virtual double PercentJournalSegmentsInUse()
+                        {
+                            return Pi->PctJournalSegmentsInUse();
+                        }
+
+                        virtual Int64 JournalSegmentsMaximumCacheSize()
+                        {
+                            return Pi->CbJournalSegmentsMaximumCacheSize();
+                        }
+
+                        virtual Int64 JournalClustersMaximumSize()
+                        {
+                            return Pi->CbJournalClustersMaximumSize();
+                        }
+
+                        virtual Int64 CachingFilePerSlab()
+                        {
+                            return Pi->CbCachingFilePerSlab();
+                        }
+
+                        virtual Int64 CachedFilePerSlab()
+                        {
+                            return Pi->CbCachedFilePerSlab();
+                        }
+
+                        virtual Int64 SlabMaximumCacheSize()
+                        {
+                            return Pi->CbSlabMaximumCacheSize();
+                        }
+
+                        virtual bool IsAsyncWriteBackEnabled()
+                        {
+                            return Pi->FAsyncWriteBackEnabled() ? true : false;
+                        }
                 };
-
-                template< class TM, class TN, class TW >
-                inline bool CacheConfigurationBase<TM, TN, TW>::IsCacheEnabled()
-                {
-                    return Pi->FCacheEnabled() ? true : false;
-                }
-
-                template< class TM, class TN, class TW >
-                inline Guid CacheConfigurationBase<TM, TN, TW>::CacheType()
-                {
-                    GUID guidNative = { 0 };
-
-                    Pi->CacheType( (BYTE*)&guidNative );
-
-                    return Guid(    guidNative.Data1,
-                                    guidNative.Data2,
-                                    guidNative.Data3,
-                                    guidNative.Data4[ 0 ],
-                                    guidNative.Data4[ 1 ],
-                                    guidNative.Data4[ 2 ],
-                                    guidNative.Data4[ 3 ],
-                                    guidNative.Data4[ 4 ],
-                                    guidNative.Data4[ 5 ],
-                                    guidNative.Data4[ 6 ],
-                                    guidNative.Data4[ 7 ] );
-                }
-
-                template< class TM, class TN, class TW >
-                inline String^ CacheConfigurationBase<TM, TN, TW>::Path()
-                {
-                    WCHAR   wszPath[ OSFSAPI_MAX_PATH ] = { 0 };
-
-                    Pi->Path( wszPath );
-
-                    return gcnew String( wszPath );
-                }
-
-                template< class TM, class TN, class TW >
-                inline Int64 CacheConfigurationBase<TM, TN, TW>::MaximumSize()
-                {
-                    return Pi->CbMaximumSize();
-                }
-
-                template< class TM, class TN, class TW >
-                inline double CacheConfigurationBase<TM, TN, TW>::PercentWrite()
-                {
-                    return Pi->PctWrite();
-                }
             }
         }
     }

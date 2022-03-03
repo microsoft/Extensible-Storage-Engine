@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( IFileFilter^% ff, ::IFileFilter** const ppffapi )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileFilter,::IFileFilter,CFileFilterWrapper<IFileFilter,::IFileFilter>>( ff, ppffapi );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileFilter,::IFileFilter,CFileFilterWrapper<IFileFilter,::IFileFilter>, FileFilterRemotable>( ff, ppffapi );
                         }
 
                     public:

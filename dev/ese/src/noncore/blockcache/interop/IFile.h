@@ -38,7 +38,7 @@ namespace Internal
                         IFile^ file,
                         FileQOS fileQOS,
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data );
+                        MemoryStream^ data );
 
                     /// <summary>
                     /// Delegate that will be called when an asynchronously issued I/O has been successfully handed off to the IO
@@ -58,7 +58,7 @@ namespace Internal
                         IFile^ file,
                         FileQOS fileQOS,
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data );
+                        MemoryStream^ data );
 
                     /// <summary>
                     /// Returns the mode(s) or disposition(s) of the file, such as Read-Only, or Temporary file. See FileModeFlags.
@@ -208,7 +208,7 @@ namespace Internal
                     /// <param name="ioHandoff">An optional IO handoff delegate.</param>
                     void IORead(
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data,
+                        MemoryStream^ data,
                         FileQOS fileQOS,
                         IOComplete^ ioComplete,
                         IOHandoff^ ioHandoff );
@@ -248,7 +248,7 @@ namespace Internal
                     /// <param name="ioHandoff">An optional IO handoff delegate.</param>
                     void IOWrite(
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data,
+                        MemoryStream^ data,
                         FileQOS fileQOS,
                         IOComplete^ ioComplete,
                         IOHandoff^ ioHandoff );

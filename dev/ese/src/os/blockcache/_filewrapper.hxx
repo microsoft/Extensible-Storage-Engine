@@ -113,7 +113,7 @@ class TFileWrapper  //  fw
         QWORD QwEngineFileId() const;
 #endif
 
-        TICK DtickIOElapsed( void* const pvIOContext ) const;
+        TICK DtickIOElapsed( void* const pvIOContext );
 
     protected:
 
@@ -146,18 +146,19 @@ class TFileWrapper  //  fw
                         m_fIOCompleteCalled( fFalse ),
                         m_cref( 1 )
                 {
-                    s_ncrit.Enter();
-                    s_il.InsertAsNextMost( this );
-                    s_ncrit.Leave();
+                    (void)ErrRegister( this );
+                }
+
+                static void Cleanup()
+                {
+                    s_iocompleteHash.Term();
                 }
 
             protected:
 
                 virtual ~CIOComplete()
                 {
-                    s_ncrit.Enter();
-                    s_il.Remove( this );
-                    s_ncrit.Leave();
+                    Unregister( this );
                 }
 
                 virtual void CleanupBeforeAsyncIOCompletion()
@@ -166,36 +167,39 @@ class TFileWrapper  //  fw
 
             public:
 
-                TICK DtickIOElapsed() const
+                TICK DtickIOElapsed()
                 { 
-                    s_ncrit.Enter();
+                    TICK                    dtick   = 0;
 
                     //  determine if this is still a valid io context.  this covers for a design flaw in pfnIOHandoff
                     //  where the interface presumes that the value assigned to pvIOContext will exist forever.  note
                     //  that this same flaw can cause us to accidentally look at a pvIOContext that has already been
                     //  reused
-                    //
-                    //  NOTE:  we cannot use "s_il.FMember( this )" here because it could touch freed memory
 
-                    CIOComplete* piocompleteT = NULL;
-                    for (   piocompleteT = s_il.PrevMost();
-                            piocompleteT != NULL && piocompleteT != this;
-                            piocompleteT = s_il.Next( piocompleteT ) )
+                    CIOCompleteKey          key( this );
+                    CIOCompleteHash::CLock  lock;
+                    CIOCompleteEntry        entry;
+
+                    s_iocompleteHash.ReadLockKey( key, &lock );
+
+                    const BOOL              fValid  = ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrRetrieveEntry( &lock, &entry ) ) == JET_errSuccess;
+                    CMeteredSection::Group  group   = CMeteredSection::groupInvalidNil;
+            
+                    if ( fValid )
                     {
+                        group = m_ms.Enter();
                     }
 
-                    //  get the elapsed time only if this is still a valid io context
+                    s_iocompleteHash.ReadUnlockKey( &lock );
 
-                    TICK dtick = 0;
-                    
-                    if ( piocompleteT == this )
+                    if ( fValid )
                     {
                         //  if the pvIOContext is null then we are the source of the information, otherwise call down
                         //  to the inner IFileAPI implementation
 
                         if ( !m_pvIOContext )
                         {
-                            dtick = (DWORD)min( lMax, CmsecHRTFromDhrt( m_hrtStart ) );
+                            dtick = (DWORD)min( lMax, CmsecHRTFromHrtStart( m_hrtStart ) );
                         }
                         else
                         {
@@ -203,7 +207,10 @@ class TFileWrapper  //  fw
                         }
                     }
 
-                    s_ncrit.Leave();
+                    if ( group != CMeteredSection::groupInvalidNil )
+                    {
+                        m_ms.Leave( group );
+                    }
 
                     return dtick;
                 }
@@ -267,13 +274,13 @@ class TFileWrapper  //  fw
                             CleanupBeforeAsyncIOCompletion();
 
                             m_pfnIOComplete(   err,
-                                               m_pfapi,
-                                               tc,
-                                               grbitQOS,
-                                               m_ibOffset,
-                                               m_cbData,
-                                               m_pbData,
-                                               m_keyIOComplete );
+                                                m_pfapi,
+                                                tc,
+                                                grbitQOS,
+                                                m_ibOffset,
+                                                m_cbData,
+                                                m_pbData,
+                                                m_keyIOComplete );
                         }
 
                         m_fIOCompleteCalled = fTrue;
@@ -382,30 +389,74 @@ class TFileWrapper  //  fw
                         else
                         {
                             this->~CIOComplete();
+                            _freea( this );
                         }
                     }
                 }
 
             private:
 
-                static CNestableCriticalSection                             s_ncrit;
-                static CInvasiveList<CIOComplete, CIOComplete::OffsetOfILE> s_il;
+                static ERR ErrEnsureInitIOCompleteHash() { return s_initOnceIocompleteHash.Init( ErrInitIOCompleteHash_, NULL ); };
+                static ERR ErrInitIOCompleteHash_( _In_ void* unused ) { return ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrInit( 5.0, 1.0 ) ); }
 
-                typename CInvasiveList<CIOComplete, OffsetOfILE>::CElement  m_ile;
-                const BOOL                                                  m_fIsHeapAlloc;
-                IFileAPI* const                                             m_pfapi;
-                const QWORD                                                 m_ibOffset;
-                const DWORD                                                 m_cbData;
-                const BYTE* const                                           m_pbData;
-                const IFileAPI::PfnIOComplete                               m_pfnIOComplete;
-                const IFileAPI::PfnIOHandoff                                m_pfnIOHandoff;
-                const DWORD_PTR                                             m_keyIOComplete;
-                IFileAPI*                                                   m_pfapiInner;
-                void*                                                       m_pvIOContext;
-                const HRT                                                   m_hrtStart;
-                BOOL                                                        m_fIOHandoffCalled;
-                BOOL                                                        m_fIOCompleteCalled;
-                int                                                         m_cref;
+                static ERR ErrRegister( _In_ CIOComplete* const piocomplete )
+                {
+                    ERR                     err     = JET_errSuccess;
+                    CIOCompleteKey          key( piocomplete );
+                    CIOCompleteEntry        entry( piocomplete );
+                    CIOCompleteHash::CLock  lock;
+                    BOOL                    fLocked = fFalse;
+
+                    Call( ErrEnsureInitIOCompleteHash() );
+
+                    s_iocompleteHash.WriteLockKey( key, &lock );
+                    fLocked = fTrue;
+                    Call( ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrInsertEntry( &lock, entry ) ) );
+
+                HandleError:
+                    if ( fLocked )
+                    {
+                        s_iocompleteHash.WriteUnlockKey( &lock );
+                    }
+                    return err;
+                }
+
+                static void Unregister( _In_ CIOComplete* const piocomplete )
+                {
+                    CIOCompleteHash::CLock  lock;
+                    CIOCompleteEntry        entry;
+
+                    s_iocompleteHash.WriteLockKey( CIOCompleteKey( piocomplete ), &lock );
+                    if ( ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrRetrieveEntry( &lock, &entry ) ) == JET_errSuccess )
+                    {
+                        piocomplete->m_ms.Partition();
+
+                        CallS( ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrDeleteEntry( &lock ) ) );
+                    }
+                    s_iocompleteHash.WriteUnlockKey( &lock );
+                }
+
+            private:
+
+                static CInitOnce< ERR, decltype( &ErrInitIOCompleteHash_ ), void* > s_initOnceIocompleteHash;
+                static CIOCompleteHash                                              s_iocompleteHash;
+
+                typename CInvasiveList<CIOComplete, OffsetOfILE>::CElement          m_ile;
+                const BOOL                                                          m_fIsHeapAlloc;
+                IFileAPI* const                                                     m_pfapi;
+                const QWORD                                                         m_ibOffset;
+                const DWORD                                                         m_cbData;
+                const BYTE* const                                                   m_pbData;
+                const IFileAPI::PfnIOComplete                                       m_pfnIOComplete;
+                const IFileAPI::PfnIOHandoff                                        m_pfnIOHandoff;
+                const DWORD_PTR                                                     m_keyIOComplete;
+                IFileAPI*                                                           m_pfapiInner;
+                void*                                                               m_pvIOContext;
+                const HRT                                                           m_hrtStart;
+                BOOL                                                                m_fIOHandoffCalled;
+                BOOL                                                                m_fIOCompleteCalled;
+                volatile int                                                        m_cref;
+                CMeteredSection                                                     m_ms;
         };
 
     protected:
@@ -415,37 +466,40 @@ class TFileWrapper  //  fw
                                     _In_                    const DWORD                     cbData,
                                     _Out_writes_( cbData )  BYTE* const                     pbData,
                                     _In_                    const OSFILEQOS                 grbitQOS,
-                                    _In_                    const IFileAPI::PfnIOComplete   pfnIOComplete,
-                                    _In_                    const DWORD_PTR                 keyIOComplete,
-                                    _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff,
-                                    _In_                    const VOID *                    pioreq,
+                                    _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                    _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                    _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
+                                    _In_opt_                const VOID *                    pioreq,
                                     _In_                    const BOOL                      fIOREQUsed,
                                     _In_                    const ERR                       errOriginal,
-                                    _In_                    CIOComplete* const              piocompleteOriginal = NULL );
+                                    _In_opt_                CIOComplete* const              piocompleteOriginal = NULL );
 
     protected:
 
-        I* const    m_piInner;
-        const BOOL  m_fReleaseOnClose;
+        I* const        m_piInner;
+        const BOOL      m_fReleaseOnClose;
+        volatile BOOL   m_fRegisteredIFilePerfAPI;
 };
 
 template< class I >
-CNestableCriticalSection TFileWrapper<I>::CIOComplete::s_ncrit( CLockBasicInfo( CSyncBasicInfo( "TFileWrapper<I>::CIOComplete::s_ncrit" ), rankFileWrapperIOComplete, 0 ) );
+CInitOnce< ERR, decltype( &TFileWrapper<I>::CIOComplete::ErrInitIOCompleteHash_ ), void* > TFileWrapper<I>::CIOComplete::s_initOnceIocompleteHash;
 
 template< class I >
-CInvasiveList<typename TFileWrapper<I>::CIOComplete, TFileWrapper<I>::CIOComplete::OffsetOfILE> TFileWrapper<I>::CIOComplete::s_il;
+CIOCompleteHash TFileWrapper<I>::CIOComplete::s_iocompleteHash( rankIOCompleteHash );
 
 template< class I >
 TFileWrapper<I>::TFileWrapper( _In_ I* const pi )
     :   m_piInner( pi ),
-        m_fReleaseOnClose( fFalse )
+        m_fReleaseOnClose( fFalse ),
+        m_fRegisteredIFilePerfAPI( fFalse )
 {
 }
 
 template< class I >
 TFileWrapper<I>::TFileWrapper( _Inout_ I** const ppi )
     :   m_piInner( *ppi ),
-        m_fReleaseOnClose( fTrue )
+        m_fReleaseOnClose( fTrue ),
+        m_fRegisteredIFilePerfAPI( fFalse )
 {
     *ppi = NULL;
 }
@@ -564,7 +618,7 @@ ERR TFileWrapper<I>::ErrReserveIOREQ(   const QWORD     ibOffset,
 template< class I >
 VOID TFileWrapper<I>::ReleaseUnusedIOREQ( VOID * pioreq )
 {
-    return m_piInner->ReleaseUnusedIOREQ( pioreq );
+    m_piInner->ReleaseUnusedIOREQ( pioreq );
 }
 
 template< class I >
@@ -584,28 +638,16 @@ ERR TFileWrapper<I>::ErrIORead( const TraceContext&                 tc,
 
     if ( pfnIOComplete || pfnIOHandoff )
     {
-        if ( pfnIOComplete )
-        {
-            Alloc( piocomplete = new CIOComplete(   fTrue,
-                                                    this,
-                                                    ibOffset,
-                                                    cbData, 
-                                                    pbData,
-                                                    pfnIOComplete,
-                                                    pfnIOHandoff,
-                                                    keyIOComplete ) );
-        }
-        else
-        {
-            piocomplete = new( _alloca( sizeof( CIOComplete ) ) ) CIOComplete(  fFalse,
-                                                                                this,
-                                                                                ibOffset,
-                                                                                cbData, 
-                                                                                pbData, 
-                                                                                pfnIOComplete,
-                                                                                pfnIOHandoff, 
-                                                                                keyIOComplete );
-        }
+        const BOOL fHeap = pfnIOComplete != NULL;
+        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+            CIOComplete(    fHeap,
+                            this,
+                            ibOffset,
+                            cbData, 
+                            pbData, 
+                            pfnIOComplete,
+                            pfnIOHandoff, 
+                            keyIOComplete ) );
     }
 
     fIOREQUsed = fTrue;
@@ -654,28 +696,16 @@ ERR TFileWrapper<I>::ErrIOWrite(    const TraceContext&             tc,
 
     if ( pfnIOComplete || pfnIOHandoff )
     {
-        if ( pfnIOComplete )
-        {
-            Alloc( piocomplete = new CIOComplete(   fTrue,
-                                                    this, 
-                                                    ibOffset, 
-                                                    cbData,
-                                                    pbData, 
-                                                    pfnIOComplete, 
-                                                    pfnIOHandoff,
-                                                    keyIOComplete ) );
-        }
-        else
-        {
-            piocomplete = new( _alloca( sizeof( CIOComplete ) ) ) CIOComplete(  fFalse, 
-                                                                                this, 
-                                                                                ibOffset,
-                                                                                cbData,
-                                                                                pbData,
-                                                                                pfnIOComplete, 
-                                                                                pfnIOHandoff, 
-                                                                                keyIOComplete );
-        }
+        const BOOL fHeap = pfnIOComplete != NULL;
+        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+            CIOComplete(    fHeap,
+                            this, 
+                            ibOffset,
+                            cbData,
+                            pbData,
+                            pfnIOComplete, 
+                            pfnIOHandoff, 
+                            keyIOComplete ) );
     }
 
     Call( m_piInner->ErrIOWrite(    tc,
@@ -743,14 +773,20 @@ ERR TFileWrapper<I>::ErrMMFree( void* const pvMap )
 template< class I >
 VOID TFileWrapper<I>::RegisterIFilePerfAPI( IFilePerfAPI * const pfpapi )
 {
-    return m_piInner->RegisterIFilePerfAPI( pfpapi );
+    if ( AtomicCompareExchange( (LONG*)&m_fRegisteredIFilePerfAPI, fFalse, fTrue ) )
+    {
+        delete pfpapi;
+        return;
+    }
+
+    m_piInner->RegisterIFilePerfAPI( pfpapi );
 }
 
 template< class I >
 VOID TFileWrapper<I>::UpdateIFilePerfAPIEngineFileTypeId(   _In_ const DWORD    dwEngineFileType,
                                                             _In_ const QWORD    qwEngineFileId )
 {
-    return m_piInner->UpdateIFilePerfAPIEngineFileTypeId( dwEngineFileType, qwEngineFileId );
+    m_piInner->UpdateIFilePerfAPIEngineFileTypeId( dwEngineFileType, qwEngineFileId );
 }
 
 template< class I >
@@ -792,7 +828,7 @@ QWORD TFileWrapper<I>::QwEngineFileId() const
 #endif
 
 template< class I >
-TICK TFileWrapper<I>::DtickIOElapsed( void* const pvIOContext ) const
+TICK TFileWrapper<I>::DtickIOElapsed( void* const pvIOContext )
 {
     CIOComplete* const piocomplete = (CIOComplete*)pvIOContext;
     return piocomplete->DtickIOElapsed();
@@ -804,20 +840,20 @@ ERR TFileWrapper<I>::HandleReservedIOREQ(   _In_                    const TraceC
                                             _In_                    const DWORD                     cbData,
                                             _Out_writes_( cbData )  BYTE* const                     pbData,
                                             _In_                    const OSFILEQOS                 grbitQOS,
-                                            _In_                    const IFileAPI::PfnIOComplete   pfnIOComplete,
-                                            _In_                    const DWORD_PTR                 keyIOComplete,
-                                            _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff,
-                                            _In_                    const VOID *                    pioreq,
+                                            _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                            _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                            _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
+                                            _In_opt_                const VOID *                    pioreq,
                                             _In_                    const BOOL                      fIOREQUsed,
                                             _In_                    const ERR                       errOriginal,
-                                            _In_                    CIOComplete* const              piocompleteOriginal )
+                                            _In_opt_                CIOComplete* const              piocompleteOriginal )
 {
     ERR             err         = errOriginal;
     CIOComplete*    piocomplete = piocompleteOriginal;
 
     //  as for the COSFile::ErrIORead impl, you cannot pass a pioreq for a sync read
 
-    Enforce( pfnIOComplete || !pioreq );
+    Assert( pfnIOComplete || !pioreq );
 
     if ( pioreq && !fIOREQUsed )
     {
@@ -832,20 +868,22 @@ ERR TFileWrapper<I>::HandleReservedIOREQ(   _In_                    const TraceC
         //
         //  CONSIDER:  JET_errDiskIO is patchable so perhaps we should use another error
 
-        Enforce( err != errDiskTilt );
+        Assert( err != errDiskTilt );
 
         err = err == JET_errOutOfMemory ? ErrERRCheck( JET_errDiskIO ) : err;
 
         if ( !piocompleteOriginal )
         {
-            piocomplete = new( _alloca( sizeof( CIOComplete ) ) ) CIOComplete(  fFalse,
-                                                                                this,
-                                                                                ibOffset,
-                                                                                cbData,
-                                                                                pbData,
-                                                                                pfnIOComplete,
-                                                                                pfnIOHandoff,
-                                                                                keyIOComplete );
+            const BOOL fHeap = fFalse;
+            piocomplete = new( _malloca( sizeof( CIOComplete ) ) )
+                CIOComplete(    fHeap,
+                                this,
+                                ibOffset,
+                                cbData,
+                                pbData,
+                                pfnIOComplete,
+                                pfnIOHandoff,
+                                keyIOComplete );
         }
 
         piocomplete->IOComplete( err, tc, grbitQOS );
@@ -873,4 +911,6 @@ class CFileWrapper : public TFileWrapper<IFileAPI>
         }
 
         virtual ~CFileWrapper() {}
+
+        static void Cleanup() { CIOComplete::Cleanup(); }
 };

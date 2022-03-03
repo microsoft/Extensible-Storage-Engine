@@ -14,12 +14,28 @@ namespace Internal
             namespace Interop
             {
                 template<class TM, class TN, class TW>
-                public ref class Base : public SafeHandle
+                public ref class Base : public MarshalByRefObject
                 {
                     public:
 
+                        ~Base()
+                        {
+                            this->!Base();
+                        }
+
+                        property IntPtr Handle
+                        {
+                            IntPtr get()
+                            {
+                                return this->handle;
+                            }
+                        }
+
+                    internal:
+
                         Base( TM^ tm )
-                            :   SafeHandle( (IntPtr)( new TW( tm ) ), true ),
+                            :   handle( (IntPtr)( new TW( tm ) ) ),
+                                isOwner( true ),
                                 isWrapper( true )
                         {
                             if ( IsInvalid )
@@ -29,24 +45,18 @@ namespace Internal
                         }
 
                         Base( TN** ppi )
-                            :   SafeHandle( (IntPtr)*ppi, true ),
+                            :   handle( (IntPtr)*ppi ),
+                                isOwner( true ),
                                 isWrapper( false )
                         {
                             *ppi = NULL;
                         }
 
                         Base( TN* pi )
-                            :   SafeHandle( (IntPtr)pi, false ),
+                            :   handle( (IntPtr)pi ),
+                                isOwner( false ),
                                 isWrapper( false )
                         {
-                        }
-
-                        property bool IsInvalid
-                        {
-                            virtual bool get() override
-                            {
-                                return ( IntPtr::Zero == this->handle );
-                            }
                         }
 
                         property TN* Pi
@@ -61,25 +71,50 @@ namespace Internal
 
                     protected:
 
-                        virtual bool ReleaseHandle() override
+                        !Base()
                         {
-                            if ( this->isWrapper )
+                            if ( !IsInvalid )
                             {
-                                TW* wrapper = (TW*)(void*)this->handle;
-                                this->handle = IntPtr::Zero;
-                                delete wrapper;
+                                ReleaseHandle();
                             }
-                            else
-                            {
-                                TN* pi = (TN*)(void*)this->handle;
-                                this->handle = IntPtr::Zero;
-                                delete pi;
-                            }
-                            return true;
                         }
 
                     private:
 
+                        property bool IsInvalid
+                        {
+                            bool get()
+                            {
+                                return this->handle == IntPtr::Zero;
+                            }
+                        }
+
+                        void ReleaseHandle()
+                        {
+                            if ( !this->IsInvalid )
+                            {
+                                if ( this->isOwner )
+                                {
+                                    if ( this->isWrapper )
+                                    {
+                                        TW* wrapper = (TW*)(void*)this->handle;
+                                        delete wrapper;
+                                    }
+                                    else
+                                    {
+                                        TN* pi = (TN*)(void*)this->handle;
+                                        delete pi;
+                                    }
+                                }
+
+                                this->handle = IntPtr::Zero;
+                            }
+                        }
+
+                    private:
+
+                        IntPtr handle;
+                        const bool isOwner;
                         const bool isWrapper;
                 };
             }

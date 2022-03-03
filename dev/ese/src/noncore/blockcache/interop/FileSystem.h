@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( IFileSystem^% fs, IFileSystemAPI** const ppfsapi )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileSystem,IFileSystemAPI,CFileSystemWrapper<IFileSystem,IFileSystemAPI>>( fs, ppfsapi );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<IFileSystem,IFileSystemAPI,CFileSystemWrapper<IFileSystem,IFileSystemAPI>, FileSystemRemotable>( fs, ppfsapi );
                         }
 
                     public:

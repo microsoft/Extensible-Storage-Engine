@@ -42,7 +42,7 @@ namespace Internal
                         FileSerial fileserial,
                         FileQOS fileQOS,
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data );
+                        MemoryStream^ data );
 
                     /// <summary>
                     /// Creates a new cache.
@@ -132,7 +132,7 @@ namespace Internal
                         FileId fileid,
                         FileSerial fileserial,
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data,
+                        MemoryStream^ data,
                         FileQOS fileQOS,
                         CachingPolicy cachingPolicy,
                         Complete^ complete );
@@ -170,7 +170,7 @@ namespace Internal
                         FileId fileid,
                         FileSerial fileserial,
                         Int64 offsetInBytes,
-                        ArraySegment<byte> data,
+                        MemoryStream^ data,
                         FileQOS fileQOS,
                         CachingPolicy cachingPolicy,
                         Complete^ complete );

@@ -874,6 +874,7 @@ typedef enum
     JET_tracetagBlockCache,
     JET_tracetagRBS,
     JET_tracetagRBSCleaner,
+    JET_tracetagBlockCacheOperations,
 
     //  Add all new tracetags here, must be in order ...
 #endif // JET_VERSION >= 0x0A01

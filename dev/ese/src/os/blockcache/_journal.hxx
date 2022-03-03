@@ -24,7 +24,9 @@ class TJournal  //  j
 
         ERR ErrGetProperties(   _Out_opt_ JournalPosition* const    pjposReplay,
                                 _Out_opt_ JournalPosition* const    pjposDurableForWriteBack,
-                                _Out_opt_ JournalPosition* const    pjposDurable ) override;
+                                _Out_opt_ JournalPosition* const    pjposDurable,
+                                _Out_opt_ JournalPosition* const    pjposAppend,
+                                _Out_opt_ JournalPosition* const    pjposFull ) override;
 
         ERR ErrVisitEntries(    _In_ const IJournal::PfnVisitEntry  pfnVisitEntry,
                                 _In_ const DWORD_PTR                keyVisitEntry ) override;
@@ -76,11 +78,13 @@ class TJournal  //  j
 
                 SegmentPosition Spos() const { return m_spos; }
                 DWORD CbEntryAppended() const { return m_cbEntryAppended; }
+                ERR ErrStatus() const { return m_errSeal; }
 
                 ERR ErrAppendRegion(    _In_                const size_t            cjb,
                                         _In_reads_( cjb )   CJournalBuffer* const   rgjb,
                                         _In_                const DWORD             cbMin,
                                         _Out_               RegionPosition* const   prpos,
+                                        _Out_               RegionPosition* const   prposEnd,
                                         _Out_               DWORD* const            pcbActual );
 
                 ERR ErrBeginSeal();
@@ -161,6 +165,7 @@ class TJournal  //  j
                                     _In_ IJournalSegment* const pjs );
 
                 static BOOL FVisitRegion_(  _In_ const RegionPosition   rpos,
+                                            _In_ const RegionPosition   rposEnd,
                                             _In_ const CJournalBuffer   jb,
                                             _In_ const DWORD_PTR        keyVisitRegion )
                 {
@@ -168,10 +173,11 @@ class TJournal  //  j
                     Unused( pfnVisitRegion );
 
                     CEntryVisitor* const pev = (CEntryVisitor*)keyVisitRegion;
-                    return pev->FVisitRegion( rpos, jb );
+                    return pev->FVisitRegion( rpos, rposEnd, jb );
                 }
 
                 BOOL FVisitRegion(  _In_ const RegionPosition   rpos,
+                                    _In_ const RegionPosition   rposEnd,
                                     _In_ const CJournalBuffer   jb );
 
 
@@ -225,6 +231,10 @@ class TJournal  //  j
 
     private:
 
+        ERR ErrIsFull( _Out_ BOOL* const pfFull );
+
+        void WaitForSealAndFlush( _In_ const SegmentPosition sposSeal, _In_ const SegmentPosition sposFlush );
+
         void WaitForAppend( _In_ const QWORD cbEntry, _In_ CWaiter* const pwaiterForAppend );
         void PrepareToWaitForAppend( _In_ const QWORD cbEntry, _In_ CWaiter* const pwaiterForAppend );
         void ReleaseAppender(   _In_    const QWORD    cbEntry,
@@ -244,54 +254,70 @@ class TJournal  //  j
         void ReleaseFlusher( _In_ CWaiter* const pwaiterToFlush );
         void PrepareToReleaseNextFlusher( _Out_ CWaiter** const ppwaiterNextFlusher );
 
-        ERR ErrGetAppendSegment( _In_ BOOL fForceNewSegment, _Out_ CSegment** const ppsegment );
+        ERR ErrGetAppendSegment( _In_ const BOOL fForceNewSegment, _Out_ CSegment** const ppsegment );
 
-        void Sealed( _In_ const ERR err, _In_ CSegment* const psegment );
+        void Sealed( _In_ CSegment* const psegment );
 
         void ReleaseSegments( _In_ CInvasiveList<CSegment, CSegment::OffsetOfILE>* const pil );
 
     private:
 
-        enum { cbSegment = sizeof( CJournalSegmentHeader ) };
+        IJournalSegmentManager* const                           m_pjsm;
+        const size_t                                            m_cbCache;
+        const int                                               m_pctCacheAvailWriteBack;
+        CCriticalSection                                        m_crit;
+        ERR                                                     m_err;
+        SegmentPosition                                         m_sposReplay;
+        SegmentPosition                                         m_sposDurableForWriteback;
+        SegmentPosition                                         m_sposDurable;
+        SegmentPosition                                         m_sposSealed;
+        SegmentPosition                                         m_sposAppend;
+        QWORD                                                   m_cb;
+        BOOL                                                    m_fAppending;
+        BOOL                                                    m_fFull;
 
-        IJournalSegmentManager* const                   m_pjsm;
-        const size_t                                    m_cbCache;
-        const int                                       m_pctCacheAvailWriteBack;
-        CCriticalSection                                m_crit;
-        ERR                                             m_err;
-        SegmentPosition                                 m_sposReplay;
-        SegmentPosition                                 m_sposDurableForWriteback;
-        SegmentPosition                                 m_sposDurable;
-        SegmentPosition                                 m_sposSealed;
-        SegmentPosition                                 m_sposAppend;
-        BOOL                                            m_fAppending;
+        CCountedInvasiveList<CSegment, CSegment::OffsetOfILE>   m_ilSegmentsToSeal;
+        CCountedInvasiveList<CSegment, CSegment::OffsetOfILE>   m_ilSegmentsSealStarting;
+        CCountedInvasiveList<CSegment, CSegment::OffsetOfILE>   m_ilSegmentsSealPending;
+        CCountedInvasiveList<CSegment, CSegment::OffsetOfILE>   m_ilSegmentsSealCompleted;
+        CCountedInvasiveList<CSegment, CSegment::OffsetOfILE>   m_ilSegmentsSealed;
+        CCountedInvasiveList<CSegment, CSegment::OffsetOfILE>   m_ilSegmentsSealFailed;
 
-        CInvasiveList<CSegment, CSegment::OffsetOfILE>  m_ilSegmentsToSeal;
-        CInvasiveList<CSegment, CSegment::OffsetOfILE>  m_ilSegmentsSealPending;
-        CInvasiveList<CSegment, CSegment::OffsetOfILE>  m_ilSegmentsSealFailed;
-        CInvasiveList<CSegment, CSegment::OffsetOfILE>  m_ilSegmentsSealed;
+        CCountedInvasiveList<CWaiter, CWaiter::OffsetOfILE>     m_ilWaitersForSeal;
+        CWaiter*                                                m_pwaiterSealer;
+        SegmentPosition                                         m_sposSealPending;
+        CWaiter*                                                m_pwaiterNextSealer;
 
-        CInvasiveList<CWaiter, CWaiter::OffsetOfILE>    m_ilWaitersForSeal;
-        CWaiter*                                        m_pwaiterSealer;
-        SegmentPosition                                 m_sposSealPending;
-        CWaiter*                                        m_pwaiterNextSealer;
+        CCountedInvasiveList<CWaiter, CWaiter::OffsetOfILE>     m_ilWaitersForAppend;
+        CWaiter*                                                m_pwaiterAppender;
 
-        CInvasiveList<CWaiter, CWaiter::OffsetOfILE>    m_ilWaitersForAppend;
-        CWaiter*                                        m_pwaiterAppender;
-
-        CInvasiveList<CWaiter, CWaiter::OffsetOfILE>    m_ilWaitersForFlush;
-        CWaiter*                                        m_pwaiterFlusher;
-        SegmentPosition                                 m_sposDurablePending;
-        CWaiter*                                        m_pwaiterNextFlusher;
+        CCountedInvasiveList<CWaiter, CWaiter::OffsetOfILE>     m_ilWaitersForFlush;
+        CWaiter*                                                m_pwaiterFlusher;
+        SegmentPosition                                         m_sposDurablePending;
+        CWaiter*                                                m_pwaiterNextFlusher;
 };
 
 template< class I  >
 INLINE TJournal<I>::~TJournal()
 {
+    m_crit.Enter();
+
+    const SegmentPosition sposSealPending = m_sposSealPending;
+    const SegmentPosition sposDurablePending = m_sposDurablePending;
+
+    WaitForSealAndFlush( sposSealPending, sposDurablePending );
+
+    Assert( m_ilSegmentsSealStarting.FEmpty() );
+    Assert( m_ilSegmentsSealPending.FEmpty() );
+
     ReleaseSegments( &m_ilSegmentsToSeal );
+    ReleaseSegments( &m_ilSegmentsSealStarting );
     ReleaseSegments( &m_ilSegmentsSealPending );
-    ReleaseSegments( &m_ilSegmentsSealFailed );
+    ReleaseSegments( &m_ilSegmentsSealCompleted );
     ReleaseSegments( &m_ilSegmentsSealed );
+    ReleaseSegments( &m_ilSegmentsSealFailed );
+
+    m_crit.Leave();
 
     delete m_pjsm;
 }
@@ -300,21 +326,30 @@ template< class I  >
 INLINE ERR TJournal<I>::ErrInit()
 {
     ERR             err         = JET_errSuccess;
+    SegmentPosition sposFirst   = sposInvalid;
     SegmentPosition sposReplay  = sposInvalid;
     SegmentPosition sposDurable = sposInvalid;
     SegmentPosition sposLast    = sposInvalid;
+    SegmentPosition sposFull    = sposInvalid;
 
     //  get the current replay and durable pointer from the segment manager
 
-    Call( m_pjsm->ErrGetProperties( &sposReplay, &sposDurable, &sposLast ) );
+    Call( m_pjsm->ErrGetProperties( &sposFirst, &sposReplay, &sposDurable, &sposLast, &sposFull ) );
 
     //  setup the journal to append after the last segment
 
     m_sposReplay = sposReplay;
     m_sposDurableForWriteback = sposDurable;
-    m_sposDurable = sposDurable;
+    m_sposDurable = sposLast;
+    m_sposDurablePending = m_sposDurable;
     m_sposSealed = sposLast;
+    m_sposSealPending = m_sposSealed;
     m_sposAppend = sposLast;
+    m_cb = sposFull - sposFirst;
+
+    //  determine if the journal is full
+
+    Call( ErrIsFull( &m_fFull ) );
 
 HandleError:
     return err;
@@ -323,11 +358,39 @@ HandleError:
 template< class I  >
 INLINE ERR TJournal<I>::ErrGetProperties(   _Out_opt_ JournalPosition* const    pjposReplay,
                                             _Out_opt_ JournalPosition* const    pjposDurableForWriteBack,
-                                            _Out_opt_ JournalPosition* const    pjposDurable )
+                                            _Out_opt_ JournalPosition* const    pjposDurable,
+                                            _Out_opt_ JournalPosition* const    pjposAppend,
+                                            _Out_opt_ JournalPosition* const    pjposFull )
 {
+    ERR             err         = JET_errSuccess;
+    BOOL            fLocked     = fFalse;
+    SegmentPosition sposFull    = sposInvalid;
+
+    if ( pjposReplay )
+    {
+        *pjposReplay = jposInvalid;
+    }
+    if ( pjposDurableForWriteBack )
+    {
+        *pjposDurableForWriteBack = jposInvalid;
+    }
+    if ( pjposDurable )
+    {
+        *pjposDurable = jposInvalid;
+    }
+    if ( pjposAppend )
+    {
+        *pjposAppend = jposInvalid;
+    }
+    if ( pjposFull )
+    {
+        *pjposFull = jposInvalid;
+    }
+
     //  protect our state
 
     m_crit.Enter();
+    fLocked = fTrue;
 
     if ( pjposReplay )
     {
@@ -342,17 +405,56 @@ INLINE ERR TJournal<I>::ErrGetProperties(   _Out_opt_ JournalPosition* const    
         //  double failure case (torn write + corruption in previous flush range) then the recovered journal may be
         //  behind the state it is protecting.  see TJournalSegmentManager<I>::ErrFindLastSegmentWithBinarySearch
 
-        *pjposDurableForWriteBack = (JournalPosition)( m_sposDurableForWriteback + cbSegment - 1 );
+        *pjposDurableForWriteBack = (JournalPosition)( m_sposDurableForWriteback + cbJournalSegment - 1 );
     }
 
     if ( pjposDurable )
     {
-        *pjposDurable = (JournalPosition)( m_sposDurable + cbSegment - 1 );
+        *pjposDurable = (JournalPosition)( m_sposDurable + cbJournalSegment - 1 );
     }
 
-    m_crit.Leave();
+    if ( pjposAppend )
+    {
+        *pjposAppend = m_sposAppend > m_sposDurable ? 
+            (JournalPosition)( m_sposAppend ) :
+            (JournalPosition)( m_sposAppend + cbJournalSegment );
+    }
 
-    return JET_errSuccess;
+    if ( pjposFull )
+    {
+        Call( m_pjsm->ErrGetProperties( NULL, NULL, NULL, NULL, &sposFull ) );
+        *pjposFull = (JournalPosition)( sposFull );
+    }
+
+HandleError:
+    if ( fLocked )
+    {
+        m_crit.Leave();
+    }
+    if ( err < JET_errSuccess )
+    {
+        if ( pjposReplay )
+        {
+            *pjposReplay = jposInvalid;
+        }
+        if ( pjposDurableForWriteBack )
+        {
+            *pjposDurableForWriteBack = jposInvalid;
+        }
+        if ( pjposDurable )
+        {
+            *pjposDurable = jposInvalid;
+        }
+        if ( pjposAppend )
+        {
+            *pjposAppend = jposInvalid;
+        }
+        if ( pjposFull )
+        {
+            *pjposFull = jposInvalid;
+        }
+    }
+    return err;
 }
 
 template< class I  >
@@ -376,7 +478,7 @@ INLINE ERR TJournal<I>::ErrRepair(  _In_    const JournalPosition   jposInvalida
 {
     ERR             err             = JET_errSuccess;
     BOOL            fLocked         = fFalse;
-    SegmentPosition sposInvalidate  = (SegmentPosition)( rounddn( (QWORD)jposInvalidate, cbSegment ) );
+    SegmentPosition sposInvalidate  = (SegmentPosition)( rounddn( (QWORD)jposInvalidate, cbJournalSegment ) );
 
     *pjposInvalidated = jposInvalid;
 
@@ -391,11 +493,11 @@ INLINE ERR TJournal<I>::ErrRepair(  _In_    const JournalPosition   jposInvalida
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
-    if ( sposInvalidate <= m_sposDurable )
+    if ( sposInvalidate <= m_sposDurableForWriteback )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
-    if ( sposInvalidate > m_sposAppend + cbSegment )
+    if ( sposInvalidate > m_sposAppend + cbJournalSegment )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
@@ -410,8 +512,11 @@ INLINE ERR TJournal<I>::ErrRepair(  _In_    const JournalPosition   jposInvalida
     //  configure the journal to start appending at the invalidated segment.  the repair will not actually happen until
     //  the first newly appended segment is sealed
 
-    m_sposSealed = sposInvalidate - cbSegment;
-    m_sposAppend = m_sposSealed;
+    m_sposDurable = sposInvalidate - cbJournalSegment;
+    m_sposDurablePending = m_sposDurable;
+    m_sposSealed = m_sposDurable;
+    m_sposSealPending = m_sposSealed;
+    m_sposAppend = m_sposDurable;
 
     //  return the actual invalidation position
 
@@ -440,7 +545,7 @@ INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t        
 {
     ERR                     err                 = JET_errSuccess;
     const size_t            cjbT                = cjb + 1;
-    CJournalBuffer* const   rgjbT               = (CJournalBuffer*)_alloca( cjbT * sizeof( CJournalBuffer ) );
+    CJournalBuffer* const   rgjbT               = (CJournalBuffer*)_malloca( cjbT * sizeof( CJournalBuffer ) );
     CJournalEntryFragment   jef                 = CJournalEntryFragment( fTrue, 0 );
     CJournalBuffer          jb                  = CJournalBuffer( sizeof( jef ), (const BYTE*)&jef );
     QWORD                   cbEntry             = 0;
@@ -451,8 +556,10 @@ INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t        
     DWORD                   cbEntryAppended     = dwMax;
     BOOL                    fForceNewSegment    = fFalse;
     RegionPosition          rpos                = rposInvalid;
+    RegionPosition          rposEnd             = rposInvalid;
     DWORD                   cbFragment          = 0;
     JournalPosition         jpos                = jposInvalid;
+    JournalPosition         jposEnd             = jposInvalid;
     DWORD                   cbEntryAppendedRem  = 0;
     CWaiter*                pwaiterNextAppender = NULL;
     CWaiter*                pwaiterNextSealer   = NULL;
@@ -486,6 +593,15 @@ INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t        
 
     WaitForAppend( cbEntry, &waiterForAppend );
 
+    //  if the journal is full then only accept zero length appends.  this serves as an ack of the journal full
+    //  condition and supports advancement of the durable pointer without the risk of writing additional state
+    //  that must also be flushed to empty the journal
+
+    if ( m_fFull && cbEntry )
+    {
+        Error( ErrERRCheck( JET_errDiskFull ) );
+    }
+
     //  if the journal is down then reject updates
 
     Call( m_err );
@@ -504,7 +620,7 @@ INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t        
 
         //  append this fragment but only if the entire journal entry fragment header fits
 
-        Call( psegment->ErrAppendRegion( cjbT, rgjbT, sizeof( jef ), &rpos, &cbFragment ) );
+        Call( psegment->ErrAppendRegion( cjbT, rgjbT, sizeof( jef ), &rpos, &rposEnd, &cbFragment ) );
 
         cbEntryAppended = cbFragment == 0 ? 0 : cbFragment - sizeof( jef );
 
@@ -524,6 +640,10 @@ INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t        
 
         jpos = ibEntry == 0 ? (JournalPosition)rpos : jpos;
 
+        //  remember the last journal position we use
+
+        jposEnd = (JournalPosition)rposEnd;
+
         //  we will need a new append segment next time if we couldn't append the entire payload
 
         fForceNewSegment = cbEntryAppended < cbEntry - ibEntry;
@@ -532,7 +652,7 @@ INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t        
     //  return the journal position of the entry that was appended
 
     *pjpos = jpos;
-    *pjposEnd = (JournalPosition)( rpos + cbEntryAppended - 1 );
+    *pjposEnd = jposEnd;
 
 HandleError:
     if ( fLocked )
@@ -548,6 +668,7 @@ HandleError:
     {
         pwaiterNextSealer->Complete();
     }
+    _freea( rgjbT );
     if ( err < JET_errSuccess )
     {
         *pjpos = jposInvalid;
@@ -573,31 +694,16 @@ INLINE ERR TJournal<I>::ErrFlush()
 
     const SegmentPosition spos = m_sposAppend;
 
-    //  prepare to wait for that segment to be sealed
+    //  wait for this segment to be sealed and flushed
 
-    CWaiter waiterToSeal( spos );
-    CWaiter waiterForSeal( spos );
-    PrepareToWaitForSeal( &waiterToSeal, &waiterForSeal );
-
-    //  prepare to wait for flush
-
-    CWaiter waiterToFlush( spos );
-    CWaiter waiterForFlush( spos );
-    PrepareToWaitForFlush( &waiterToFlush , &waiterForFlush );
-
-    //  wait for the segment to be sealed
-
-    WaitForSeal( &waiterToSeal, &waiterForSeal );
-
-    //  wait for the segment to be flushed
-
-    WaitForFlush( &waiterToFlush, &waiterForFlush );
+    WaitForSealAndFlush( spos, spos );
 
     //  if our segment is not durable then indicate failure
 
     if ( m_sposDurable < spos )
     {
-        Call( m_err >= JET_errSuccess ? ErrERRCheck( JET_errInternalError ) : m_err );
+        Call( m_err );
+        BlockCacheInternalError( "JournalFlushFailure" );
     }
 
 HandleError:
@@ -613,7 +719,7 @@ INLINE ERR TJournal<I>::ErrTruncate( _In_ const JournalPosition jposReplay )
 {
     ERR             err         = JET_errSuccess;
     BOOL            fLocked     = fFalse;
-    SegmentPosition sposReplay = (SegmentPosition)( rounddn( (QWORD)jposReplay, cbSegment ) );
+    SegmentPosition sposReplay = (SegmentPosition)( rounddn( (QWORD)jposReplay, cbJournalSegment ) );
 
     //  protect our state
 
@@ -650,7 +756,7 @@ HandleError:
 template< class I  >
 INLINE TJournal<I>::TJournal( _Inout_ IJournalSegmentManager** const  ppjsm, _In_ const size_t cbCache )
     :   m_pjsm( *ppjsm ),
-        m_cbCache( max( cbSegment, cbCache ) ),
+        m_cbCache( max( cbJournalSegment, cbCache ) ),
         m_pctCacheAvailWriteBack( 50 ),
         m_crit( CLockBasicInfo( CSyncBasicInfo( "TJournal<I>::m_crit" ), rankJournalAppend, 0 ) ),
         m_err( JET_errSuccess ),
@@ -659,7 +765,9 @@ INLINE TJournal<I>::TJournal( _Inout_ IJournalSegmentManager** const  ppjsm, _In
         m_sposDurable( sposInvalid ),
         m_sposSealed( sposInvalid ),
         m_sposAppend( sposInvalid ),
+        m_cb( 0 ),
         m_fAppending( fFalse ),
+        m_fFull( fFalse ),
         m_pwaiterSealer( NULL ),
         m_sposSealPending( sposInvalid ),
         m_pwaiterNextSealer( NULL ),
@@ -676,11 +784,12 @@ INLINE ERR TJournal<I>::CSegment::ErrAppendRegion(  _In_                const si
                                                     _In_reads_( cjb )   CJournalBuffer* const   rgjb,
                                                     _In_                const DWORD             cbMin,
                                                     _Out_               RegionPosition* const   prpos,
+                                                    _Out_               RegionPosition* const   prposEnd,
                                                     _Out_               DWORD* const            pcbActual )
 {
     //  perform the append
 
-    ERR err = m_pjs->ErrAppendRegion( cjb, rgjb, cbMin, prpos, pcbActual );
+    ERR err = m_pjs->ErrAppendRegion( cjb, rgjb, cbMin, prpos, prposEnd, pcbActual );
 
     //  track how much entry payload was appended
 
@@ -723,7 +832,7 @@ INLINE void TJournal<I>::CSegment::Sealed( _In_ const ERR err )
 {
     m_errSeal = m_errSeal >= JET_errSuccess ? err : m_errSeal;
 
-    m_pj->Sealed( m_errSeal, this );
+    m_pj->Sealed( this );
 
     m_sigSeal.Set();
 }
@@ -755,7 +864,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitSegment(  _In_ const SegmentPositi
     if ( errValidation < JET_errSuccess )
     {
         SegmentPosition sposDurable = sposInvalid;
-        Call( m_pjsm->ErrGetProperties( NULL, &sposDurable, NULL ) );
+        Call( m_pjsm->ErrGetProperties( NULL, NULL, &sposDurable, NULL, NULL ) );
 
         if ( spos <= sposDurable )
         {
@@ -785,6 +894,7 @@ HandleError:
 
 template< class I  >
 INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPosition   rpos,
+                                                        _In_ const RegionPosition   rposEnd,
                                                         _In_ const CJournalBuffer   jb )
 {
     ERR                             err         = JET_errSuccess;
@@ -796,7 +906,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
 
     if ( jb.Cb() < sizeof( *pef ) )
     {
-        Error( ErrERRCheck( JET_errInternalError ) );
+        BlockCacheInternalError( "JournalFragmentTooSmall" );
     }
 
     //  if this is the first fragment of a journal entry then remember its region position and size
@@ -820,7 +930,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
 
     if ( pef->CbEntryRemaining() != m_cbEntryRem )
     {
-        Error( ErrERRCheck( JET_errInternalError ) );
+        BlockCacheInternalError( "JournalFragmentInvalidSequence" );
     }
 
     //  compute the size of the fragment and ensure we have the right amount of payload
@@ -828,7 +938,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
     cbFragment = jb.Cb() - sizeof( *pef );
     if ( cbFragment > m_cbEntryRem )
     {
-        Error( ErrERRCheck( JET_errInternalError ) );
+        BlockCacheInternalError( "JournalFragmentInvalidSize" );
     }
 
     //  ensure we have a buffer large enough to accumulate this entry
@@ -855,7 +965,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
     if ( m_cbEntryRem == 0 )
     {
         m_pfnVisitEntry(    m_jpos, 
-                            (JournalPosition)( rpos + cbFragment - 1 ),
+                            (JournalPosition)rposEnd,
                             CJournalBuffer( m_cbEntry, m_jb.Rgb() ),
                             m_keyVisitEntry );
     }
@@ -864,6 +974,70 @@ HandleError:
     delete[] rgb;
     m_err = m_err >= JET_errSuccess ? err : m_err;
     return m_err >= JET_errSuccess;
+}
+
+template<class I>
+ERR TJournal<I>::ErrIsFull( _Out_ BOOL* const pfFull )
+{
+    ERR             err         = JET_errSuccess;
+    SegmentPosition sposFirst   = sposInvalid;
+    SegmentPosition sposLast    = sposInvalid;
+    QWORD           cbTotal     = 0;
+    QWORD           cbUsed      = 0;
+    QWORD           cbAvailable = 0;
+    BOOL            fFull       = fFalse;
+
+    *pfFull = fFalse;
+
+    //  get the current replay and durable pointer from the segment manager
+
+    Call( m_pjsm->ErrGetProperties( &sposFirst, NULL, NULL, &sposLast, NULL ) );
+
+    //  determine if the journal is full
+
+    cbTotal = m_cb;
+    cbUsed = sposLast - sposFirst + cbJournalSegment;
+    cbAvailable = cbTotal - cbUsed;
+
+    fFull = cbAvailable <= cbJournalFull;
+
+    //  return the result
+
+    if ( fFull )
+    {
+        *pfFull = fTrue;
+    }
+
+HandleError:
+    if ( err < JET_errSuccess )
+    {
+        *pfFull = fFalse;
+    }
+    return err;
+}
+
+template< class I >
+void TJournal<I>::WaitForSealAndFlush( _In_ const SegmentPosition sposSeal, _In_ const SegmentPosition sposFlush )
+{
+    //  prepare to wait for that segment to be sealed
+
+    CWaiter waiterToSeal( sposSeal );
+    CWaiter waiterForSeal( sposSeal );
+    PrepareToWaitForSeal( &waiterToSeal, &waiterForSeal );
+
+    //  prepare to wait for flush
+
+    CWaiter waiterToFlush( sposFlush );
+    CWaiter waiterForFlush( sposFlush );
+    PrepareToWaitForFlush( &waiterToFlush, &waiterForFlush );
+
+    //  wait for the segment to be sealed
+
+    WaitForSeal( &waiterToSeal, &waiterForSeal );
+
+    //  wait for the segment to be flushed
+
+    WaitForFlush( &waiterToFlush, &waiterForFlush );
 }
 
 template< class I >
@@ -896,22 +1070,28 @@ void TJournal<I>::WaitForAppend( _In_ const QWORD cbEntry, _In_ CWaiter* const p
     //  compute the size of the append queue
 
     const size_t cbEntryAppended = m_ilSegmentsToSeal.FEmpty() ? 0 : m_ilSegmentsToSeal.NextMost()->CbEntryAppended();
-    const QWORD cbEntryAppendQ = roundup( cbEntryAppended + cbEntry, cbSegment );
+    const QWORD cbEntryAppendQ = roundup( cbEntryAppended + cbEntry, cbJournalSegment );
 
     //  compute the segment that should be sealed to make progress on writing our cache but is still below our maximum
-    //  cache size
+    //  cache size.  we should avoid write back on the append segment
 
-    const size_t cbCacheAvailWriteBack = rounddn( m_cbCache * m_pctCacheAvailWriteBack / 100, cbSegment );
-    const SegmentPosition sposWriteBack = m_sposAppend + cbEntryAppendQ - cbCacheAvailWriteBack;
+    const size_t cbCacheAvailWriteBack = rounddn( m_cbCache * m_pctCacheAvailWriteBack / 100, cbJournalSegment );
+    const SegmentPosition sposWriteBack = min(  m_sposAppend - cbJournalSegment,
+                                                m_sposAppend + cbEntryAppendQ >= (SegmentPosition)cbCacheAvailWriteBack ?
+                                                    m_sposAppend + cbEntryAppendQ - cbCacheAvailWriteBack :
+                                                    (SegmentPosition)0 );
 
     //  compute the segment that must be sealed before we have enough room to append this entry in the cache
 
-    const size_t cbCache = rounddn( m_cbCache, cbSegment );
-    const SegmentPosition sposFull = min( m_sposAppend, m_sposAppend + cbEntryAppendQ - cbCache );
+    const size_t cbCache = rounddn( m_cbCache, cbJournalSegment );
+    const SegmentPosition sposFull = min(   m_sposAppend,
+                                            m_sposAppend + cbEntryAppendQ >= (SegmentPosition)cbCache ?
+                                                m_sposAppend + cbEntryAppendQ - cbCache :
+                                                (SegmentPosition)0 );
 
     //  prepare to wait for that segment to be sealed
 
-    CWaiter waiterToSeal( sposWriteBack );
+    CWaiter waiterToSeal( max( sposWriteBack, sposFull ) );
     CWaiter waiterForSeal( sposFull );
     PrepareToWaitForSeal( &waiterToSeal, &waiterForSeal );
 
@@ -981,32 +1161,34 @@ void TJournal<I>::PrepareToWaitForSeal( _In_ CWaiter* const pwaiterToSeal, _In_ 
 
     //  add ourselves as a waiter for seal in segment order if the desired segment isn't already sealed
 
-    if ( m_sposSealed < pwaiterForSeal->Spos() )
+    if ( m_sposSealed < pwaiterForSeal->Spos() && m_err >= JET_errSuccess )
     {
-        CWaiter* pwaiter = NULL;
-        for (   pwaiter = m_ilWaitersForSeal.NextMost();
-                pwaiter != NULL && pwaiter->Spos() > pwaiterForSeal->Spos();
-                pwaiter = m_ilWaitersForSeal.Prev( pwaiter ) )
+        CWaiter* pwaiterLE = NULL;
+        for (   pwaiterLE = m_ilWaitersForSeal.NextMost();
+                pwaiterLE != NULL && pwaiterLE->Spos() > pwaiterForSeal->Spos();
+                pwaiterLE = m_ilWaitersForSeal.Prev( pwaiterLE ) )
         {
         }
 
-        m_ilWaitersForSeal.Insert( pwaiterForSeal, pwaiter ? m_ilWaitersForSeal.Next( pwaiter ) : NULL );
+        CWaiter* pwaiterGT = pwaiterLE ? m_ilWaitersForSeal.Next( pwaiterLE ) : m_ilWaitersForSeal.PrevMost();
+
+        m_ilWaitersForSeal.Insert( pwaiterForSeal, pwaiterGT );
     }
     else
     {
         pwaiterForSeal->Complete();
     }
 
-    //  if the required segments are already sealed then we don't need to do anything
+    //  if the required segments are already sealed or seal pending then we don't need to do anything
 
-    if ( m_sposSealed >= pwaiterToSeal->Spos() )
+    if ( m_sposSealPending >= pwaiterToSeal->Spos() )
     {
         pwaiterToSeal->Complete();
     }
 
     //  if there is no one sealing and the segments to seal exist then we are elected as the sealer
 
-    else if ( !m_pwaiterSealer && m_sposSealed < pwaiterToSeal->Spos() )
+    else if ( !m_pwaiterSealer && m_sposSealPending < pwaiterToSeal->Spos() )
     {
         m_pwaiterSealer = pwaiterToSeal;
         m_sposSealPending = pwaiterToSeal->Spos();
@@ -1064,6 +1246,10 @@ void TJournal<I>::WaitForSeal( _In_ CWaiter* const pwaiterToSeal, _In_ CWaiter* 
 
         m_crit.Enter();
 
+        //  the segments must be sealed or we should be in a failed state
+
+        Assert( pwaiterForSeal->Spos() <= m_sposSealed || m_err < JET_errSuccess );
+
         //  release any sealed segments
 
         ReleaseSegments( &m_ilSegmentsSealed );
@@ -1094,10 +1280,10 @@ INLINE void TJournal<I>::SealSegments( _In_ const SegmentPosition spos )
     {
         psegmentNext = m_ilSegmentsToSeal.Next( psegment );
 
-        if ( psegment->Spos() <= spos )
+        if ( psegment->Spos() <= sposSealed )
         {
             m_ilSegmentsToSeal.Remove( psegment );
-            m_ilSegmentsSealPending.InsertAsNextMost( psegment );
+            m_ilSegmentsSealStarting.InsertAsNextMost( psegment );
         }
     }
 
@@ -1107,9 +1293,13 @@ INLINE void TJournal<I>::SealSegments( _In_ const SegmentPosition spos )
 
     //  seal all unsealed segments
 
-    for ( psegment = m_ilSegmentsSealPending.PrevMost(); psegment != NULL; psegment = psegmentNext )
+    while ( psegment = m_ilSegmentsSealStarting.PrevMost() )
     {
-        psegmentNext = m_ilSegmentsSealPending.Next( psegment );
+        m_ilSegmentsSealStarting.Remove( psegment );
+
+        m_crit.Enter();
+        m_ilSegmentsSealPending.InsertAsNextMost( psegment );
+        m_crit.Leave();
 
         ERR errT = psegment->ErrBeginSeal();
 
@@ -1197,32 +1387,34 @@ void TJournal<I>::PrepareToWaitForFlush( _In_ CWaiter* const pwaiterToFlush, _In
 
     //  add ourselves as a waiter for flush in segment order if the desired segment isn't already flushed
 
-    if ( m_sposDurable < pwaiterForFlush->Spos() )
+    if ( m_sposDurable < pwaiterForFlush->Spos() && m_err >= JET_errSuccess )
     {
-        CWaiter* pwaiter = NULL;
-        for (   pwaiter = m_ilWaitersForFlush.NextMost();
-                pwaiter != NULL && pwaiter->Spos() > pwaiterForFlush->Spos();
-                pwaiter = m_ilWaitersForFlush.Prev( pwaiter ) )
+        CWaiter* pwaiterLE = NULL;
+        for (   pwaiterLE = m_ilWaitersForFlush.NextMost();
+                pwaiterLE != NULL && pwaiterLE->Spos() > pwaiterForFlush->Spos();
+                pwaiterLE = m_ilWaitersForFlush.Prev( pwaiterLE ) )
         {
         }
 
-        m_ilWaitersForFlush.Insert( pwaiterForFlush, pwaiter ? m_ilWaitersForFlush.Next( pwaiter ) : NULL );
+        CWaiter* pwaiterGT = pwaiterLE ? m_ilWaitersForFlush.Next( pwaiterLE ) : m_ilWaitersForFlush.PrevMost();
+
+        m_ilWaitersForFlush.Insert( pwaiterForFlush, pwaiterGT );
     }
     else
     {
         pwaiterForFlush->Complete();
     }
 
-    //  if the required segments are already durable then we don't need to do anything
+    //  if the required segments are already durable or pending durable then we don't need to do anything
 
-    if ( m_sposDurable >= pwaiterToFlush->Spos() )
+    if ( m_sposDurablePending >= pwaiterToFlush->Spos() )
     {
         pwaiterToFlush->Complete();
     }
 
     //  if there is no one flushing and the segments to flush exist then we are elected as the sealer
 
-    else if ( !m_pwaiterFlusher && m_sposDurable < pwaiterToFlush->Spos() )
+    else if ( !m_pwaiterFlusher && m_sposDurablePending < pwaiterToFlush->Spos() )
     {
         m_pwaiterFlusher = pwaiterToFlush;
         m_sposDurablePending = pwaiterToFlush->Spos();
@@ -1279,6 +1471,11 @@ void TJournal<I>::WaitForFlush( _In_ CWaiter* const pwaiterToFlush, _In_ CWaiter
         pwaiterForFlush->Wait();
 
         m_crit.Enter();
+
+        //  the segments must be sealed and flushed or we should be in a failed state
+
+        Assert( pwaiterForFlush->Spos() <= m_sposSealed || m_err < JET_errSuccess );
+        Assert( pwaiterForFlush->Spos() <= m_sposDurable || m_err < JET_errSuccess );
     }
 
     Assert( m_crit.FOwner() );
@@ -1387,11 +1584,11 @@ void TJournal<I>::PrepareToReleaseNextFlusher( _Out_ CWaiter** ppwaiterNextFlush
 }
 
 template< class I >
-INLINE ERR TJournal<I>::ErrGetAppendSegment( _In_ BOOL fForceNewSegment, _Out_ CSegment** const ppsegment )
+INLINE ERR TJournal<I>::ErrGetAppendSegment( _In_ const BOOL fForceNewSegment, _Out_ CSegment** const ppsegment )
 {
-    ERR                 err = JET_errSuccess;
-    IJournalSegment* pjs = NULL;
-    CSegment* psegment = NULL;
+    ERR                 err         = JET_errSuccess;
+    IJournalSegment*    pjs         = NULL;
+    CSegment*           psegment    = NULL;
 
     *ppsegment = NULL;
 
@@ -1407,7 +1604,7 @@ INLINE ERR TJournal<I>::ErrGetAppendSegment( _In_ BOOL fForceNewSegment, _Out_ C
     {
         //  create a new append segment
 
-        const SegmentPosition sposAppend = m_sposAppend + cbSegment;
+        const SegmentPosition sposAppend = m_sposAppend + cbJournalSegment;
         Call( m_pjsm->ErrAppendSegment( sposAppend, m_sposReplay, m_sposDurable, &pjs ) );
         Alloc( psegment = new CSegment( this, &pjs, sposAppend ) );
 
@@ -1422,13 +1619,23 @@ INLINE ERR TJournal<I>::ErrGetAppendSegment( _In_ BOOL fForceNewSegment, _Out_ C
         //  we are appending
 
         m_fAppending = fTrue;
+
+        //  determine if the journal is currently full
+
+        Call( ErrIsFull( &m_fFull ) );
     }
 
     //  return the append segment
 
     *ppsegment = psegment;
 
+    //  note if the journal is full
+
 HandleError:
+    if ( err == JET_errDiskFull )
+    {
+        m_fFull = fTrue;
+    }
     delete pjs;
     if ( err < JET_errSuccess )
     {
@@ -1438,41 +1645,54 @@ HandleError:
 }
 
 template< class I  >
-INLINE void TJournal<I>::Sealed( _In_ const ERR err, _In_ CSegment* const psegment )
+INLINE void TJournal<I>::Sealed( _In_ CSegment* const psegment )
 {
     m_crit.Enter();
 
-    //  remove the segment from the list of segments to seal
+    //  put this segment into the sealed list in order
 
     m_ilSegmentsSealPending.Remove( psegment );
 
-    //  update our sealed pointer even if the seal failed so that we release waiters
-
-    m_sposSealed = max( m_sposSealed,
-                        m_ilSegmentsToSeal.FEmpty() ?
-                            psegment->Spos() :
-                            m_ilSegmentsToSeal.PrevMost()->Spos() - cbSegment );
-
-    //  the segment was sealed successfully
-
-    if ( err >= JET_errSuccess )
+    CSegment* psegmentLE = NULL;
+    for (   psegmentLE = m_ilSegmentsSealCompleted.NextMost();
+            psegmentLE != NULL && psegmentLE->Spos() > psegment->Spos();
+            psegmentLE = m_ilSegmentsSealCompleted.Prev( psegmentLE ) )
     {
-        //  put the segment into the sealed list
-
-        m_ilSegmentsSealed.InsertAsNextMost( psegment );
     }
 
-    //  the segment was not sealed successfully
+    m_ilSegmentsSealCompleted.Insert(   psegment,
+                                        psegmentLE ?
+                                            m_ilSegmentsSealCompleted.Next( psegmentLE ) :
+                                            m_ilSegmentsSealCompleted.PrevMost() );
 
-    else
+    //  update our sealed pointer as segments are sequentially completed.  we will do this even for failures so that we
+    //  release waiters.  we will retain the failures in a separate list
+
+    while ( m_ilSegmentsSealCompleted.PrevMost() &&
+            m_ilSegmentsSealCompleted.PrevMost()->Spos() == m_sposSealed + cbJournalSegment )
     {
-        //  put the segment in the failed segment list
+        CSegment* psegmentSealed = m_ilSegmentsSealCompleted.PrevMost();
 
-        m_ilSegmentsSealFailed.InsertAsNextMost( psegment );
+        //  put the segment into the sealed or failed list
 
-        //  flag the journal as failed
+        m_ilSegmentsSealCompleted.Remove( psegmentSealed );
 
-        m_err = m_err >= JET_errSuccess ? err : m_err;
+        if ( psegmentSealed->ErrStatus() >= JET_errSuccess )
+        {
+            m_ilSegmentsSealed.InsertAsNextMost( psegmentSealed );
+        }
+        else
+        {
+            m_ilSegmentsSealFailed.InsertAsNextMost( psegmentSealed );
+        }
+
+        //  accumulate seal failures
+
+        m_err = m_err >= JET_errSuccess ? psegmentSealed->ErrStatus() : m_err;
+
+        //  advance our sealed pointer even on failure to release waiters
+
+        m_sposSealed = psegmentSealed->Spos();
     }
 
     //  release all eligible seal waiters

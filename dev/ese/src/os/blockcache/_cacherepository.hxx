@@ -80,7 +80,7 @@ class TCacheRepository  //  crep
         {
             public:
 
-                CCachePathTableEntry( _Deref_out_opt_z_ const WCHAR** const pwszKeyPath );
+                CCachePathTableEntry( _Deref_inout_z_ const WCHAR** const pwszKeyPath );
 
                 ~CCachePathTableEntry();
 
@@ -88,8 +88,8 @@ class TCacheRepository  //  crep
                 const UINT UiHash() const { return m_uiHash; }
                 ICache* Pc() const { return m_pc; }
 
-                void AddRef() { m_cref++; }
-                BOOL FRelease() { return --m_cref == 0; }
+                void AddRef() { AtomicIncrement((LONG*)&m_cref); }
+                BOOL FRelease() { return AtomicDecrement((LONG*)&m_cref) == 0; }
 
                 ERR ErrAddAsOwnerOrWaiter( _In_ CSemaphore* const psem );
                 void AddNextOwner();
@@ -116,7 +116,7 @@ class TCacheRepository  //  crep
                 typename CInvasiveList< CCachePathTableEntry, OffsetOfILE >::CElement   m_ile;
                 const WCHAR* const                                                      m_wszKeyPath;
                 const UINT                                                              m_uiHash;
-                int                                                                     m_cref;
+                volatile int                                                            m_cref;
                 CSemaphore*                                                             m_psemOwner;
                 CInvasiveList<CWaiter, CWaiter::OffsetOfILE>                            m_ilWaiters;
                 ICache*                                                                 m_pc;
@@ -184,7 +184,7 @@ TCacheRepository<I>::TCacheRepository(  _In_ IFileIdentification* const pfident,
 template< class I >
 TCacheRepository<I>::~TCacheRepository()
 {
-    CloseAllCaches();
+    Cleanup();
 }
 
 template< class I >
@@ -316,7 +316,7 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
 
         if ( ++cAttempt >= cAttemptMax )
         {
-            Call( ErrERRCheck( JET_errInternalError ) );
+            BlockCacheInternalError( "CacheOpenByIdRetryLimit" );
         }
 
         //  if we have a cache open from a previous attempt then close it
@@ -358,7 +358,7 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
     if ( memcmp( rgbUniqueIdActual, rgbUniqueId, cbGuid ) )
     {
         ReportCachingFileNotFoundById( pfsconfig, volumeid, fileid, rgbUniqueId );
-        Call( ErrERRCheck( JET_errDiskIO ) );
+        Error( ErrERRCheck( JET_errDiskIO ) );
     }
 
     //  return the opened cache
@@ -384,7 +384,7 @@ HandleError:
 }
 
 template< class I >
-INLINE TCacheRepository<I>::CCachePathTableEntry::CCachePathTableEntry( _Deref_out_opt_z_ const WCHAR** const pwszKeyPath )
+INLINE TCacheRepository<I>::CCachePathTableEntry::CCachePathTableEntry( _Deref_inout_z_ const WCHAR** const pwszKeyPath )
     :   m_wszKeyPath( *pwszKeyPath ),
         m_uiHash( UiHash( *pwszKeyPath ) ),
         m_cref( 0 ),
@@ -620,7 +620,7 @@ ERR TCacheRepository<I>::ErrOpenCacheMiss(  _In_    IFileSystemFilter* const    
 
         if ( ++cAttempt >= cAttemptMax )
         {
-            Call( ErrERRCheck( JET_errInternalError ) );
+            BlockCacheInternalError( "CacheOpenRetryLimit" );
         }
 
         //  try to open the file

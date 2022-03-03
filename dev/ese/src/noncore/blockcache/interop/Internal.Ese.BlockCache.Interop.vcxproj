@@ -1,0 +1,282 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Condition="'$(COREXTBRANCH)' != ''" Project="$(EnvironmentConfig)" />
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <ProjectGuid>{57a146c3-12c8-4642-a485-84a85845d3b1}</ProjectGuid>
+    <AssemblyName>Internal.Ese.BlockCache.Interop</AssemblyName>
+    <PublishedInclude Condition="'$(Configuration)'=='Debug'">$(DEVCOMPDIR)\published\objd\$(BuildArchitecture)\inc</PublishedInclude>
+    <PublishedInclude Condition="'$(Configuration)'=='Release'">$(DEVCOMPDIR)\published\obj\$(BuildArchitecture)\inc</PublishedInclude>
+    <CLRSupport>true</CLRSupport>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <!--   This project is unable to be instrumented with the version of Magellan used by infra team's Code Coverage system. It will be excluded in instrumentation when being instrumented for functional test purposes. -->
+  <PropertyGroup Condition="'$(EXCHANGE_CODE_COVERAGE_MODE)'=='true'">
+    <QInstrumentForCoverage>false</QInstrumentForCoverage>
+  </PropertyGroup>
+  <!-- RunningInRazzle: -->
+  <Import Condition="'$(BuildingWithBuildExe)' == 'true' and '$(COREXTBRANCH)' == ''" Project="$(ESEROOTDIR)\ESE.Cpp.Common.props" />
+  <!-- RunningInExchangeCorext: -->
+  <Import Condition="'$(COREXTBRANCH)' != ''" Project="$(COMPDIR)\ese.Cpp.Common.props" />
+  <Target Name="WaitForInputs_internal_ese_blockcache_interop_dll" Condition="'$(QBUILD)'!='1'" BeforeTargets="ClCompile">
+    <Exec Command="$(BldSyncWaitForCommand) Internal.Ese.BlockCache.Interop sync.lib;oslite.lib;checksum.lib;checksum_avx.lib;Microsoft.Isam.Esent.Interop.dll" />
+  </Target>
+  <PropertyGroup Label="Globals">
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <CompileAsManaged>true</CompileAsManaged>
+      <RuntimeTypeInfo>true</RuntimeTypeInfo>
+      <!--  /GR  -->
+      <!-- ExceptionHandling>Sync</ExceptionHandling -->
+      <AdditionalIncludeDirectories>
+          %(AdditionalIncludeDirectories);
+          $(BuildArchitecture);
+          .;
+          $(INETROOT)\public\inc;
+          ..;
+          $(INETROOT)\DISTRIB\PUBLIC\INC\$(BuildType)\$(BuildArchitecture);
+          $(PublishedInclude);
+          $(DISTRIB_PRIVATE_INC_PATH);
+        </AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>
+          %(PreprocessorDefinitions);
+          BUILD_ENV_IS_EX;
+          ESE_FLAVOUR_IS_ESE;
+          ENABLE_CODESIGN;
+          ENABLE_PRS_DELAYSIGN;
+          _MBCS;
+        </PreprocessorDefinitions>
+      <AdditionalUsingDirectories>$(DISTRIB_PRIVATE_BIN_PATH);$(PkgNET_Framework_462_TargetingPack)\tools\v4.0.30319\reference_assemblies\v4.6.2</AdditionalUsingDirectories>
+      <ForcedUsingFiles>$(PkgNET_Framework_462_TargetingPack)\tools\v4.0.30319\reference_assemblies\v4.6.2\mscorlib.dll</ForcedUsingFiles>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntermediateOutputPath)stdafx.pch</PrecompiledHeaderOutputFile>
+      <ControlFlowGuard>false</ControlFlowGuard>
+    </ClCompile>
+    <Link>
+      <!-- OutputFile>$(TargetPath)</OutputFile -->
+      <AdditionalDependencies>
+          $(DISTRIB_PRIVATE_LIB_PATH)\sync.lib;
+          $(DISTRIB_PRIVATE_LIB_PATH)\oslite.lib;
+          $(DISTRIB_PRIVATE_LIB_PATH)\checksum.lib;
+          $(DISTRIB_PRIVATE_LIB_PATH)\checksum_avx.lib;
+          kernel32.lib;
+          rpcrt4.lib;
+          advapi32.lib;
+          msvcmrt.lib;
+          $(PkgNET_Framework_472_SDK_Package)\tools\NETFXTools\$(PlatformForSdk)\mscoree.lib;
+          %(AdditionalDependencies);
+      </AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
+    <Link>
+      <EntryPointSymbol>DLLEntryPoint</EntryPointSymbol>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='Win32'">
+    <Link>
+      <EntryPointSymbol>DLLEntryPoint@12</EntryPointSymbol>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="Factory.cpp" />
+    <ClCompile Include="ObjectMarshaller.cpp" />
+    <ClCompile Include="stdafx.cpp">
+      <PrecompiledHeader>Create</PrecompiledHeader>
+      <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
+      <ObjectFileName>$(IntermediateOutputPath)stdafx.obj</ObjectFileName>
+    </ClCompile>
+    <ClCompile Include="assemblyinfo.cpp" />
+    <ResourceCompile Include="version.rc">
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(ProjectDir)\$(O)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Pass2Publish Include="$(TargetDir)\$(AssemblyName).dll">
+      <TargetPath>$(DISTRIB_PRIVATE_BIN_PATH)\$(AssemblyName).dll</TargetPath>
+    </Pass2Publish>
+  </ItemGroup>
+  <ItemGroup>
+    <QCustomInput Include="$(PkgNET_Framework_472_SDK_Package)">
+      <Visible>false</Visible>
+    </QCustomInput>
+    <QCustomInput Include="$(DISTRIB_PRIVATE_INC_PATH)\eseex_x.h">
+      <Visible>false</Visible>
+    </QCustomInput>
+    <QCustomInput Include="$(DISTRIB_PRIVATE_INC_PATH)\exdbfailureitem.h">
+      <Visible>false</Visible>
+    </QCustomInput>
+    <QCustomInput Include="$(DISTRIB_PUBLIC_INC_PATH)\esebkmsg.h">
+      <Visible>false</Visible>
+    </QCustomInput>
+    <QCustomInput Include="$(DISTRIB_PRIVATE_INC_PATH)\exdbmsg_ese.h">
+      <Visible>false</Visible>
+    </QCustomInput>
+    <QCustomInput Include="$(COMPDIRSRC)\inc\*">
+      <Visible>false</Visible>
+    </QCustomInput>
+    <QCustomInput Include="$(DISTRIB_PRIVATE_BIN_PATH)\Microsoft.Isam.Esent.Interop.dll">
+      <Visible>false</Visible>
+    </QCustomInput>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Base.h" />
+    <ClInclude Include="BlockCacheConfiguration.h" />
+    <ClInclude Include="BlockCacheConfigurationBase.h" />
+    <ClInclude Include="BlockCacheConfigurationRemotable.h" />
+    <ClInclude Include="BlockCacheFactory.h" />
+    <ClInclude Include="BlockCacheFactoryBase.h" />
+    <ClInclude Include="Cache.h" />
+    <ClInclude Include="CacheBase.h" />
+    <ClInclude Include="CacheConfiguration.h" />
+    <ClInclude Include="CacheConfigurationBase.h" />
+    <ClInclude Include="CacheConfigurationRemotable.h" />
+    <ClInclude Include="CachedBlock.h" />
+    <ClInclude Include="CachedBlockId.h" />
+    <ClInclude Include="CachedBlockNumber.h" />
+    <ClInclude Include="CachedBlockSlab.h" />
+    <ClInclude Include="CachedBlockSlabBase.h" />
+    <ClInclude Include="CachedBlockSlabManager.h" />
+    <ClInclude Include="CachedBlockSlabManagerBase.h" />
+    <ClInclude Include="CachedBlockSlabManagerRemotable.h" />
+    <ClInclude Include="CachedBlockSlabRemotable.h" />
+    <ClInclude Include="CachedBlockSlot.h" />
+    <ClInclude Include="CachedBlockSlotState.h" />
+    <ClInclude Include="CachedBlockWriteCount.h" />
+    <ClInclude Include="CachedBlockWriteCountsManager.h" />
+    <ClInclude Include="CachedBlockWriteCountsManagerBase.h" />
+    <ClInclude Include="CachedBlockWriteCountsManagerRemotable.h" />
+    <ClInclude Include="CachedFileConfiguration.h" />
+    <ClInclude Include="CachedFileConfigurationBase.h" />
+    <ClInclude Include="CachedFileConfigurationRemotable.h" />
+    <ClInclude Include="CacheRepositoryBase.h" />
+    <ClInclude Include="CacheRepositoryRemotable.h" />
+    <ClInclude Include="CacheTelemetry.h" />
+    <ClInclude Include="CacheTelemetryBase.h" />
+    <ClInclude Include="CacheTelemetryRemotable.h" />
+    <ClInclude Include="CacheRemotable.h" />
+    <ClInclude Include="CachingPolicy.h" />
+    <ClInclude Include="CBlockCacheConfigurationWrapper.h" />
+    <ClInclude Include="CBlockCacheFactoryWrapper.h" />
+    <ClInclude Include="CCacheConfigurationWrapper.h" />
+    <ClInclude Include="CCachedBlockSlabManagerWrapper.h" />
+    <ClInclude Include="CCachedBlockSlabWrapper.h" />
+    <ClInclude Include="CCachedBlockWriteCountsManagerWrapper.h" />
+    <ClInclude Include="CCachedFileConfigurationWrapper.h" />
+    <ClInclude Include="CacheRepository.h" />
+    <ClInclude Include="CCacheRepositoryWrapper.h" />
+    <ClInclude Include="CCacheTelemetryWrapper.h" />
+    <ClInclude Include="CCacheWrapper.h" />
+    <ClInclude Include="CContainer.h" />
+    <ClInclude Include="CFileFilterWrapper.h" />
+    <ClInclude Include="CFileFindWrapper.h" />
+    <ClInclude Include="CFileIdentificationWrapper.h" />
+    <ClInclude Include="CFileSystemConfigurationWrapper.h" />
+    <ClInclude Include="CFileSystemFilterWrapper.h" />
+    <ClInclude Include="CFileSystemWrapper.h" />
+    <ClInclude Include="CFileWrapper.h" />
+    <ClInclude Include="ChunkNumber.h" />
+    <ClInclude Include="CJournalSegmentManagerWrapper.h" />
+    <ClInclude Include="CJournalSegmentWrapper.h" />
+    <ClInclude Include="CJournalWrapper.h" />
+    <ClInclude Include="ClusterNumber.h" />
+    <ClInclude Include="ClusterRead.h" />
+    <ClInclude Include="ClusterReadInverse.h" />
+    <ClInclude Include="ClusterWritten.h" />
+    <ClInclude Include="ClusterWrittenInverse.h" />
+    <ClInclude Include="Common.h" />
+    <ClInclude Include="Complete.h" />
+    <ClInclude Include="CompleteInverse.h" />
+    <ClInclude Include="ConsiderUpdate.h" />
+    <ClInclude Include="ConsiderUpdateInverse.h" />
+    <ClInclude Include="CWrapper.h" />
+    <ClInclude Include="File.h" />
+    <ClInclude Include="FileBase.h" />
+    <ClInclude Include="FileFilter.h" />
+    <ClInclude Include="FileFilterBase.h" />
+    <ClInclude Include="FileFilterRemotable.h" />
+    <ClInclude Include="FileFind.h" />
+    <ClInclude Include="FileFindBase.h" />
+    <ClInclude Include="FileFindRemotable.h" />
+    <ClInclude Include="FileId.h" />
+    <ClInclude Include="FileIdentification.h" />
+    <ClInclude Include="FileIdentificationBase.h" />
+    <ClInclude Include="FileIdentificationRemotable.h" />
+    <ClInclude Include="FileModeFlags.h" />
+    <ClInclude Include="FileQOS.h" />
+    <ClInclude Include="FileSerial.h" />
+    <ClInclude Include="FileSize.h" />
+    <ClInclude Include="FileSystem.h" />
+    <ClInclude Include="FileSystemBase.h" />
+    <ClInclude Include="FileSystemConfiguration.h" />
+    <ClInclude Include="FileSystemConfigurationBase.h" />
+    <ClInclude Include="FileSystemConfigurationRemotable.h" />
+    <ClInclude Include="FileSystemFilter.h" />
+    <ClInclude Include="FileSystemFilterBase.h" />
+    <ClInclude Include="FileSystemFilterRemotable.h" />
+    <ClInclude Include="FileSystemRemotable.h" />
+    <ClInclude Include="FileRemotable.h" />
+    <ClInclude Include="IBlockCacheConfiguration.h" />
+    <ClInclude Include="IBlockCacheFactory.h" />
+    <ClInclude Include="ICache.h" />
+    <ClInclude Include="ICacheConfiguration.h" />
+    <ClInclude Include="ICachedBlockSlab.h" />
+    <ClInclude Include="ICachedBlockSlabManager.h" />
+    <ClInclude Include="ICachedBlockWriteCountsManager.h" />
+    <ClInclude Include="ICachedFileConfiguration.h" />
+    <ClInclude Include="ICacheRepository.h" />
+    <ClInclude Include="ICacheTelemetry.h" />
+    <ClInclude Include="IFile.h" />
+    <ClInclude Include="IFileFilter.h" />
+    <ClInclude Include="IFileFind.h" />
+    <ClInclude Include="IFileIdentification.h" />
+    <ClInclude Include="IFileSystem.h" />
+    <ClInclude Include="IFileSystemConfiguration.h" />
+    <ClInclude Include="IFileSystemFilter.h" />
+    <ClInclude Include="IJournal.h" />
+    <ClInclude Include="IJournalSegment.h" />
+    <ClInclude Include="IJournalSegmentManager.h" />
+    <ClInclude Include="IObjectMarshaller.h" />
+    <ClInclude Include="IOComplete.h" />
+    <ClInclude Include="IOCompleteInverse.h" />
+    <ClInclude Include="IOMode.h" />
+    <ClInclude Include="Journal.h" />
+    <ClInclude Include="JournalBase.h" />
+    <ClInclude Include="JournalPosition.h" />
+    <ClInclude Include="JournalSegment.h" />
+    <ClInclude Include="JournalSegmentBase.h" />
+    <ClInclude Include="JournalSegmentManager.h" />
+    <ClInclude Include="JournalSegmentManagerBase.h" />
+    <ClInclude Include="JournalSegmentManagerRemotable.h" />
+    <ClInclude Include="JournalSegmentRemotable.h" />
+    <ClInclude Include="JournalRemotable.h" />
+    <ClInclude Include="ObjectMarshaller.h" />
+    <ClInclude Include="RegionPosition.h" />
+    <ClInclude Include="Sealed.h" />
+    <ClInclude Include="SealedInverse.h" />
+    <ClInclude Include="SegmentPosition.h" />
+    <ClInclude Include="SlabSaved.h" />
+    <ClInclude Include="SlabSavedInverse.h" />
+    <ClInclude Include="SlotNumber.h" />
+    <ClInclude Include="UpdateNumber.h" />
+    <ClInclude Include="VisitEntry.h" />
+    <ClInclude Include="VisitEntryInverse.h" />
+    <ClInclude Include="VisitRegion.h" />
+    <ClInclude Include="VisitRegionInverse.h" />
+    <ClInclude Include="VisitSegment.h" />
+    <ClInclude Include="VisitSegmentInverse.h" />
+    <ClInclude Include="VisitSlab.h" />
+    <ClInclude Include="VisitSlabInverse.h" />
+    <ClInclude Include="VisitSlot.h" />
+    <ClInclude Include="VisitSlotInverse.h" />
+    <ClInclude Include="VolumeId.h" />
+  </ItemGroup>
+  <!-- RunningInRazzle: -->
+  <Import Condition="'$(BuildingWithBuildExe)' == 'true' and '$(COREXTBRANCH)' == ''" Project="$(NTMAKEENV)\Microsoft.Build.UI.Xaml.Cpp.targets" />
+  <!-- RunningInExchangeCorext: -->
+  <Import Condition="'$(COREXTBRANCH)' != ''" Project="$(ExtendedTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

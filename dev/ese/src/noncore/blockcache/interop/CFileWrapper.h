@@ -114,7 +114,7 @@ namespace Internal
                         QWORD QwEngineFileId() const override;
 #endif
 
-                        TICK DtickIOElapsed( void* const pvIOContext ) const override;
+                        TICK DtickIOElapsed( void* const pvIOContext ) override;
                 };
 
                 template< class TM, class TN >
@@ -350,7 +350,9 @@ namespace Internal
                                                             const VOID *                        pioreq )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = gcnew array<byte>( cbData );
+                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
+                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, true );
                     IOComplete^     iocomplete  = ( pfnIOComplete || pfnIOHandoff ) ?
                                                         gcnew IOComplete(   this,
                                                                             false, 
@@ -360,11 +362,13 @@ namespace Internal
                                                                             pfnIOHandoff ) :
                                                         nullptr;
 
-                    pin_ptr<byte> rgbDataIn = &buffer[ 0 ];
-                    UtilMemCpy( (BYTE*)rgbDataIn, pbData, cbData );
+                    if ( cbData )
+                    {
+                        UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    }
 
                     ExCall( I()->IORead(    ibOffset,
-                                            ArraySegment<byte>( buffer ),
+                                            stream,
                                             (FileQOS)grbitQOS,
                                             pfnIOComplete ?
                                                 gcnew IFile::IOComplete( iocomplete, &IOComplete::Complete ) :
@@ -374,9 +378,8 @@ namespace Internal
                                                 nullptr ) );
 
                 HandleError:
-                    if ( !pfnIOComplete )
+                    if ( !pfnIOComplete && cbData )
                     {
-                        pin_ptr<const byte> rgbData = &buffer[ 0 ];
                         UtilMemCpy( pbData, (const BYTE*)rgbData, cbData );
                     }
                     return err;
@@ -393,7 +396,9 @@ namespace Internal
                                                                 const IFileAPI::PfnIOHandoff    pfnIOHandoff )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = gcnew array<byte>( cbData );
+                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
+                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, false );
                     IOComplete^     iocomplete  = ( pfnIOComplete || pfnIOHandoff ) ?
                                                         gcnew IOComplete(   this,
                                                                             true, 
@@ -403,11 +408,13 @@ namespace Internal
                                                                             pfnIOHandoff ) :
                                                         nullptr;
 
-                    pin_ptr<byte> rgbData = &buffer[ 0 ];
-                    UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    if ( cbData )
+                    {
+                        UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    }
 
                     ExCall( I()->IOWrite(   ibOffset,
-                                            ArraySegment<byte>( buffer ),
+                                            stream,
                                             (FileQOS)grbitQOS,
                                             pfnIOComplete ?
                                                 gcnew IFile::IOComplete( iocomplete, &IOComplete::Complete ) :
@@ -548,7 +555,7 @@ namespace Internal
 #endif
 
                 template< class TM, class TN >
-                inline TICK CFileWrapper<TM, TN>::DtickIOElapsed( void* const pvIOContext ) const
+                inline TICK CFileWrapper<TM, TN>::DtickIOElapsed( void* const pvIOContext )
                 {
                     return 0;
                 }

@@ -23,7 +23,7 @@ namespace Internal
                     /// <summary>
                     /// An invalid SegmentPosition.
                     /// </summary>
-                    Invalid = Int64::MaxValue,
+                    Invalid = (Int64)::sposInvalid,
                 };
             }
         }

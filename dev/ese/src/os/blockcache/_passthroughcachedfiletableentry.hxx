@@ -10,10 +10,11 @@ class CPassThroughCachedFileTableEntry  //  cfte
 {
     public:
 
-        CPassThroughCachedFileTableEntry(   _In_ const VolumeId     volumeid,
+        CPassThroughCachedFileTableEntry(   _In_ ICache* const      pc,
+                                            _In_ const VolumeId     volumeid,
                                             _In_ const FileId       fileid,
                                             _In_ const FileSerial   fileserial )
-            :   CCachedFileTableEntryBase( volumeid, fileid, fileserial ),
+            :   CCachedFileTableEntryBase( pc, volumeid, fileid, fileserial ),
                 m_pffDisplacedData( NULL )
         {
         }
@@ -80,7 +81,7 @@ INLINE ERR CPassThroughCachedFileTableEntry::ErrOpenCachedFile( _In_ IFileSystem
 
         if ( ++cAttempt >= cAttemptMax )
         {
-            Call( ErrERRCheck( JET_errInternalError ) );
+            BlockCacheInternalError( "PassThroughCacheOpenDisplacedDataRetryLimit" );
         }
 
         //  try to open the file

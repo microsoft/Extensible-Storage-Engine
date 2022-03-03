@@ -51,6 +51,54 @@ namespace Internal
                     /// </summary>
                     /// <returns>The percentage of this caching file holding data for write back caching only.</returns>
                     double PercentWrite();
+
+                    /// <summary>
+                    /// The maximum size of this caching file used by journal segments.
+                    /// </summary>
+                    /// <returns>The maximum size of this caching file used by journal segments.</returns>
+                    Int64 JournalSegmentsMaximumSize();
+
+                    /// <summary>
+                    /// The amount of the journal segments that should be in use.
+                    /// </summary>
+                    /// <returns>The amount of the journal segments that should be in use.</returns>
+                    double PercentJournalSegmentsInUse();
+
+                    /// <summary>
+                    /// The maximum amount of cache memory used by journal segments.
+                    /// </summary>
+                    /// <returns>The maximum amount of cache memory used by journal segments.</returns>
+                    Int64 JournalSegmentsMaximumCacheSize();
+
+                    /// <summary>
+                    /// The maximum size of this caching file used by journal clusters.
+                    /// </summary>
+                    /// <returns>The maximum size of this caching file used by journal clusters.</returns>
+                    Int64 JournalClustersMaximumSize();
+
+                    /// <summary>
+                    /// The amount of caching file managed as a unit.
+                    /// </summary>
+                    /// <returns>The amount of caching file managed as a unit.</returns>
+                    Int64 CachingFilePerSlab();
+
+                    /// <summary>
+                    /// The number of consecutive bytes of a cached file that land in the same caching unit.
+                    /// </summary>
+                    /// <returns>The number of consecutive bytes of a cached file that land in the same caching unit.</returns>
+                    Int64 CachedFilePerSlab();
+
+                    /// <summary>
+                    /// The maximum amount of cache memory used by slabs.
+                    /// </summary>
+                    /// <returns>The maximum amount of cache memory used by slabs.</returns>
+                    Int64 SlabMaximumCacheSize();
+
+                    /// <summary>
+                    /// Indicates if asynchronous write back is enabled.
+                    /// </summary>
+                    /// <returns>True if asynchronous write back is enabled.</returns>
+                    bool IsAsyncWriteBackEnabled();
                 };
             }
         }

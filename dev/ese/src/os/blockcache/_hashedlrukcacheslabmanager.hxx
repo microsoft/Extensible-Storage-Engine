@@ -1,0 +1,1124 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+#pragma once
+
+//  TCachedBlockSlabManager:  implementation of ICachedBlockSlabManager and its derivatives.
+//
+//  I:  ICachedBlockSlabManager or derivative
+//
+//  This class manages the set of slabs that belong to the cache.  Slabs can be addressed directly by offset for
+//  journal replay or they can be addressed logically by cached block id.  Cached blocks are distributed among the
+//  slabs by a hash function.  This hash function is key to the overall performance of the cache.
+//
+//  Slabs can be acquired for exclusive access only.  They must be released via ICachedBlockSlab::Release when no
+//  longer in use.  Any changes made to the slab are made temporarily in memory.  If a slab is released without
+//  accepting these changes via ICachedBlockSlab::AcceptChanges then those changes will be lost.
+//
+//  A modified slab is retained in memory as long as its accepted changes have not yet been written back to storage via
+//  ICachedBlockSlab::ErrSave.
+//
+//  A slab is generally not retained in memory for any other reason.  This is because of the nature of the persistent
+//  cache it supports.  We have obviously already decided that the data we are caching is not important enough to hold
+//  in memory.  We also consider its metadata too cold to retain in memory.
+// 
+//  The slab manager is responsible for defer initializing a slab with its initial state on load.  This happens when a
+//  slab is read and any chunk of that slab is confirmed to be uninitialized via its checksum and it has never been
+//  written according to the write counters (CCachedBlockWriteCountsManager).
+//
+//  The slab manager is actually used twice:  once for the main cache state and again to manage the avail pool.  The
+//  avail pool is the set of clusters we keep to support writing new data into the cache as a virtual part of the
+//  journal.  The avail pool slabs are only accessed by offset because they contain no cached data.
+
+class CCachedBlockSlabReference;
+
+template< class I >
+class TCachedBlockSlabManager  //  cbsm
+    :   public I
+{
+    public:  //  specialized API
+
+        ~TCachedBlockSlabManager()
+        {
+            TermSlabTable();
+        }
+
+        void RemoveSlabReference( _Inout_ CCachedBlockSlabTableEntry** const ppste )
+        {
+            ReleaseSlab( ppste );
+        }
+
+    public:  //  ICachedBlockSlabManager
+
+        ERR ErrGetSlab( _In_    const CCachedBlockId&       cbid,
+                        _Out_   ICachedBlockSlab** const    ppcbs ) override;
+
+        ERR ErrIsSlabForCachedBlock(    _In_    ICachedBlockSlab* const pcbs,
+                                        _In_    const CCachedBlockId&   cbid,
+                                        _Out_   BOOL* const             pfIsSlabForCachedBlock ) override;
+
+        ERR ErrGetSlab( _In_    const QWORD                 ib,
+                        _In_    const BOOL                  fWait,
+                        _In_    const BOOL                  fIgnoreVerificationErrors,
+                        _Out_   ICachedBlockSlab** const    ppcbs ) override;
+
+        ERR ErrVisitSlabs(  _In_ const ICachedBlockSlabManager::PfnVisitSlab    pfnVisitSlab,
+                            _In_ const DWORD_PTR                                keyVisitSlab ) override;
+
+    protected:
+
+        TCachedBlockSlabManager(    _In_    IFileFilter* const                      pff,
+                                    _In_    const QWORD                             cbCachingFilePerSlab,
+                                    _In_    const QWORD                             cbCachedFilePerSlab,
+                                    _In_    const QWORD                             ibChunk,
+                                    _In_    const QWORD                             cbChunk,
+                                    _In_    ICachedBlockWriteCountsManager* const   pcbwcm,
+                                    _In_    const QWORD                             icbwcBase,
+                                    _In_    const ClusterNumber                     clnoMin,
+                                    _In_    const ClusterNumber                     clnoMax );
+
+    private:
+
+        ERR ErrLockSlab(    _In_    const QWORD                         ibSlab,
+                            _In_    const BOOL                          fWait,
+                            _Out_   CCachedBlockSlabTableEntry** const  ppste );
+        void ReleaseSlab( _Inout_ CCachedBlockSlabTableEntry** const ppste );
+
+        BOOL FValidCachedBlockId( _In_ const CCachedBlockId& cbid );
+        QWORD IbSlabOfCachedBlockId( _In_ const CCachedBlockId& cbid );
+
+        ERR ErrEnsureInitSlabTable() { return m_initOnceSlabTable.Init( ErrInitSlabTable_, this ); };
+        ERR ErrInitSlabTable();
+        static ERR ErrInitSlabTable_( _In_ TCachedBlockSlabManager<I>* const pcbsm ) { return pcbsm->ErrInitSlabTable(); }
+        void TermSlabTable();
+
+    private:
+
+        static QWORD                                                                        s_rgrgqwTable1[ 4 ][ 256 ];
+        static DWORD                                                                        s_rgrgdwTable2[ 2 ][ 256 ];
+
+        IFileFilter* const                                                                  m_pff;
+        const QWORD                                                                         m_cbCachingFilePerSlab;
+        const QWORD                                                                         m_cbCachedFilePerSlab;
+        const QWORD                                                                         m_ibChunk;
+        const QWORD                                                                         m_cbChunk;
+        const QWORD                                                                         m_cbSlab;
+        const QWORD                                                                         m_cSlab;
+        const QWORD                                                                         m_cCachedFileBlockPerSlab;
+        ICachedBlockWriteCountsManager* const                                               m_pcbwcm;
+        const QWORD                                                                         m_icbwcBase;
+        const ClusterNumber                                                                 m_clnoMin;
+        const ClusterNumber                                                                 m_clnoMax;
+        CInitOnce< ERR, decltype( &ErrInitSlabTable_ ), TCachedBlockSlabManager<I>* const > m_initOnceSlabTable;
+        CCachedBlockSlabHash                                                                m_slabHash;
+};
+
+template< class I  >
+INLINE ERR TCachedBlockSlabManager<I>::ErrGetSlab(  _In_    const CCachedBlockId&       cbid,
+                                                    _Out_   ICachedBlockSlab** const    ppcbs )
+{
+    ERR                 err     = JET_errSuccess;
+    ICachedBlockSlab*   pcbs    = NULL;
+    QWORD               ibSlab  = 0;
+
+    *ppcbs = NULL;
+
+    //  we do not accept invalid cached block ids
+
+    if ( !FValidCachedBlockId( cbid ) )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    //  determine the target slab for this cached block id by its hash
+
+    ibSlab = IbSlabOfCachedBlockId( cbid );
+
+    //  open the slab by its id
+
+    Call( ErrGetSlab( ibSlab, fTrue, fFalse, &pcbs ) );
+
+    //  return the slab
+
+    *ppcbs = pcbs;
+    pcbs = NULL;
+
+HandleError:
+    delete pcbs;
+    if ( err < JET_errSuccess )
+    {
+        delete *ppcbs;
+        *ppcbs = NULL;
+    }
+    return err;
+}
+
+template<class I>
+INLINE ERR TCachedBlockSlabManager<I>::ErrIsSlabForCachedBlock( _In_    ICachedBlockSlab* const pcbs,
+                                                                _In_    const CCachedBlockId&   cbid,
+                                                                _Out_   BOOL* const             pfIsSlabForCachedBlock )
+{
+    ERR     err                     = JET_errSuccess;
+    QWORD   ibSlabProvided          = 0;
+    QWORD   ibSlabForCachedBlock    = 0;
+    BOOL    fIsSlabForCachedBlock   = fFalse;
+
+    *pfIsSlabForCachedBlock = fFalse;
+
+    //  an existing slab must be provided
+
+    if ( !pcbs )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    //  we do not accept invalid cached block ids
+
+    if ( !FValidCachedBlockId( cbid ) )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    //  get the id of the provided slab
+
+    Call( pcbs->ErrGetPhysicalId( &ibSlabProvided ) );
+
+    //  determine the target slab for this cached block id by its hash
+
+    ibSlabForCachedBlock = IbSlabOfCachedBlockId( cbid );
+
+    //  indicate if there is a match
+
+    fIsSlabForCachedBlock = ibSlabProvided == ibSlabForCachedBlock;
+
+    //  return the result
+
+    *pfIsSlabForCachedBlock = fIsSlabForCachedBlock;
+
+HandleError:
+    if ( err < JET_errSuccess )
+    {
+        *pfIsSlabForCachedBlock = fFalse;
+    }
+    return err;
+}
+
+template< class I  >
+INLINE ERR TCachedBlockSlabManager<I>::ErrGetSlab(  _In_    const QWORD                 ib,
+                                                    _In_    const BOOL                  fWait,
+                                                    _In_    const BOOL                  fIgnoreVerificationErrors,
+                                                    _Out_   ICachedBlockSlab** const    ppcbs )
+{
+    ERR                         err         = JET_errSuccess;
+    CCachedBlockSlabTableEntry* pste        = NULL;
+    CCachedBlockSlab*           pcbs        = NULL;
+    ERR                         errSlab     = JET_errSuccess;
+    CCachedBlockSlabReference*  pcbsr       = NULL;
+
+    *ppcbs = NULL;
+
+    //  we must be asking for a slab by a legal offset
+
+    if ( m_ibChunk > ib || ib >= m_ibChunk + m_cbChunk )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    if ( ib % sizeof( CCachedBlockChunk ) )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    //  create/open the entry for this slab by its offset
+
+    Call( ErrLockSlab( ib, fWait, &pste ) );
+
+    if ( !pste )
+    {
+        Error( JET_errSuccess );
+    }
+
+    //  if the slab isn't already loaded then load it
+
+    if ( !pste->Pcbs() )
+    {
+        //  load the slab.  this will still work even if there are verification errors
+
+        const QWORD iChunk          = ( ib - m_ibChunk ) / sizeof( CCachedBlockChunk );
+        const QWORD icbwcBase       = m_icbwcBase + iChunk;
+        const QWORD iSlab           = ( ib - m_ibChunk ) / m_cbSlab;
+
+        errSlab = CCachedBlockSlab::ErrLoad(    m_pff, 
+                                                ib, 
+                                                m_cbSlab, 
+                                                m_pcbwcm, 
+                                                icbwcBase, 
+                                                m_clnoMin,
+                                                m_clnoMax,
+                                                fIgnoreVerificationErrors,
+                                                &pcbs );
+
+        //  fail only if we are not supposed to ignore verification errors
+
+        Call( fIgnoreVerificationErrors ? ErrIgnoreVerificationErrors( errSlab ) : errSlab );
+
+        //  verify that the slab error status matches what was returned
+
+        if ( errSlab != pcbs->ErrStatus() )
+        {
+            BlockCacheInternalError( "HashedLRUKCacheSlabManagerMismatchedErr" );
+        }
+
+        //  keep the slab in the slab entry
+
+        pste->OpenSlab( &pcbs );
+    }
+
+    //  verify that the slab validation state meets our expectations
+
+    errSlab = pste->Pcbs()->ErrStatus();
+    Call( fIgnoreVerificationErrors ? ErrIgnoreVerificationErrors( errSlab ) : errSlab );
+
+    //  provide a wrapper for the slab that will manage its lifecycle
+
+    Alloc( pcbsr = new CCachedBlockSlabReference( this, &pste, pste->Pcbs(), fIgnoreVerificationErrors ) );
+
+    //  return the slab
+
+    *ppcbs = pcbsr;
+    pcbsr = NULL;
+
+    err = errSlab;
+
+HandleError:
+    delete pcbsr;
+    delete pcbs;
+    ReleaseSlab( &pste );
+    if ( ( fIgnoreVerificationErrors ? ErrIgnoreVerificationErrors( err ) : err ) < JET_errSuccess )
+    {
+        delete *ppcbs;
+        *ppcbs = NULL;
+    }
+    return err;
+}
+
+template< class I  >
+INLINE ERR TCachedBlockSlabManager<I>::ErrVisitSlabs(   _In_ const ICachedBlockSlabManager::PfnVisitSlab    pfnVisitSlab,
+                                                        _In_ const DWORD_PTR                                keyVisitSlab )
+{
+    ERR                 err     = JET_errSuccess;
+    ERR                 errSlab = JET_errSuccess;
+    ICachedBlockSlab*   pcbs    = NULL;
+
+    //  we expect a callback
+
+    if ( !pfnVisitSlab )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    //  iterate through all the slabs we own
+
+    for ( QWORD ibSlab = m_ibChunk; ibSlab < m_ibChunk + m_cbChunk; ibSlab += m_cbSlab )
+    {
+        //  close any previously opened slab
+        
+        delete pcbs;
+        pcbs = NULL;
+
+        //  open this slab, ignoring verification errors
+
+        errSlab = ErrGetSlab( ibSlab, fTrue, fTrue, &pcbs );
+        Call( ErrIgnoreVerificationErrors( errSlab ) );
+
+        //  visit this slab
+
+        if ( !pfnVisitSlab( ibSlab, errSlab, pcbs, keyVisitSlab ) )
+        {
+            break;
+        }
+    }
+
+HandleError:
+    delete pcbs;
+    return err;
+}
+
+template< class I  >
+INLINE TCachedBlockSlabManager<I>::TCachedBlockSlabManager( _In_    IFileFilter* const                      pff,
+                                                            _In_    const QWORD                             cbCachingFilePerSlab,
+                                                            _In_    const QWORD                             cbCachedFilePerSlab,
+                                                            _In_    const QWORD                             ibChunk,
+                                                            _In_    const QWORD                             cbChunk,
+                                                            _In_    ICachedBlockWriteCountsManager* const   pcbwcm,
+                                                            _In_    const QWORD                             icbwcBase,
+                                                            _In_    const ClusterNumber                     clnoMin,
+                                                            _In_    const ClusterNumber                     clnoMax )
+    :   m_pff( pff ),
+        m_cbCachingFilePerSlab( cbCachingFilePerSlab ),
+        m_cbCachedFilePerSlab( cbCachedFilePerSlab  ),
+        m_ibChunk( ibChunk ),
+        m_cbChunk( cbChunk ),
+        m_cbSlab( ( m_cbCachingFilePerSlab / ( CCachedBlockChunk::Ccbl() * cbCachedBlock ) ) * sizeof( CCachedBlockChunk ) ),
+        m_cSlab( m_cbChunk / m_cbSlab ),
+        m_cCachedFileBlockPerSlab( m_cbCachedFilePerSlab / cbCachedBlock ),
+        m_pcbwcm( pcbwcm ),
+        m_icbwcBase( icbwcBase ),
+        m_clnoMin( clnoMin ),
+        m_clnoMax( clnoMax ),
+        m_slabHash( rankSlabHash )
+{
+}
+
+template< class I >
+ERR TCachedBlockSlabManager<I>::ErrLockSlab(    _In_    const QWORD                         ibSlab,
+                                                _In_    const BOOL                          fWait,
+                                                _Out_   CCachedBlockSlabTableEntry** const  ppste )
+{
+    ERR                                     err                     = JET_errSuccess;
+    CCachedBlockSlabKey                     key( ibSlab );
+    CCachedBlockSlabEntry                   entry;
+    CCachedBlockSlabHash::CLock             lock;
+    CCachedBlockSlabHash::ERR               errCachedBlockSlabHash  = CCachedBlockSlabHash::ERR::errSuccess;
+    BOOL                                    fLocked                 = fFalse;
+    CCachedBlockSlabTableEntry*             psteExisting            = NULL;
+    CCachedBlockSlabTableEntry*             psteNew                 = NULL;
+    BOOL                                    fDeleteEntry            = fFalse;
+    CCachedBlockSlabTableEntry::CContext    context;
+
+    *ppste = NULL;
+
+    Call( ErrEnsureInitSlabTable() );
+
+    m_slabHash.WriteLockKey( key, &lock );
+    fLocked = fTrue;
+
+    errCachedBlockSlabHash = m_slabHash.ErrRetrieveEntry( &lock, &entry );
+    if ( errCachedBlockSlabHash == CCachedBlockSlabHash::ERR::errSuccess )
+    {
+        psteExisting = entry.Pste();
+    }
+    else
+    {
+        Assert( errCachedBlockSlabHash == CCachedBlockSlabHash::ERR::errEntryNotFound );
+
+        Alloc( psteExisting = psteNew = new CCachedBlockSlabTableEntry( ibSlab ) );
+
+        entry = CCachedBlockSlabEntry( psteNew );
+        errCachedBlockSlabHash = m_slabHash.ErrInsertEntry( &lock, entry );
+        if ( errCachedBlockSlabHash == CCachedBlockSlabHash::ERR::errOutOfMemory )
+        {
+            Error( ErrERRCheck( JET_errOutOfMemory ) );
+        }
+        Assert( errCachedBlockSlabHash == CCachedBlockSlabHash::ERR::errSuccess );
+        fDeleteEntry = fTrue;
+    }
+
+    if ( fWait || !psteExisting->FOwned() )
+    {
+        psteExisting->AddAsOwnerOrWaiter( &context );
+        fDeleteEntry = fFalse;
+        psteNew = NULL;
+
+        m_slabHash.WriteUnlockKey( &lock );
+        fLocked = fFalse;
+
+        context.Wait();
+
+        *ppste = psteExisting;
+    }
+
+HandleError:
+    if ( fDeleteEntry )
+    {
+        errCachedBlockSlabHash = m_slabHash.ErrDeleteEntry( &lock );
+        Assert( errCachedBlockSlabHash == CCachedBlockSlabHash::ERR::errSuccess );
+    }
+    delete psteNew;
+    if ( fLocked )
+    {
+        m_slabHash.WriteUnlockKey( &lock );
+    }
+    if ( err < JET_errSuccess )
+    {
+        *ppste = NULL;
+    }
+    return err;
+}
+
+template<class I>
+INLINE void TCachedBlockSlabManager<I>::ReleaseSlab( _Inout_ CCachedBlockSlabTableEntry** const ppste )
+{
+    CCachedBlockSlabTableEntry* const   pste            = *ppste;
+    BOOL                                fDeleteEntry    = fFalse;
+
+    *ppste = NULL;
+
+    if ( !pste )
+    {
+        return;
+    }
+
+    CCachedBlockSlabHash::CLock lock;
+    m_slabHash.WriteLockKey( CCachedBlockSlabKey( pste ), &lock );
+
+    if ( fDeleteEntry = pste->FRemoveAsOwner() )
+    {
+        CCachedBlockSlabHash::ERR errCachedBlockSlabHash = m_slabHash.ErrDeleteEntry( &lock );
+        Assert( errCachedBlockSlabHash == CCachedBlockSlabHash::ERR::errSuccess );
+    }
+
+    m_slabHash.WriteUnlockKey( &lock );
+
+    if ( fDeleteEntry )
+    {
+        delete pste;
+    }
+}
+
+template<class I>
+INLINE BOOL TCachedBlockSlabManager<I>::FValidCachedBlockId( _In_ const CCachedBlockId& cbid )
+{
+    if ( cbid.Volumeid() == volumeidInvalid )
+    {
+        return fFalse;
+    }
+    if ( cbid.Fileid() == fileidInvalid )
+    {
+        return fFalse;
+    }
+    if ( cbid.Fileserial() == fileserialInvalid )
+    {
+        return fFalse;
+    }
+    if ( cbid.Cbno() == cbnoInvalid )
+    {
+        return fFalse;
+    }
+    return fTrue;
+}
+
+template< class I >
+INLINE QWORD TCachedBlockSlabManager<I>::IbSlabOfCachedBlockId( _In_ const CCachedBlockId& cbid )
+{
+    //  NOTE:  PERSISTED:  this hash function is used to locate persistent data in the cache.  changes to this hash
+    //  function or its configuration can result in data loss!
+
+    //  make a copy of the cache cached block id with a CachedBlockNumber that is rounded down to the boundary of the
+    //  consecutive bytes of cached file we wish to hold in each slab
+
+    //  we will hash the CachedBlockNumber aligned to the number of sequential cached file blocks that should land in
+    //  the same slab
+
+    const DWORD hashInput = (DWORD)cbid.Cbno() / (DWORD)m_cCachedFileBlockPerSlab;
+
+    //  use a mixed tabulation hash based on cryptographically random numbers to hash the CachedBlockNumber.  this
+    //  allows us to get a good hash function though the input is an integer with non-uniformly used values that are
+    //  close to zero.  the quality of this hash function is crucial because it is providing the load balancing for the
+    //  cache by distributing the cache request load as evenly as possible over the slabs and because we only allow a
+    //  given cached block to be placed in the slab that is selected.
+
+    QWORD qwHash = 0;
+    for ( int i = 0; i < _countof( s_rgrgqwTable1 ); i++ )
+    {
+        qwHash ^= s_rgrgqwTable1[ i ][ DWORD( hashInput >> ( 8 * i ) ) % _countof( s_rgrgqwTable1[ 0 ] ) ];
+    }
+
+    DWORD dwHashHigh = DWORD( qwHash >> 32 );
+    DWORD dwHashLow = DWORD( qwHash );
+
+    DWORD dwHash = dwHashLow;
+    for ( int i = 0; i < _countof( s_rgrgdwTable2 ); i++ )
+    {
+        dwHash ^= s_rgrgdwTable2[ i ][ DWORD( (int)dwHashHigh >> ( 8 * i ) ) % _countof( s_rgrgdwTable2[ 0 ] ) ];
+    }
+
+    //  combine the hash with the FileSerial which is a cryptographically random number
+
+    dwHash ^= (DWORD)cbid.Fileserial();
+
+    //  map the hash into our slab count
+
+    const QWORD iSlab = dwHash % m_cSlab;
+
+    //  convert the hash to a slab offset
+
+    const QWORD ibSlab = m_ibChunk + iSlab * m_cbSlab;
+
+    //  return the target slab
+
+    return ibSlab;
+}
+
+template< class I >
+ERR TCachedBlockSlabManager<I>::ErrInitSlabTable()
+{
+    ERR err = JET_errSuccess;
+
+    if ( m_slabHash.ErrInit( 5.0, 1.0 ) == CCachedBlockSlabHash::ERR::errOutOfMemory )
+    {
+        Error( ErrERRCheck( JET_errOutOfMemory ) );
+    }
+
+HandleError:
+    return err;
+}
+
+template< class I >
+void TCachedBlockSlabManager<I>::TermSlabTable()
+{
+    if ( m_initOnceSlabTable.FIsInit() )
+    {
+        CCachedBlockSlabHash::CLock lock;
+        CCachedBlockSlabEntry       entry;
+        CCachedBlockSlabHash::ERR   errSlabHash;
+
+        m_slabHash.BeginHashScan( &lock );
+
+        while ( ( errSlabHash = m_slabHash.ErrMoveNext( &lock ) ) != CCachedBlockSlabHash::ERR::errNoCurrentEntry )
+        {
+            errSlabHash = m_slabHash.ErrRetrieveEntry( &lock, &entry );
+            Assert( errSlabHash == CCachedBlockSlabHash::ERR::errSuccess );
+
+            delete entry.Pste();
+        }
+
+        m_slabHash.EndHashScan( &lock );
+
+        m_slabHash.Term();
+    }
+}
+
+//  NOTE:  PERSISTED:  this hash function is used to locate persistent data in the cache.  changes to this hash
+//  function or its configuration can result in data loss!
+
+template<class I>
+QWORD TCachedBlockSlabManager<I>::s_rgrgqwTable1[ _countof( s_rgrgqwTable1 ) ][ _countof( s_rgrgqwTable1[ 0 ] ) ] =
+{
+    {
+        0x8EB75AF7355BD928, 0x59A0DF75A2F3F641, 0x3750BB3256A70F90, 0x7859881ADE77752B,
+        0x5E3FF68E7289E6BB, 0x2C6AEFB31A723F60, 0x93104DDAE00A7DD9, 0xCB8EFBDE294839CC,
+        0x6C2DB56617972C59, 0x30496732C8EF6831, 0x5B0D415B39262B05, 0xEAD674A3FF67636E,
+        0xC51FEA87F78A352E, 0x6A4EDFA48ACF320A, 0xC7B7F52D7D845906, 0x856ECC07FF3949C4,
+        0x2DB5837F97D73F84, 0xD1B2FB866830D682, 0xDA40FADFEB313CB7, 0x164E6F4E6AED6776,
+        0x6CFF4D44B49206C3, 0xCBCF542D7068B132, 0x0A0F9BFE2EF9290F, 0xEB4F21CF4C930904,
+        0x5888BC772A07F13A, 0x2E8717A2785F1337, 0xCBD046F85290C1E4, 0xFC4887A39155ED50,
+        0xECDEEB1AB8C8587C, 0x1F4284B19C2E2DE4, 0x75B8502B9108D36E, 0xB989306ADE3F41E3,
+        0xEE1A741D121087B2, 0xE077D18634FF9D47, 0xD97C3DD842A3F0D6, 0xC3355D4E28E2CF87,
+        0x707B4149600D1F76, 0x7085CC2CD416CBA9, 0x707FA1C43487717F, 0xE9F68CDB21EACF6F,
+        0x139B03C803229FFE, 0xF8076DF5BD5B5837, 0x92D907874D96EA3E, 0xFCEE60D7126150C6,
+        0x1D6BDA232425A3BA, 0xF3E52F37D0C584B3, 0x49FFFC059D8A27BD, 0x981371E2EE54594E,
+        0x3AA3983165A5ECAE, 0xDAD2E362E281C329, 0x0B7382B9AB884163, 0xCC5B2BD2898BE217,
+        0xA21C991B0328B8FF, 0xC1A0B3AD91509805, 0x37B3E29EB9CD7103, 0x034245C80FF50F58,
+        0xBC46AA7DD1637CA6, 0xE80D31C2AA7CE208, 0x4CD444AB29B60D4E, 0xDDF9812BD3E4D43E,
+        0xC1FA97213BFCF500, 0x4DC1E5ECE87482F4, 0x66D6A1A5000359F6, 0x062D3EB067918E23,
+        0x607D0D88C2E2B802, 0x85F99DFFD0F1F2E7, 0x57AF0FA8154C6918, 0xF4A9077927F55F3D,
+        0x7B5097C21E918E6B, 0x6235BCF566265B72, 0x5E460EF9559A8D4D, 0x37EA0004665B6D63,
+        0x29A9A6994B81F294, 0xD4B4BC5BAA40EEA3, 0x002F82CCA1833714, 0x0E87894F624DCC51,
+        0x5411AE511BB51D3A, 0x53916315EFB384E2, 0x2DD4050223DA8ED5, 0x0B900C2B60BB8829,
+        0x36F40654E3337674, 0xB733FD35FF78FC49, 0xD26FE57F530BAF19, 0x2E38A99833638862,
+        0x0178656BD9967959, 0x146203DE146C3E19, 0x2C19C52DBB5B8877, 0x815648867CFD8265,
+        0x7AB20EA89A344D31, 0xC8299384D8028159, 0xC0FBF1F4731ABF11, 0x935859F0F1710180,
+        0xB141F147F2E53761, 0x57E15470CD962A45, 0x2ED619007DC47D71, 0x174BB6309C7F8FF5,
+        0x92E3898BC0955B0E, 0x07D7366C53000EFB, 0xBB86FEE4A20B5011, 0x291445DEC32B865F,
+        0xDB12EF069E24AB46, 0xE6DD9732F983600E, 0x5081CA99322C7215, 0x8C86C68FB094B15C,
+        0x2F5103790A5618B8, 0xDFE348CB57B3CE7B, 0x4F48212377AD4725, 0xFB31B67843361CE9,
+        0xEC3B850DAC33B433, 0x9D98C4F82429EB7F, 0x8FB06E802CDE868D, 0x8A0B2C947E01DDB6,
+        0x56865A45FCB6C031, 0x878B0E29E53C3E0E, 0xB88A6D12CD5DB959, 0x08506146F0F30706,
+        0xACF7BBFD54E24229, 0x1E16098BADC1029D, 0x5B87A967E9917EFE, 0xC80196E2D908B505,
+        0x68D7467CD2E3B812, 0x0087DF266219EE5D, 0xC32E0213692717C5, 0x4CB78608A54DD706,
+        0xD2308D43ABEE614D, 0xC9E1F9EED1F44FBA, 0xE38DCB7580CE1A93, 0x4D47A29184C0493C,
+        0x679B3CAE42826409, 0x8C73B6BEE8AA6233, 0x368F449979983BDA, 0xDCE0A190BA1239A8,
+        0x00B4FCB29C69F7E5, 0xC4CEBDEA72A82112, 0x55C8DBE6C559E440, 0x60E878890715B1A5,
+        0x305C06B9CE363279, 0x19FF16F44577D1D7, 0x2F770548E5482C81, 0x39BD851BBE068002,
+        0x65E7FBDA3464E983, 0x4331E6A7CECC5ED4, 0x83EE20CCAC8230FC, 0x788299C2F66D6716,
+        0x6BE5262133E83641, 0x84B62BDA50E698EA, 0x80213A80DFEC97D4, 0x2C0603D9E7211676,
+        0x5640D827D6AB3E44, 0x0CA792731A87189B, 0x220B932AFF2BC67C, 0xEEC64702379120A2,
+        0xBAC6719A7508A442, 0xE5EA2A33662252F2, 0x0B6C15525B567152, 0xACD544B780D6A3F3,
+        0x7FB90638C1B8BC78, 0xEFF66FF3B8025D89, 0xA7E93647DBF2B4C7, 0xE6D23CEA0EA035FE,
+        0x4D9C9572F4DAE203, 0x37F54E501D48FDCC, 0xB95971D1747ECD8C, 0x8A2AF6B026F45909,
+        0x394BD439EC2290F2, 0xB7FA03C9C7811C2A, 0xA23385C36732F207, 0xB237F048208B55B4,
+        0xBAEE768882FAA377, 0x60CB31F2790C27DE, 0x9AA5E9D19327460A, 0x2C84D3F2646631E6,
+        0x563F522BA49DE7EA, 0x16E6C14B9B93CC3A, 0xC0C9977F4D2F2580, 0xFB6DA1A7B7D2A6F8,
+        0xBB7437C16937BFFF, 0x1AB6399A3622B6BB, 0x572EBCDAC17219F2, 0xB62752EF6D1E6E81,
+        0x41A2E2ADA114C994, 0xF4D727EAF0D69F14, 0xF72958F9F219653E, 0x94F5F7DF9036C2D1,
+        0x9A1E3AB94E7A5277, 0xC517A64BAE83B86E, 0xFEBEAC1CBC09DAFE, 0x15E44E7EBEF4F1A6,
+        0xBE51470E09FCC3B8, 0xF48DD54EA942D336, 0xA70323E258E74CDA, 0xFAB075328B89CADB,
+        0xB3009286F818793E, 0xDEA26A5485B25077, 0x5A65F33005983009, 0x2EB1B6850D35BE42,
+        0x54C953392496F0BF, 0x4D03D6FF4C515964, 0xDE15AFFE3EA53E40, 0xE80DB38856B0B43E,
+        0x1647D0D2A642FF21, 0x6C7F45BF6A27E32C, 0x3C1596343D3E3911, 0x39070731F36E0A89,
+        0x4CAABE3D218F89F3, 0x487F49263057E1B5, 0x0C569C2669D4C326, 0xF54BFA20BFCE5263,
+        0x8A9E080F45C39AE3, 0x70F9242CFFA1AE5C, 0x592014B528D620C9, 0x5F304874EA5DFFE7,
+        0x7F878AFFD2E7840F, 0x04BE03ECF2FECC3E, 0x44A8545E33736A5B, 0x195D8AC50F8910FA,
+        0x0B2348B9336F31B2, 0xE35426EAAF7C9910, 0xFD9DDA780C1B9DB8, 0x1BC46DA4705B01A0,
+        0xFC080FE1DEA5A4BE, 0xB89620FAA28B223D, 0x29FAFBDA9D535A17, 0x5EF8269A3B3626EA,
+        0xFF3A316A96F4FCE7, 0x61586560A4A1467C, 0xE8C68768CC88EF5E, 0xD3F8B5E6DC6D286D,
+        0xB6E57C838044595F, 0xE76EA450A198E8F5, 0x369826C911655580, 0xDFFCB451EFC114DC,
+        0x61AEA463FFEB35FF, 0xEA2B89BACB77E3E4, 0x5F9BF94C451DF927, 0xE592200E038C3E2E,
+        0xCCA76B7EA4C57076, 0x83163D51F5EFF42E, 0xD84C6CDF7F5024A6, 0xFD261E10322EDF68,
+        0x5838F0298260523A, 0x1996BFEF5FC0C7E0, 0x4E0B525D415AFC25, 0x48BCA523A5250972,
+        0x27E633E37D044389, 0xA4D6CE8F147E20CB, 0xECA9F35366FFADB3, 0x8F47C0DFC39894F8,
+        0x19CD4ECD46344B39, 0x91C1504E991AE3BE, 0x5971A072E72C2FAD, 0x6066C55F809D0921,
+        0xB5B99EDBCBEDA90E, 0x42719F02E4EAC512, 0x07FDDC0DC00C7A8F, 0x2E34D351B75846B9,
+    },
+    {
+        0xCFA8AF47AA819636, 0xCB56E3D8A33ECD60, 0x416D2F19D4B688C4, 0x7DD351B75C5C8FA0,
+        0x91311CDBAA86EF66, 0xDA492D4DC3CB0DCA, 0xD7C8F86B9718EBF2, 0x1201295F2D41ED42,
+        0x313303FEC0554D2B, 0x8D9DFB744C1A7CD6, 0x2BBDB7A295D72279, 0x249F7E2A58B77C0C,
+        0x8FC6FBDCA8F1EF9B, 0xACAE8B20E3033650, 0xA8CA0010DE5B4079, 0x6059C6D906FDF704,
+        0x9C8E569CCF0B8E2E, 0xF42381D3CA6CA6C1, 0xD1B8E0C508C68C3C, 0xE77CB18E6EAEA9D0,
+        0xB89D11D6F12EE5C2, 0x6A11EA6F06D99E59, 0xDDFABC4970AC9928, 0xC0038BE728DEEAD0,
+        0x6A527C01505EAED5, 0x4AB50B70BEAAFFBB, 0x6A8A46EA4FBECC50, 0xF65E9B404A585ACC,
+        0x2B40930003CCAF95, 0x216F7BADA393B1D2, 0xD6E0E34208617586, 0x9C972DD86220BA3A,
+        0x4A400CA34E00A4E0, 0x656EDC2A9AB8840E, 0x555D4BA326EFBF16, 0x0E597DD9B56D5770,
+        0x1654F48B9F845BBD, 0x9D56C6E8FC4D10C0, 0xD4D32CF74ABEFCFD, 0x03839A52A4D80E66,
+        0x11A88E777054CC94, 0xF1533A27B3613438, 0x830299D64A23F8AB, 0xF9032FE8DAD2352A,
+        0x6BF0D6C2EFD8F691, 0x78793F0A34FFCDCB, 0x0A3CDEFBF9D942C6, 0x364543B27BE4058A,
+        0x55FBE8287F8067D0, 0x54F93562A0D70910, 0xF8AD003EA1E4273B, 0xD86FA34C3DDE490C,
+        0x1E4BA490717290F3, 0x82C50C4988414C91, 0x9E96CDF84B0AF4DA, 0xD4A80AB07E706D3A,
+        0x516CE2689E28C990, 0x276E4952131A05B5, 0x0F2762C077BE8CC0, 0xFDFCFD7B1278BC97,
+        0x9CF3AC27AA1800D4, 0xC4FEB2F933EC5B48, 0xC42194919CB9C239, 0x35F30FBE879209CD,
+        0x64D22A79A3F68794, 0x28CE07237117134E, 0x5D16672681B217ED, 0x12E645EC660F9059,
+        0xBE0E04B81290EDED, 0x80E6549C9D406087, 0x6221CEC4005E0EDD, 0xC7FC0DAD7967EBD8,
+        0x50B9EA1572ABF5BF, 0x8D894EE952EAE2CF, 0xDBAD01E000CAAD98, 0x047C0512F21CCFD9,
+        0x64C34E2225979CC7, 0xEE50E246DF1B1241, 0xE63EB3598A567B33, 0xD7916E95C3453A5D,
+        0xB5864987B460D836, 0x560542264E12C49D, 0xA0E6C16C6BD4B6D9, 0xBFDC3AFCC31CFED1,
+        0x78CBD1917DFD8A23, 0x3DF41DD8F632655C, 0x4213A82E6A032E15, 0x6CC2357D1961B19B,
+        0xB43EE37807DA8B1D, 0x04E8989C3A8561A3, 0x16D7B4820B0DF4C4, 0xE620FE65E667665B,
+        0x4EF2E65DC1594A57, 0xB8DF6F621AA6B8C3, 0xB7911377C5390CBC, 0x9646194F24B6AEE6,
+        0x282CAEBEB3671DC0, 0x5384A35AEAAAAD62, 0x4F9E321F000429B9, 0xD5F44EA5CC89040C,
+        0x0ED5BE477D433800, 0x1CE4145997773185, 0x7D6E05F5DCD848C5, 0x2CD85A7A2E4214B4,
+        0xBFF0A9434EFE1747, 0x77BE410C3294576F, 0x14A3B3EFAAE5C292, 0x22975DD3C6B7D110,
+        0xE0122F7611817F20, 0x64DE6BF1A747E659, 0x54E36D869D2D4619, 0x605254EA6416542D,
+        0x5C7744CC8E03B369, 0xDA85F3DBFEFBC6CB, 0x52B10B2CF8B890E9, 0xD11FFDD7413B32D0,
+        0x8F491700DDF75605, 0xF1A8C90F698178C5, 0x826E2F4A1B25C667, 0xDF3A61029BE6F054,
+        0x0B527E59048503B9, 0x8640F245BBFA19A4, 0x69F2AD59DAA343E2, 0xEB7300FB9A488965,
+        0x5D0F5DEA32504622, 0x4CD700B59C88EA43, 0x24E70436FACA9AF3, 0x98F8DEE456502128,
+        0xAB64E5647F92236B, 0x92F5965A35FBDDBB, 0xE1AD313291064741, 0xCF83369791ED9BF6,
+        0x1AECBBC83685A70D, 0x7CF713A0F386633D, 0xC96F5EB3BB6E1A23, 0x113263679125D0A3,
+        0x45C2B8FE5FA58882, 0xAC6881315C6368CD, 0xBCB926D9A2E2DD65, 0x1FBC6B2ACB79E568,
+        0x021E4636B76CCE92, 0xF8651C09EFC37BBD, 0xE2955D369070A6B9, 0xCA3C235A0A9DDDD7,
+        0x889F282116D6242A, 0xDF744F2C6B70E994, 0xBDFA82BAFA647630, 0x8515C7228D25C28A,
+        0x41A074E55741969E, 0xC1718C6C6A5A6769, 0x96E010A768A87D0B, 0x3C2319C52C9EC529,
+        0x8DD43678DDE29D9C, 0x24939EEE8403A5E2, 0xE865A79832253E3E, 0xE468ECD91EF7CDAD,
+        0xBD99A568314772B7, 0xDA577892B53A59A2, 0xBC64E35E6A9BC56C, 0x6A33A6C3EC90968B,
+        0x914F6B72684E08B0, 0xA07E443A7975B7A2, 0x611BAC239CF4FD2A, 0xE0FDE2A950EFE175,
+        0x064118FADE8E8D86, 0x1A0F1C5AE8F6126C, 0x7794AEE5A97DC16D, 0x85DE309FF5CA51B1,
+        0x62B26D8FA9725143, 0xF4CD7F3480E5BC38, 0xA428BAE0F3D80EBE, 0x190C60F22AF14380,
+        0x1D57883319F21A49, 0x0414CA6E44D00008, 0xB206CBE233074EB5, 0xD1DEAFC4CA292F2D,
+        0x1FDCEE8408371966, 0xB6543B14D41BB741, 0x88C18D4E9E2BEFED, 0xDCD7226A0C0DDBDD,
+        0x0CE7583E747FDB05, 0x2B5C2CAC3BAA5E6A, 0x15A5CAE08AC76BCB, 0x4E43CBC42E6933F4,
+        0xF9DAFC6CDD286B87, 0x2D047DA6C3042E78, 0xD55F40D709ECD38C, 0x932BF66823352D92,
+        0x71BA846E570C5C64, 0x515484248B2BEBEE, 0x1E8C02D60C6B5983, 0xC3849F391792B7EE,
+        0x4F762B2C265C305D, 0xE2115CB7F4F6BD5B, 0x89815E8F52001FB3, 0xD41C2F06A62B4A56,
+        0xAC034D7FD8AB404D, 0x5031BADBFD03E9E1, 0x9828F77EBA0EC164, 0xEFC6B7F66BE1FFF0,
+        0x18146527221ABA5C, 0x1B49C4E2CB71E8FC, 0x1D61FED9AFAB56A1, 0x1505F4C1AD66C2D6,
+        0x6721C1870F74DEED, 0x79EBFC7A1FEE25D6, 0x726F7A3DD35AA740, 0x0C38FCA94C272996,
+        0xBF8332A4357C2203, 0x465FFC2285E929B7, 0xA66E21E99BCC589E, 0x00D2C3594E162F89,
+        0x0D4CC9A96F3A0D01, 0x69383288CBDD0042, 0xA07602A5439775F2, 0x4226EBCFC05124F0,
+        0x2055BAE00ED86647, 0xA47A05C120EBBA8E, 0x8D4C42106C222D60, 0x2A14F22C989BC99E,
+        0xD0F24486F887E79C, 0x81C115635F86A125, 0x854B8F02C6A13D85, 0xC9A28A3114E46D4C,
+        0x8DB1D89079E42706, 0xF56CF6B62A9D8F37, 0x26D8519166011F99, 0x2749468C64DC4660,
+        0x9D43410F6B27B6B2, 0x58CF24ECCEBEFCF0, 0x5C92E357A55A5BCD, 0x458A2945058DA555,
+        0x6E4E6E89CD139AA1, 0xB0FD62A5C8D55BCE, 0xCA68D6092924468F, 0xB029121DCC9CF8BC,
+        0xC18A3ED35B02BC6A, 0xFBE9F3EE2BB007E9, 0x23BF0FC20DB4EA6A, 0xC6D45E0BD1A59D37,
+        0x57888039F9618624, 0x71CBD7DFDFC7CAF3, 0x8A103FD1F3B345CF, 0xDA4EDE65F9AD46E6,
+        0x35A54BD2518414B5, 0xB7097A9565AC64D9, 0x23D24AE09FA166E8, 0x3CDB917DA02A7189,
+        0xC57EFC2062ECB71A, 0x4375384688EEA8CF, 0xF5F35116B71C6ADD, 0xD0CE17D7CA5077C6,
+        0xB22BA4F2A9779D91, 0x6CABEAF7C05D6410, 0x74F27AB8D414910D, 0x9813FB7BBB195B31,
+    },
+    {
+        0x3ED21537617D1EBB, 0x883D3536500041BD, 0x236F8B0765801D7B, 0x499723B7CBC06E02,
+        0xDFE543233E840202, 0xA61117BCCEA72980, 0x5BD2BA6B7F27C34A, 0x7F9EEC9197E11391,
+        0xBD3489CF2B86A6DD, 0x0C86510DA43EC417, 0xB0BAD6014BEC9B74, 0x053BE9D3B80D5C1D,
+        0x76E8BFDC948CCF99, 0x0D6A1276C736B62D, 0x68373775BFFE0E42, 0x9B49150E9F9005DB,
+        0xB3BD291DCA7A33E7, 0xAB979082899694E1, 0x16D47D7334E8206D, 0x4B9454127EC4991C,
+        0x4E18B908D6B1E07D, 0x353D54FD32E32A80, 0x472B92EB9E25FC85, 0x9A0ACD49B8C69591,
+        0x83EDB70CEED7717A, 0x1C5EEA7AA9A3FF37, 0x2E0B63FC24DC6711, 0xEAB243FCC3F6D27F,
+        0xD93E160DF9B1F7D2, 0x15EE916064860BAC, 0x627C59CBA87D48B5, 0x31C3657C3AFAE84A,
+        0x02EFBCDA88D7D163, 0x1434495BB2471FD3, 0x36EEF22982CCB853, 0xCD4F058408ABE937,
+        0x6BCE2BE404AAC465, 0x0B959A30C90B9415, 0xB974CA1A5D95BFC5, 0x3C2D36E90752B07F,
+        0xF703295A13CAC62B, 0x185A1DE6D8885969, 0x1F799BF4FAFFD178, 0x26F32394BB55A6F1,
+        0x24783969C03A4BAC, 0xD45AF15EF5B57B6F, 0x801C100096BFAA1B, 0x1E25B341DE8C0015,
+        0x5EE0FC750616578B, 0x88C2D1FE9A1F384B, 0xB438444B63F2F467, 0x8465A25374E47231,
+        0xBB2E920490E9E0BB, 0x18A2E98E187EB906, 0xC8C7B032805A0F9E, 0xD59F7F967285B3EA,
+        0x6C73E16FA402CE12, 0x41A69304B4DBF54F, 0x5B1DE3DE405AE25E, 0xB23A30C660EC4604,
+        0xC42619757DED6DF0, 0xBC9C315B95206CA3, 0x2FAED544C4D252AA, 0x676FECC36E92E3FA,
+        0x5B6AACF77F18A3E8, 0x862FD4EF3B3B664F, 0x5DCC5256ED332790, 0xE3BA843B47217149,
+        0x93A0EE58B037D420, 0xE391BB9A55A22551, 0x023E9122E394E01F, 0xAB6D5DF8391D8A29,
+        0xF1180B2DF506187F, 0xE2946DE5CC29D4B9, 0xF58CCF1715D9374C, 0xA3DFDD905420BD51,
+        0x224D5921835AE95D, 0xF132F11A966E4870, 0x9A361BA206E497F8, 0x6E1DC1746B1D4C56,
+        0x024176B1B6993089, 0xB8E00BB0D5A49870, 0x092F819FF0303130, 0x6E42B7FEEDB73510,
+        0x74678E7FE31BCBE1, 0x8661204E2E288FD6, 0x2C73867F1E06C56C, 0x73252F6A9C2E16DD,
+        0xFC9FFA69D9518550, 0x2EFD188009306240, 0x7AF7639DCB2F5A5E, 0xAF73991F2F36C763,
+        0xDE7986CB501ED643, 0x4F58A6A084285899, 0xE5CA7DCFF46281E9, 0x0C6F6C26085DCB64,
+        0xF1F1789B2B4B4AB2, 0x3AB9828CE7EF99DC, 0x6702F2D2CF06728E, 0x07E884D5AAC41723,
+        0x5AEA6A59A709FBA2, 0xFD4EF0B9FD4D6CA4, 0xDEB4B080FC5EE164, 0x95F6854E342F4905,
+        0x94EDEF2D7DCC9851, 0x30AD0DCE069D427C, 0x5F8C534C5FE0ED42, 0xDC8330051C3CD1EE,
+        0x29405E20230D04FE, 0xAFA2A88F1011FA10, 0xD06E79C033254FC5, 0x34E2BC6DADCA7251,
+        0xF199D4ECC6C5C4F7, 0x8CEBE2DE9EE5C8B8, 0x89DA56CEC848B984, 0xFA96A6D0F26FC4C7,
+        0x563741331E455302, 0xFB0C61E933FBEA83, 0x1282CF8E076C9D0C, 0x34D4E13C92A5C683,
+        0x6D2F32DB627402CC, 0x2B69E53CD2137963, 0xBA002A4EE15447B6, 0xA26B489D72E0E221,
+        0xDDDF6B39C152C061, 0x86F142142C8A48C3, 0x9A1264636F4EC238, 0xEC1DA4AF4C891894,
+        0xF6B6EA6286DE9CAD, 0x8286E9D47ABD530F, 0x68FA7AF3DB3533CD, 0x046B9562DDBAF150,
+        0x7BBDB25ACB2FAE8C, 0x7814F566B22C6F8B, 0x023E178F847D9381, 0x5E0A358FA2CA8892,
+        0xCE287C3724ABE77E, 0x8C9427D65BC0B51C, 0x8F95B9437A78673F, 0xA343E8319EA7F640,
+        0xA0C37915587EE91A, 0xA9C6E96973A7113C, 0x16D0F44DC08E624D, 0x70FB222FD4203F30,
+        0x89B64C01862DAA74, 0x42233578D3C88C6A, 0xE8144388F422AD16, 0x3BC99509CFDC62AA,
+        0xD6612EF07263A143, 0x4429A901C33D72A6, 0xABB330636CE6679B, 0x0C4F661FC5B8A9BE,
+        0x291A701C8310A3E0, 0x95B6A10ECEEAA494, 0xBB057115E0DE4542, 0xBD9FE0A069C0A1CF,
+        0x334E334394CEDD78, 0xFF28443EEBE8BEB6, 0x1079A7E990A95723, 0xD88C2BB905144FD7,
+        0x81C17F59029D0FDE, 0xB9FCA85E5E710FD8, 0x82D2F7B4CCB8C70B, 0x26771EFAAF0DBD2E,
+        0x682FC26F61F99A65, 0xC8E74C37D80A44D6, 0xA651E1394FA51DC1, 0xE9F8FFA6C2798383,
+        0x12749AF532080613, 0x6456B724FC91AA59, 0xFA1154B4367F773F, 0x5E6AC81B84B24065,
+        0xF24345954C75E5F4, 0xD703A33548791987, 0x073D2DA8D2442332, 0x5419A6369338F209,
+        0x90656104BE233C86, 0xD2AEB56A905729EA, 0xD14EB160E0517CC5, 0x23EC84CB6CEFA4F3,
+        0x07C29F2B201D1CA7, 0x444D8673380A3E17, 0xED4FF21A667F01C9, 0x25A3E00BC249E0EB,
+        0x5867976B20E268DD, 0xCFE84FBD602FB4F6, 0x2A8C6C768E24809D, 0x1DBE68873D2A400A,
+        0x899391760010275B, 0xF9C0FBF534C372A6, 0x761AFF2A6C941607, 0x27272BEDD1BA7B86,
+        0x24CB48BD1E1285CA, 0x5C753AA9AFB1CBDF, 0xB72CD5960BCF5EE8, 0x81B6455F9F80A7A5,
+        0x5A159C5522B650A2, 0x0CECDC9DFCE3EC92, 0xF554C771772024D6, 0xB7CBCFDDCA5EFDF6,
+        0xA3E998F4690EF847, 0x4FB7745C90234935, 0x9FAB98B3B5711AC1, 0xE516CF8AA93CF0FB,
+        0x12B9C1BD4FDFCB51, 0xDA9B7683E0FF591B, 0x93ABA44D5DED0E71, 0x6ADCCA6CC43D2E78,
+        0x1DC1BC3664D467D9, 0x2236B603E6D2F5D5, 0x24BE8665A0AA3B71, 0x3A6B44F87F0AC705,
+        0x32F4053261068AE0, 0xDE43009EE0D587A9, 0xC4FC240A96AA6B10, 0x4E1837B0C8C638DC,
+        0x53794AF10607605B, 0xF832B52D24EF46E2, 0xC5C7C65687D50CAC, 0x19C696817E2BB8BB,
+        0xE7D0D4C84D0E342F, 0xF547021A938B8842, 0xCA470FCB9BE83B73, 0xC8180694F639DE79,
+        0xA1232B6406FD4369, 0x19BD950D51938149, 0xCA74F1384672FAC4, 0x9443686556AF4A7D,
+        0x1DF950E9C2E4C230, 0x9E5F97704B5ED681, 0x911B143183BF5A5A, 0x7CEC20D17311687A,
+        0x670FE564845CDB45, 0x6797FB741B9ACD86, 0x7FE368DCE36B48C1, 0x6E81EBA734AA2E0F,
+        0x92E9A3357D0EBD0B, 0x183BFCE596578C8E, 0x27F3D31C8EA4F1B9, 0x3D696DA75E35AE44,
+        0x41B13BEA31C08E4A, 0x7BE920A1D445D4A0, 0x377B12CF276FB78B, 0xD0776BAEA3524E50,
+        0xB156C65C39A52712, 0x89DC5BC0BE1AEFE7, 0x6A54F8BA21163C68, 0xA2067C2418B4228B,
+        0x646C40B57D78F104, 0xACE7C02DFE368B0D, 0x1216E8323D853F82, 0x61C63210B2F5CEE9,
+        0xB5E558C4DD578708, 0x18A9CFA0B077CD02, 0x92FD60C45C76EB02, 0xC7EC5F882610D23E,
+    },
+    {
+        0xEFF7E7A7BBFFC99E, 0xAACCCD8DC0FA57CB, 0x1B4F7316D0715C83, 0x13B3CAC733366C72,
+        0x26743640576C3A12, 0x240DEBA369A18178, 0x5AB86B20280E7881, 0xBDEC04560D3B5E31,
+        0x03A9A4FF70DCDF8D, 0x58345433881953F1, 0x2B6C22CFD79459AB, 0xB3900C9D0513F871,
+        0xC7D5F0A3039F149C, 0x6E022581C46FE39C, 0xD33168925B3AD3A5, 0xC9958E94409E99AE,
+        0x63902A87AF6E43E0, 0x77071D183359942A, 0x664E8BA282FF6BA8, 0xFB5779BA73E7590E,
+        0x415ECD3C573BE43E, 0x0F2817B2C8719E4B, 0x2FDD8FC7189AD93C, 0x1FE3F1D3E26CEB62,
+        0x3F5C1E47FD0AB770, 0x18FB0A2F2FC2335A, 0x4FB21B3EC3AB8DCE, 0xCC4AF57196031661,
+        0xA93D35605ABA322F, 0x0685A440B03D9BA7, 0x84C3816F0E85F7D6, 0x7434F9D5CD0BBD05,
+        0x0B0657749634766E, 0x044C2AFE545F4DF5, 0x7CA9CC8ED5773BD0, 0xF38C97387FACECF7,
+        0x6B7B7D4C678015EB, 0x8F250CE2979F088D, 0x11BA791FD7132552, 0x9F1BC9EC75DA2755,
+        0xC0A32AB696574083, 0x756A54836702FE18, 0x4F1FFC5D59439747, 0x0873E113D822A0E6,
+        0xB76363CD687E06F1, 0x0F99D46532721C61, 0x92235CA6F77B5BC9, 0x66E1449513B0548F,
+        0x76C80D6FBEBFBCB8, 0xCFF22BDC3C713478, 0x59260DC7BD814650, 0x900B359227BB1171,
+        0xF00D2AC7E5D4C6E7, 0x15C77017FB65447A, 0x950CA05F25BA8057, 0x6C740AF05ECC2863,
+        0x0F0A673D1D34207A, 0xBD0721D59786FEE1, 0x6E3952F9A39533D8, 0xAD49212FAB052B9F,
+        0x98B35597A641B1D1, 0x41BE05142C37F035, 0x9DB2723BFBF5AA7A, 0x8EBDDF791C8CC3A9,
+        0x97F93534CA547A1F, 0xC406E2060D117601, 0x8415A045F5EBEC77, 0x2C83B52436A2DABA,
+        0xA9902E923B2D1514, 0xA29B0796716DACFC, 0xE3FA331654E82449, 0x1CBF2FEEAF034FE1,
+        0x9EBE3318061C5B9F, 0x98C34A0A86EF1AE6, 0x00D2D5BE1AB7F931, 0xF3E4C48F17FAC401,
+        0x45400AC29ADAF20F, 0xB10CD14428E72FDB, 0xFF3C398E97226E9F, 0xBE1CF7B889D3DBF5,
+        0x7E2842A08173ED16, 0xCDFA182E43F826A1, 0xC56340C37ECC606E, 0x47D9601EF889D314,
+        0x5EE19D2427357CD7, 0x04EF952F6414E91F, 0x881B62BE4F9C070B, 0x729B86C0D033C186,
+        0x9C16C613034589F5, 0xEB4D1566AA22E09B, 0x4B0C83391FAABF42, 0x8D804CBA1818C644,
+        0xDF3905D93CFB29EE, 0x66DE1E47144D4384, 0x2A8E61C86DE8E631, 0xEC9A21EB7562EBBF,
+        0xA104079E67A026E1, 0x32181F8C42F142A0, 0x31AC9F35A2ECD0DF, 0x348F0D3E0C8BA10A,
+        0xE4F31E135923A1EE, 0x25505AF2B35B665B, 0xFC7B0FC53BD3DEC0, 0xEDCDF9BD322DD8D1,
+        0x25AFC02E53B55EC9, 0x881D7A82DB608071, 0x12390D181ED44457, 0x24A6456CDFA8B06E,
+        0xBB0DF9142EDBB269, 0xD7345E25E7F96CAD, 0xA4935D46A65D4A6B, 0x2F56366852BB1D68,
+        0x6477A62B5F7948A3, 0x5009CF51E0A6123D, 0xD85A6CB64916BC5C, 0x1AC1593551FF345B,
+        0xB69388DB02A23BF8, 0xFBBC429E5314E14A, 0xFDC54DB1241DE8E4, 0x183BC621A0C76BEF,
+        0x00EA08142DF9EC69, 0x35BE3F7B8AA9E58E, 0xA72021B58AC2C573, 0x4BB509C116971DB3,
+        0xD6EFFD1AE38EBA65, 0x12765357237A4181, 0x28850128AC4B985C, 0x1448EBDC45C0D4FF,
+        0xFA45ACD79B7DE536, 0x4C7F9BBE614A5261, 0x73B7E9921DDD184D, 0x63D916209BE47E2C,
+        0xF830DA9297779EB4, 0x5C9EC381CEFE474D, 0xE87289E73886ACB3, 0x2BED4BC66CB8FCCE,
+        0x7AA87A0D0FB5BB83, 0x840DF6AABBAD0D22, 0x8EB6903B7DBAA8B2, 0xF10CE7815E1E7B5A,
+        0x6EDAE9FAF148E270, 0x97190001E980B197, 0xEE17EC55318FA914, 0xFA0747F9FB4ABB24,
+        0xB465EE4E43AC2263, 0xC0BB0E9208254D6D, 0x411ADDB547656179, 0xA23D2FBA66F96F0A,
+        0x76BEAED7F2C19402, 0xEF54A64D89928CA5, 0xDF137150381DCD4A, 0x0BB9196C2E7BD999,
+        0x619F4B27E10E79C8, 0x95CA7CDD7704CAAE, 0x46B68823BFB2B546, 0x687841E6D5304EA9,
+        0xAE736BAB5373393F, 0xF988EF0D145D8E4F, 0x8824A071B8214F4F, 0x3B8BFED7AD847A16,
+        0x2418A571B9A9426F, 0xCEA02DC7B5BCE7E0, 0x2C29F69EB33D02B9, 0x44C2DC459D6AC189,
+        0xBFFF7A939CA2F71C, 0xADD31996977808BF, 0x3041D042827DFE41, 0x63A12069387934A2,
+        0x36D7C544028772DD, 0x00B5D8F28FD9B6D0, 0x79D7A83124E49B65, 0x9AEFA6D28869C65B,
+        0x418EAEB557CDAC43, 0x025C81AB150D6D68, 0x8F80263CFF930F1F, 0x7CE16063837076DF,
+        0x05638A9D6C99EC96, 0x74F1777FB4BD0AD6, 0x5A79EED693ADEAAB, 0x72D7F41A44FACE9F,
+        0x030A07B427C821BE, 0xD0545A1CDC73E433, 0x446F2929964E685A, 0x9F221DB094779267,
+        0x86BA1367DD501590, 0x54A9F12F03BFF7B2, 0xFFC2BEA89C84B0F4, 0x6C06F726BC4B18C7,
+        0x922EEE82DAE5BEDE, 0x47E32DA7D4EBF4C0, 0x0B69002FF5B5267B, 0x50938E3DC77BE134,
+        0x413FE3155FBD8F9C, 0x9233D5D8C585F2D2, 0xFF490209BAAA6B7F, 0xBB59873AF418A170,
+        0x51DEB14E90D44383, 0x1AF9A6F4E3082C66, 0xE1843249A4DF5B02, 0x63DEBF2FF7143FAF,
+        0x33A88619E192DB47, 0xC3DEC9C59BF970AD, 0x6338E063A4742158, 0x0EE73E7F3505F01E,
+        0x00D4283767C6BA2F, 0xD666FC30ABB94036, 0xC6C5DD420AC14CF6, 0xE0EC54CBAD05F4AD,
+        0x0ACAB18A45591AC5, 0xF4CB27EEBCA26C84, 0x74CCECA4A1D95936, 0xCB08EA3AB265DCFC,
+        0xF245FA324EFE467C, 0xBFB62AE40F5D0AF7, 0xDD22108526B92A7E, 0x4C24E09D975E607C,
+        0x44336B065FE375D1, 0x010D1193076322B6, 0x19BC751BBB2B0925, 0x08443E37123B1579,
+        0xAAF4B26560C53EC3, 0xCFDBB84855DD4105, 0x6D7FFEE485286E44, 0x555DE96930EA398E,
+        0x09A4C53BC67433EB, 0x5E8E0C9823BBD99D, 0x1CCCE61984129A7E, 0x4570EDF2494A1649,
+        0x3E6669DAE26C966B, 0x0E04D28AA56FFAC3, 0x3F748B4CCA1F69C8, 0x6D3DCAD3F8EBA47F,
+        0x7797A4420E12A22E, 0x93738FD82FC8160B, 0x9157F7887325F990, 0x439DF9B3B49FACD6,
+        0x39177357D370811E, 0xCCBE736A76389128, 0xF9F87A317728CB04, 0x4CA0251203D3CBBD,
+        0x49FAE0B7019660A7, 0xD2264E0B53CF75A2, 0x48625D242208B3BC, 0xB8C418D332972D3A,
+        0xD497EC0FB388B229, 0x39E06EF2299E1ACB, 0x294D3BA6AB8BE6BC, 0xA0DA27DCF99478A6,
+        0xEF824BFA99CAFE1A, 0x58CE350D51615033, 0x7970E87B7D0328A6, 0x6E3EDC4E0D461445,
+        0x7101A5D7C8E0B2BB, 0x6CEF1ADE8770485C, 0x108EB0DBEA70C364, 0x08096F1960C9E1AF,
+    },
+};
+
+template<class I>
+DWORD TCachedBlockSlabManager<I>::s_rgrgdwTable2[ _countof( s_rgrgdwTable2 ) ][ _countof( s_rgrgdwTable2[ 0 ] ) ] =
+{
+    {
+        0xC3EBB3A6, 0x7B5C7B03, 0x23C8FBBA, 0xE347832D,
+        0xBE37543E, 0xFC0473D5, 0x659F2763, 0xA77045BE,
+        0x00154FD9, 0x10FBAB8B, 0x83B59613, 0x6EA50CF8,
+        0xD580D290, 0x69BD109A, 0x4B9DBF2E, 0x559C6010,
+        0xF3C0D30B, 0x979A2999, 0x43C61E72, 0xD0903DD0,
+        0x2A1D84E4, 0xFB8A2A73, 0x310C30DF, 0x952546CC,
+        0xDF34D539, 0x6B6B1827, 0xD235BCE4, 0xFB1AB6DF,
+        0x888C1316, 0xEAB7A334, 0x9376A97F, 0xA6819DD7,
+        0x02238849, 0x8DDBF49C, 0xDAE92061, 0x4BE4BBFB,
+        0x5BF0B7D9, 0xCC1E6344, 0xA3C860D3, 0xB50C8C4E,
+        0x3B70ED6B, 0x30E71FF0, 0xD4387AD2, 0xEA888687,
+        0x7A5E005B, 0xBE880BF6, 0xDEC4D85B, 0xC3FAF1E3,
+        0xFE27C602, 0xA393665D, 0xE4C8CEF8, 0x1F8BD63F,
+        0x7D029DDB, 0x15DD016D, 0x809B2A56, 0xE9FC1465,
+        0xB4193E97, 0x2CD1A6D9, 0x9B107C17, 0xAE5ED317,
+        0x78CE87CA, 0xBEFB0D9E, 0x91152E59, 0x0EC0B462,
+        0x5AB348E2, 0xDF8E82CA, 0xB9365C79, 0xF2D39E86,
+        0x6B56B7A9, 0x2A9C9F2B, 0x80837493, 0x49A8045C,
+        0x7513A958, 0x6B79B9C9, 0x5025C23D, 0x187A411B,
+        0x569367F2, 0x40FE08F4, 0x2595DDE2, 0x85F7921A,
+        0xF310A167, 0x377D1C12, 0x394FA53B, 0x6521BB72,
+        0xD8773068, 0x315B9D0E, 0x0852B9F7, 0x404F0F88,
+        0x8A9297DE, 0x1A9CE998, 0x22823748, 0xD09EDEC4,
+        0x6CB80DC2, 0x981EC3A8, 0x59C52D00, 0xC4545274,
+        0x9CD3DE85, 0x28EDAAB7, 0x7BC90AEE, 0x7DEC7F21,
+        0x93AD2F0A, 0xCA03F6F8, 0xD98C35F3, 0xCC2EAF96,
+        0x3F815394, 0xBEAB2AFD, 0x423F4F6F, 0xFF12E976,
+        0x484AAE06, 0x2F803D96, 0xEAD4B740, 0x538B2025,
+        0xEEBEA5C8, 0xC3DC80BB, 0xE62EED09, 0x189F0C57,
+        0x575CCA06, 0x3D7842A9, 0x44B749F0, 0xB7224643,
+        0xBBF00F5C, 0x1A9DEDC3, 0x4E0F2FCA, 0x056B07E2,
+        0xBA881FB5, 0x468D6DF2, 0xAE83B4CE, 0xE845DB9D,
+        0x43436E27, 0xE558D30D, 0x1C2AAE5D, 0x114DC867,
+        0x50D7AA8C, 0x551F3F5A, 0xF8CD29E2, 0xF2A2B79B,
+        0x9DC32178, 0xBD1DDEB2, 0x8C5E9986, 0x056113A4,
+        0xDBFF1A5C, 0x408D8A61, 0xFEE59700, 0x34551C8A,
+        0xCA459C35, 0x23D58C7C, 0x4AEDFF7E, 0xA33DAFD2,
+        0xB6DF2ABC, 0x6C50FDDA, 0xDC41CFD3, 0x9118A214,
+        0xAAC9E1E6, 0x57E00B6F, 0x8B20C794, 0x7766A1A7,
+        0xDA5F2A1E, 0x6005DBDF, 0x8C25B848, 0x4A65054E,
+        0x9BD9F470, 0x55BC6E55, 0x0BB9E57A, 0xFEBA3482,
+        0xB9F2A4CB, 0xF30539F2, 0xE292BF30, 0xC6E48E49,
+        0xB60274E5, 0x8F6F8AE8, 0xF8A4BDBC, 0xFCB19BC2,
+        0x52A1D0C6, 0x5809D40F, 0x85AB9DA5, 0x06853EB5,
+        0x2AFF3082, 0x7985B1C0, 0x88989699, 0x6A752FDF,
+        0xEB71E695, 0x269037B8, 0x4A304AD5, 0xB3922474,
+        0xCB008EFA, 0x791B89A0, 0x46A19443, 0x1AD8059F,
+        0x3897C0FF, 0x1C48C0D6, 0x9888E87A, 0xF9F5A612,
+        0xAA0B7DE1, 0x105968F4, 0xB8D34B4D, 0xEB16D22F,
+        0x93DF27CD, 0x86AAB336, 0x8B0E028B, 0x9482E010,
+        0xB69E9BE6, 0xAA28BEF5, 0x01273C6B, 0x9AC9212D,
+        0xFED5E568, 0xB823BDE1, 0xEA79DF08, 0x3B1FC9FF,
+        0xDDB37417, 0xED7FE596, 0x5CE740F5, 0x8A5891B0,
+        0x18CC6AC3, 0x7F04EDF1, 0x6259C34E, 0x699650E5,
+        0x894DE51A, 0x0A4CAB4D, 0x6CBCD617, 0x33AD0277,
+        0x7E1B834E, 0xD199EB09, 0xEFF01946, 0x20829C76,
+        0xEDD8CC2B, 0x2C2EADE1, 0x5CBA2F01, 0xFE5135DB,
+        0xDD5A9ED3, 0x29B86CB8, 0xA91A5C74, 0xD5B37593,
+        0x5664BDB0, 0x63ED204B, 0xC28CA836, 0x4C7288F5,
+        0xA8894B10, 0x54D6FA81, 0x215BEA86, 0x2CEC8FF2,
+        0x6C7DD6FF, 0x433CABBF, 0xB64C0423, 0xD2C3A68F,
+        0xE684A170, 0x3B376BEC, 0x5371B8DF, 0x6D0EA31A,
+        0x89A4F192, 0x2B88476B, 0x83C165D0, 0x09B2CAD8,
+        0xFC796592, 0x7E1A22A6, 0x23BF940D, 0x98CA43D8,
+    },
+    {
+        0x0EA04706, 0x2EE9BF58, 0xD7E9A005, 0xFB82CAD2,
+        0xDDBDAA8D, 0xCCD5951C, 0xFACF5BB9, 0x1D3FAF7C,
+        0x6E0AD7D2, 0xB5B8EEDE, 0x67C5E935, 0xA62DFCB1,
+        0xF6290825, 0xB94D1853, 0x7AADBDD6, 0xEF9A304F,
+        0xBB285EE0, 0x604A2269, 0x56CCB4DF, 0x9A4E6B25,
+        0x0A4A00DC, 0x6B92752B, 0x73E1951D, 0x9F22C3C2,
+        0x0BF7F76D, 0x45806893, 0x5846F3CB, 0x7A2E933C,
+        0xF750E77D, 0x0CE65B9B, 0x0F9CC3AE, 0x9353C844,
+        0x5857850F, 0xA6969859, 0xE8F0F99F, 0x3E58FE3C,
+        0x96313392, 0x4AF7EB2D, 0x01A3D138, 0x179C76B2,
+        0x6E0C20C7, 0x9EDABB7E, 0x1ADC1926, 0xD44FB387,
+        0xCE5ACC76, 0xB0BEEC6B, 0xCAA5EF8A, 0x10BD8349,
+        0x2248BAB0, 0x8CD0F02C, 0x68F096FB, 0x1DC6C284,
+        0xA33F3714, 0x49301957, 0x428A561D, 0xAFA04B60,
+        0x88A4F205, 0x373E4D11, 0x264DB25E, 0x1DF60D15,
+        0x76060B56, 0xAA970F53, 0x6C40B3FE, 0xA3FB397A,
+        0x20CA2B2D, 0xE621CC69, 0xB0D29833, 0x2365B960,
+        0x1736E8AA, 0x9ED19865, 0xCEC08048, 0x4905021E,
+        0x4FD4B25D, 0x3BFB5323, 0x989960D9, 0x66907331,
+        0x60CED44C, 0x58075A60, 0x34D7CF2B, 0xAABB0A7B,
+        0xB6D77F22, 0xEAC15475, 0x6C8C63C4, 0x489BB3C9,
+        0x25AEB9C3, 0xEA137A9A, 0x052C6366, 0xC5A3E3C0,
+        0x9900CC55, 0x7EA00FAB, 0xDDFB3CD3, 0x987F706B,
+        0x0A5ECEAB, 0x72075017, 0x25C38417, 0x5DDF3093,
+        0x9911E23B, 0x41DC35F7, 0xB8F922D3, 0x8A9EB66D,
+        0xFCBE9CBA, 0x3D4C0D63, 0x6A019B81, 0x8CDDEAF1,
+        0xBB80BAA4, 0xC0383BF1, 0xD3D5EBCD, 0x53D8354C,
+        0x566352E5, 0xFEF24EDF, 0xBE1CEFAA, 0x5D6452D9,
+        0x30F39BD9, 0x712DF944, 0x0E9597D8, 0x68E4D202,
+        0xFF4831A0, 0x3AE2FD3A, 0x880DA83C, 0xEAE24522,
+        0xCBE021A6, 0x0747DCEF, 0xEE5DC154, 0x93FE1215,
+        0x5E41637F, 0x0F5AF6F1, 0x28D16234, 0x4E3645B1,
+        0xD034A48C, 0x81E12A10, 0x4BC7D029, 0x6D2416D9,
+        0xB1C3A1C2, 0xBF954C48, 0x8A78AAFA, 0xB74D41BF,
+        0x116B89E6, 0x97C4FB13, 0x4F312DDD, 0xD4338F47,
+        0x3660EE2E, 0xAF4D6EEB, 0xB98127F5, 0xDD389811,
+        0x6C71455A, 0xFB3FFA09, 0x4C34550F, 0xF097416E,
+        0x2CC243D5, 0x137937FD, 0x53694E94, 0x2023AF3C,
+        0x4A3DB14B, 0x73EC00D4, 0xD67EE692, 0xE8AF46E4,
+        0xFAE3873B, 0x9AED13F8, 0xCB9B48A3, 0x1D210D6A,
+        0xBC458ADB, 0x186AFA04, 0x3F8FE417, 0x8A801CB5,
+        0x9DEF7656, 0x6B628DCD, 0x6D80444C, 0x4B4B9CE3,
+        0x9EC4CF38, 0x05132B41, 0x59862507, 0x2BA6794A,
+        0x2FFE60A9, 0x923BD619, 0x61DB3EB7, 0xC4F125FA,
+        0x37EDEB61, 0x255972A8, 0xA45C20F2, 0x8FF897FB,
+        0x16F6BE08, 0x67757EAA, 0xE602BDD1, 0x92ECEC90,
+        0xD896B0AB, 0x10AA236E, 0xAA597E36, 0xCEF09F5D,
+        0x1D3519D7, 0x399D06C0, 0xD4374B05, 0x8FC47ADA,
+        0xCDDF2F74, 0x56F3CEBF, 0x022C1826, 0x7295E213,
+        0x2CAB1B0D, 0xD8A07ECB, 0x46ACBA57, 0xF29F0686,
+        0xF727B7B5, 0x8A9A3B18, 0x0479387E, 0xA9FC2993,
+        0x0B2BBF4A, 0x7159A914, 0x951A1CD3, 0xB0E90BA6,
+        0x90AFF578, 0x5536DBA8, 0x8A529E45, 0x88C02795,
+        0x5D652D9A, 0xA24E8085, 0x38B6BFEC, 0x30FF2017,
+        0x98B2F207, 0x93D2A1C5, 0x03E0A7CD, 0xD9BB471B,
+        0xBFA602D3, 0x7B54F5F8, 0xE7FDD49B, 0x95C9BBCB,
+        0xADCF8E07, 0xB74237B9, 0xBC93E22F, 0x838ABF74,
+        0xF2C280B3, 0x7DACA00B, 0x9D78765D, 0x222387CB,
+        0xCE768881, 0x891A9C41, 0x17B5EB0D, 0x62558807,
+        0x8D4F0C33, 0x728D6A63, 0xC8FE1F93, 0xE79045AA,
+        0xF8F66697, 0xC72CF591, 0xD52D915A, 0x5A294C76,
+        0x71CD9836, 0x5E78C4E2, 0xC3D59060, 0xD998BECC,
+        0xAD9CE4E6, 0x4083D250, 0xA83CD32D, 0xECFBA835,
+        0x073D2D83, 0x03D50981, 0xD56474AD, 0xB4D50A64,
+    },
+};
+
+//  CCachedBlockSlabManager:  concrete TCachedBlockSlabManager<ICachedBlockSlabManager>
+
+class CCachedBlockSlabManager  //  cbsm
+    :   public TCachedBlockSlabManager<ICachedBlockSlabManager>
+{
+    public:  //  specialized API
+
+        static ERR ErrInit( _In_    IFileFilter* const                      pff,
+                            _In_    const QWORD                             cbCachingFilePerSlab,
+                            _In_    const QWORD                             cbCachedFilePerSlab,
+                            _In_    const QWORD                             ibChunk,
+                            _In_    const QWORD                             cbChunk,
+                            _In_    ICachedBlockWriteCountsManager* const   pcbwcm,
+                            _In_    const QWORD                             icbwcBase,
+                            _In_    const ClusterNumber                     clnoMin,
+                            _In_    const ClusterNumber                     clnoMax,
+                            _Out_   ICachedBlockSlabManager** const         ppcbsm )
+        {
+            ERR                         err     = JET_errSuccess;
+            CCachedBlockSlabManager*    pcbsm   = NULL;
+
+            *ppcbsm = NULL;
+
+            if ( ibChunk % sizeof( CCachedBlockChunk ) )
+            {
+                Error( ErrERRCheck( JET_errInvalidParameter ) );
+            }
+
+            if ( !cbChunk )
+            {
+                Error( ErrERRCheck( JET_errInvalidParameter ) );
+            }
+
+            if ( cbChunk % sizeof( CCachedBlockChunk ) )
+            {
+                Error( ErrERRCheck( JET_errInvalidParameter ) );
+            }
+
+            //  create the slab manager
+
+            Alloc( pcbsm = new CCachedBlockSlabManager( pff, 
+                                                        cbCachingFilePerSlab, 
+                                                        cbCachedFilePerSlab, 
+                                                        ibChunk, 
+                                                        cbChunk,
+                                                        pcbwcm,
+                                                        icbwcBase,
+                                                        clnoMin,
+                                                        clnoMax ) );
+
+            //  return the slab manager
+
+            *ppcbsm = pcbsm;
+            pcbsm = NULL;
+
+        HandleError:
+            delete pcbsm;
+            if ( err < JET_errSuccess )
+            {
+                delete *ppcbsm;
+                *ppcbsm = NULL;
+            }
+            return err;
+        }
+
+    private:
+
+        CCachedBlockSlabManager(    _In_    IFileFilter* const                      pff,
+                                    _In_    const QWORD                             cbCachingFilePerSlab,
+                                    _In_    const QWORD                             cbCachedFilePerSlab,
+                                    _In_    const QWORD                             ibChunk,
+                                    _In_    const QWORD                             cbChunk,
+                                    _In_    ICachedBlockWriteCountsManager* const   pcbwcm,
+                                    _In_    const QWORD                             icbwcBase,
+                                    _In_    const ClusterNumber                     clnoMin,
+                                    _In_    const ClusterNumber                     clnoMax )
+            :   TCachedBlockSlabManager<ICachedBlockSlabManager>(   pff,
+                                                                    cbCachingFilePerSlab, 
+                                                                    cbCachedFilePerSlab,
+                                                                    ibChunk,
+                                                                    cbChunk,
+                                                                    pcbwcm, 
+                                                                    icbwcBase,
+                                                                    clnoMin,
+                                                                    clnoMax )
+        {
+        }
+};
+
+
+//  CCachedBlockSlabReference:  a reference to an ICachedBlockSlab implementation.
+
+class CCachedBlockSlabReference : public CCachedBlockSlabWrapper
+{
+    public:  //  specialized API
+
+        CCachedBlockSlabReference(  _In_    TCachedBlockSlabManager<ICachedBlockSlabManager>* const pcbsm,
+                                    _Inout_ CCachedBlockSlabTableEntry** const                      ppste,
+                                    _In_    CCachedBlockSlab* const                                 pcbs,
+                                    _In_    const BOOL                                              fIgnoreVerificationErrors )
+            :   CCachedBlockSlabWrapper( pcbs ),
+                m_pcbsm( pcbsm ),
+                m_pste( *ppste ),
+                m_pcbs( pcbs ),
+                m_fIgnoreVerificationErrors( fIgnoreVerificationErrors )
+        {
+            *ppste = NULL;
+            m_pcbs->SetIgnoreVerificationErrors( fIgnoreVerificationErrors );
+        }
+
+        virtual ~CCachedBlockSlabReference()
+        {
+            RevertUpdates();
+            m_pcbs->SetIgnoreVerificationErrors( fFalse );
+            m_pcbsm->RemoveSlabReference( &m_pste );
+        }
+
+    private:
+
+        TCachedBlockSlabManager<ICachedBlockSlabManager>* const m_pcbsm;
+        CCachedBlockSlabTableEntry*                             m_pste;
+        CCachedBlockSlab* const                                 m_pcbs;
+        const BOOL                                              m_fIgnoreVerificationErrors;
+};

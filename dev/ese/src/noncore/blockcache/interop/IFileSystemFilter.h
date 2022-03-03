@@ -46,7 +46,7 @@ namespace Internal
                     /// <param name="f">The file to rename.</param>
                     /// <param name="pathDest">The new path for the file.</param>
                     /// <param name="overwriteExisting">True if any existing file at the destination may be deleted.</param>
-                    void FileRename( IFile^ f, String^ pathDest, bool overwriteExisting );
+                    void FileRename( File^ f, String^ pathDest, bool overwriteExisting );
                 };
             }
         }
