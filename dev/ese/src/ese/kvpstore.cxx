@@ -13,13 +13,17 @@
 
 //  keys for the schema versions
 
+// Internal version is owned by the KVP class and describes the capabilities of the class.
 PERSISTED static const WCHAR *  p_wszSchemaInternalMajorVersion     = L".Schema\\Internal\\Major";
 PERSISTED static const WCHAR *  p_wszSchemaInternalMinorVersion     = L".Schema\\Internal\\Minor";
 PERSISTED static const WCHAR *  p_wszSchemaInternalUpdateVersion    = L".Schema\\Internal\\Update";
+// External version is owned by the caller and doesn't affect the actual KVP capabilities.
 PERSISTED static const WCHAR *  p_wszSchemaExternalMajorVersion     = L".Schema\\External\\Major";
 PERSISTED static const WCHAR *  p_wszSchemaExternalMinorVersion     = L".Schema\\External\\Minor";
 PERSISTED static const WCHAR *  p_wszSchemaExternalUpdateVersion    = L".Schema\\External\\Update";
 
+PERSISTED static const PCSTR p_szKeyColumn = "Key";
+PERSISTED static const PCSTR p_szTypeColumn = "Type";
 
 //  ================================================================
 //  Basic Initialization / Term
@@ -37,15 +41,31 @@ CKVPStore::CKVPStore( IFMP ifmp, const WCHAR * const wszTableName )
     Assert( p_wszSchemaInternalMajorVersion[0] == s_wchSecret );
 
     Assert( 0 == kvpvtInvalidType );
+
+    ULONG ulInternalMajorVersionLast = 0;
+    ULONG ulInternalMinorVersionLast = 0;
+    ULONG ulInternalUpdateVersionLast = 0;
+    
     for( KVPIValueType iType = kvpvtInvalidType; iType < kvpvtMaxValueType; iType = KVPIValueType( iType + 1 ) )
     {
-        m_rgDataTypeInfo[iType].m_type = iType;
-        Assert( m_rgDataTypeInfo[iType].m_cid == 0 );
-        Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_cbDataCol == 0 );
+        Assert( m_rgDataTypeInfo[iType].m_type == iType );
+        Assert( m_rgDataTypeInfo[iType].m_cid == JET_columnidNil );
+        Assert( m_rgDataTypeInfo[iType].m_szName != NULL );
+
+        // Types should be in version order and version components never decrease.
+        //  The next non-major version after 1.0.2 could be either 1.0.3, 1.1.2, or 1.1.3,
+        //  but not 1.1.0.
+        //
+        Assert( m_rgDataTypeInfo[iType].m_ulMajor >= ulInternalMajorVersionLast );
+        Assert( m_rgDataTypeInfo[iType].m_ulMinor >= ulInternalMinorVersionLast );
+        Assert( m_rgDataTypeInfo[iType].m_ulUpdate >= ulInternalUpdateVersionLast );
+        ulInternalMajorVersionLast = m_rgDataTypeInfo[iType].m_ulMajor;
+        ulInternalMinorVersionLast = m_rgDataTypeInfo[iType].m_ulMinor;
+        ulInternalUpdateVersionLast = m_rgDataTypeInfo[iType].m_ulUpdate;
     }
 
-    Assert( m_cidKey == 0 );
-    Assert( m_cidType == 0 );
+    m_cidKey = JET_columnidNil;
+    m_cidType = JET_columnidNil;
 
     Assert( m_critGlobalTableLock.FNotOwner() );
 }
@@ -66,26 +86,49 @@ ERR CKVPStore::ErrKVPIInitIBootstrapCriticalCOLIDs()
     JET_COLUMNDEF jcd;
     jcd.cbStruct = sizeof( jcd );
 
-    Call( ErrIsamGetTableColumnInfo( (JET_SESID)m_ppibGlobalLock, (JET_VTID)m_pfucbGlobalLock, "Key", NULL, &jcd, sizeof( jcd ), JET_ColInfo, fFalse ) );
-    Assert( m_cidKey == jcd.columnid || m_cidKey == 0 /* was uninit */ );
+    Call( ErrIsamGetTableColumnInfo(
+              (JET_SESID)m_ppibGlobalLock,
+              (JET_VTID)m_pfucbGlobalLock,
+              p_szKeyColumn,
+              NULL,
+              &jcd,
+              sizeof( jcd ),
+              JET_ColInfo,
+              fFalse ) );
+    Assert( m_cidKey == JET_columnidNil ); /* was uninit */
     m_cidKey = jcd.columnid;
-
-    Call( ErrIsamGetTableColumnInfo( (JET_SESID)m_ppibGlobalLock, (JET_VTID)m_pfucbGlobalLock, "Type", NULL, &jcd, sizeof( jcd ), JET_ColInfo, fFalse ) );
-    Assert( m_cidType == jcd.columnid || m_cidType == 0 /* was uninit */ );
+    
+    Call( ErrIsamGetTableColumnInfo(
+              (JET_SESID)m_ppibGlobalLock,
+              (JET_VTID)m_pfucbGlobalLock,
+              p_szTypeColumn,
+              NULL,
+              &jcd,
+              sizeof( jcd ),
+              JET_ColInfo,
+              fFalse ) );
+    Assert( m_cidType == JET_columnidNil ); /* was uninit */ 
     m_cidType = jcd.columnid;
 
-    Call( ErrIsamGetTableColumnInfo( (JET_SESID)m_ppibGlobalLock, (JET_VTID)m_pfucbGlobalLock, "iValue", NULL, &jcd, sizeof( jcd ), JET_ColInfo, fFalse ) );
-    Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_cid == jcd.columnid || m_rgDataTypeInfo[kvpvtSchemaValueType].m_cid == 0 /* was uninit */ );
+    Call( ErrIsamGetTableColumnInfo(
+              (JET_SESID)m_ppibGlobalLock,
+              (JET_VTID)m_pfucbGlobalLock,
+              m_rgDataTypeInfo[kvpvtSchemaValueType].m_szName,
+              NULL,
+              &jcd,
+              sizeof( jcd ),
+              JET_ColInfo,
+              fFalse ) );
+    Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_cid == JET_columnidNil ); /* was uninit */
+    Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_cbDataCol == sizeof( LONG ) );
     m_rgDataTypeInfo[kvpvtSchemaValueType].m_cid = jcd.columnid;
-    Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_cbDataCol == cbKVPIVariableDataSize || // using this null init to avoid hassles
-            m_rgDataTypeInfo[kvpvtSchemaValueType].m_cbDataCol == 4 );  // or if someone fixes it to the real value, that'd be fine too
 
 HandleError:
 
     return err;
 }
 
-ERR CKVPStore::ErrKVPIInitICreateTable( PIB * ppib, const IFMP ifmp, const CHAR * const szTableName, const DWORD dwMajorVersionExpected )
+ERR CKVPStore::ErrKVPIInitICreateTable( PIB * ppib, const IFMP ifmp, const CHAR * const szTableName, const ULONG ulMajorVersionExpected )
 {
     ERR err = JET_errSuccess;
 
@@ -100,37 +143,68 @@ ERR CKVPStore::ErrKVPIInitICreateTable( PIB * ppib, const IFMP ifmp, const CHAR 
     //      The key - which is the primary / clustered index.
     //      The type - as it must not be NULL.
     //      The int ValueType - as we may want to escrow update it later.
+    //
+    //  Upgrade paths add new columntypes
     ULONG iValueDefault = 0;
     JET_COLUMNCREATE_A  rgcolumncreateKVPTable[] = {
-        //{ cbStruct,                 szColumn,     coltyp,               cbMax, grbit,                                     pvDefault, cbDefault, cp, columnid, err          }
-        { sizeof(JET_COLUMNCREATE_A), "Key",        JET_coltypBinary,       0,  JET_bitColumnVariable,                          NULL,    0,         0,  0,        JET_errSuccess },
-        { sizeof(JET_COLUMNCREATE_A), "Type",       JET_coltypUnsignedByte, 0,  JET_bitColumnFixed|JET_bitColumnNotNULL,        NULL,    0,         0,  0,        JET_errSuccess },
-        { sizeof(JET_COLUMNCREATE_A), "iValue",     JET_coltypLong,         0,  JET_bitColumnFixed|JET_bitColumnEscrowUpdate,   &iValueDefault,  sizeof(iValueDefault),         0,  0,        JET_errSuccess },
-        // We add these in the minor and update upgrade path to prove it works
-        //{ sizeof(JET_COLUMNCREATE_A), "rgValue",  JET_coltypBinary,       0,  JET_bitColumnTagged,    NULL,    0,         0,  0,        JET_errSuccess },
-        //{ sizeof(JET_COLUMNCREATE_A), "qwValue",  JET_coltypCurrency,     0,  JET_bitColumnVariable,  NULL,    0,         0,  0,        JET_errSuccess },
+        {
+            sizeof(JET_COLUMNCREATE_A),
+            const_cast<PSTR>(p_szKeyColumn), // "Key"
+            JET_coltypBinary,
+            0,
+            JET_bitColumnVariable,
+            NULL,
+            0,
+            0,
+            0,
+            JET_errSuccess
+        },
+        {
+            sizeof(JET_COLUMNCREATE_A),
+            const_cast<PSTR>(p_szTypeColumn), // "Type" ,
+            JET_coltypUnsignedByte,
+            0,
+            JET_bitColumnFixed|JET_bitColumnNotNULL,
+            NULL,
+            0,
+            0,
+            0,
+            JET_errSuccess
+        },
+        {
+            sizeof(JET_COLUMNCREATE_A),
+            const_cast<PSTR>(m_rgDataTypeInfo[kvpvtSchemaValueType].m_szName), //  "iValue",
+            m_rgDataTypeInfo[kvpvtSchemaValueType].m_coltyp,
+            0,
+            m_rgDataTypeInfo[kvpvtSchemaValueType].m_grbit,
+            &iValueDefault,
+            sizeof(iValueDefault),
+            0,
+            0,
+            JET_errSuccess
+        },
     };
 
     static const CHAR szMSysKVPTableIndex[]     = "KeyPrimary";
     static const CHAR szMSysKVPTableIndexKey[]  = "+Key\0";
 
     JET_INDEXCREATE3_A  rgindexcreateKVPTable[] = {
-    {
-        sizeof( JET_INDEXCREATE3_A ),                   // size of this structure
-        const_cast<char *>( szMSysKVPTableIndex ),      // index name
-        const_cast<char *>( szMSysKVPTableIndexKey ),   // index key
-        sizeof( szMSysKVPTableIndexKey ),               // length of key
-        JET_bitIndexPrimary|JET_bitIndexDisallowTruncation,         // index options
-        92,                                             // index density
-        0,                                              // lcid for the index
-        0,                                              // maximum length of variable length columns in index key
-        NULL,                                           // pointer to conditional column structure
-        0,                                              // number of conditional columns
-        JET_errSuccess,                                 // returned error code,
-        255,                                            // maximum key size
-        NULL                                            // space hints
-    },
-};
+        {
+            sizeof( JET_INDEXCREATE3_A ),                   // size of this structure
+            const_cast<char *>( szMSysKVPTableIndex ),      // index name
+            const_cast<char *>( szMSysKVPTableIndexKey ),   // index key
+            sizeof( szMSysKVPTableIndexKey ),               // length of key
+            JET_bitIndexPrimary|JET_bitIndexDisallowTruncation,         // index options
+            92,                                             // index density
+            0,                                              // lcid for the index
+            0,                                              // maximum length of variable length columns in index key
+            NULL,                                           // pointer to conditional column structure
+            0,                                              // number of conditional columns
+            JET_errSuccess,                                 // returned error code,
+            255,                                            // maximum key size
+            NULL                                            // space hints
+        },
+    };
 
     JET_TABLECREATE5_A  tablecreateKVPTable = {
         sizeof( JET_TABLECREATE5_A ),       // size of this structure
@@ -151,7 +225,7 @@ ERR CKVPStore::ErrKVPIInitICreateTable( PIB * ppib, const IFMP ifmp, const CHAR 
         0,                                  // cbLVChunkMax
         JET_TABLEID( pfucbNil ),            // returned tableid
         0,                                  // returned count of objects created
-};
+    };
 
     const JET_DBID  jdbid   = (JET_DBID)ifmp;
 
@@ -176,19 +250,20 @@ ERR CKVPStore::ErrKVPIInitICreateTable( PIB * ppib, const IFMP ifmp, const CHAR 
     Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_type == kvpvtSchemaValueType );
     Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_cid = rgcolumncreateKVPTable[2].columnid );
 
-    //  first time we've used this table, initialize the schema elements
+    //  first time we've used this table, initialize the schema elements for Internal version numbers.
     //
-    INT dwOldVersion = 0;   // we thunk an older version to ensure upgrade works ...
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaInternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&p_dwInternalMajorVersion, sizeof( p_dwInternalMajorVersion ) ) );
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaInternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&dwOldVersion, sizeof( dwOldVersion ) ) );
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaInternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&dwOldVersion, sizeof( dwOldVersion ) ) );
+    ULONG ulInitialVersion = 0;   // We start with the first-release values to handle efv upgrade restrictions.
+    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaInternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&p_ulInternalMajorVersion, sizeof( p_ulInternalMajorVersion ) ) );
+    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaInternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&ulInitialVersion, sizeof( ulInitialVersion ) ) );
+    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaInternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&ulInitialVersion, sizeof( ulInitialVersion ) ) );
 
-    //  we set all the user versions to 1.0.0, it's user's job to figure this out.
+
+    //  we set all the External version to X.0.0, where X is the user version requested.
     //
-    INT dwInitialUserSubVersions = 0;
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&dwMajorVersionExpected, sizeof( dwMajorVersionExpected ) ) );
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&dwInitialUserSubVersions, sizeof( dwInitialUserSubVersions ) ) );
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&dwInitialUserSubVersions, sizeof( dwInitialUserSubVersions ) ) );
+    ULONG ulInitialUserSubVersions = 0;
+    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&ulMajorVersionExpected, sizeof( ulMajorVersionExpected ) ) );
+    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&ulInitialUserSubVersions, sizeof( ulInitialUserSubVersions ) ) );
+    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&ulInitialUserSubVersions, sizeof( ulInitialUserSubVersions ) ) );
 
     m_pfucbGlobalLock = NULL;
     Call( ErrFILECloseTable( ppib, (FUCB *)tablecreateKVPTable.tableid ) );
@@ -213,15 +288,14 @@ HandleError:
     return err;
 }
 
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-
-ERR CKVPStore::ErrKVPIInitIUpgradeIAddBlobValueType( const DWORD dwUpgradeVersion )
+// Add a new type to the schema for the KVP table as an update.
+ERR CKVPStore::ErrKVPIAddValueTypeToSchema( const KVPIValueType kvpvt )
 {
     ERR err = JET_errSuccess;
     BOOL fInTransaction = fFalse;
     JET_COLUMNDEF jcd = { 0 };
 
-    Assert( dwUpgradeVersion == p_dwMinorAddBlobValueType );    // make sure client code is consistent with our upgrade version
+    Assert( m_rgDataTypeInfo[kvpvt].m_ulUpdate <= p_ulInternalUpdateVersion );    // make sure client code is consistent with our upgrade version
 
     Assert( !fInTransaction );
     Call( ErrDIRBeginTransaction( m_ppibGlobalLock, 41431, NO_GRBIT ) );
@@ -229,25 +303,43 @@ ERR CKVPStore::ErrKVPIInitIUpgradeIAddBlobValueType( const DWORD dwUpgradeVersio
 
     jcd.cbStruct = sizeof( jcd );
     //jcd.columnid =
-    jcd.coltyp = JET_coltypBinary;
+    jcd.coltyp = m_rgDataTypeInfo[kvpvt].m_coltyp;
     //jcd.wCountry =
     //jcd.langid =
     //jcd.cp =
     //jcd.wCollate =        /* Must be 0 */
     //jcd.cbMax =
-    jcd.grbit = JET_bitColumnTagged;
+    jcd.grbit = m_rgDataTypeInfo[kvpvt].m_grbit;
 
     JET_COLUMNID jcid;
 
-    Call( ErrIsamAddColumn( m_ppibGlobalLock, m_pfucbGlobalLock, "rgValue", &jcd, NULL, 0, &jcid ) );
+    Call( ErrIsamAddColumn(
+              m_ppibGlobalLock,
+              m_pfucbGlobalLock,
+              m_rgDataTypeInfo[kvpvt].m_szName,
+              &jcd,
+              NULL,
+              0,
+              &jcid ) );
 
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaInternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&dwUpgradeVersion, sizeof( dwUpgradeVersion ) ) );
+    Call( ErrKVPISetValue(
+              eHasTrx,
+              p_wszSchemaInternalUpdateVersion,
+              kvpvtSchemaValueType,
+              (BYTE*)&(m_rgDataTypeInfo[kvpvt].m_ulUpdate),
+              sizeof( m_rgDataTypeInfo[kvpvt].m_ulUpdate ) ) );
 
     Assert( fInTransaction );
     Call( ErrDIRCommitTransaction( m_ppibGlobalLock, NO_GRBIT ) );
     fInTransaction = fFalse;
 
-    OSTrace( JET_tracetagUpgrade, OSFormat( "KVPStore( %ws ) upgraded minor version: %d -> %d\n", p_wszTableName, dwUpgradeVersion - 1, dwUpgradeVersion ) );
+    OSTrace(
+        JET_tracetagUpgrade,
+        OSFormat(
+            "KVPStore( %ws ) updated: %u -> %u\n",
+            p_wszTableName,
+            m_rgDataTypeInfo[kvpvt].m_ulUpdate - 1,
+            m_rgDataTypeInfo[kvpvt].m_ulUpdate ) );
 
 HandleError:
 
@@ -262,89 +354,76 @@ HandleError:
     return err;
 }
 
-
-ERR CKVPStore::ErrKVPIInitIUpgradeIAddQwordValueType( const DWORD dwUpgradeVersion )
-{
-    ERR err = JET_errSuccess;
-    BOOL fInTransaction = fFalse;
-    JET_COLUMNDEF jcd = { 0 };
-
-    Assert( dwUpgradeVersion == p_dwUpdateAddQwordValueType );  // make sure client code is consistent with our upgrade version
-
-    Assert( !fInTransaction );
-    Call( ErrDIRBeginTransaction( m_ppibGlobalLock, 57815, NO_GRBIT ) );
-    fInTransaction = fTrue;
-
-
-    jcd.cbStruct = sizeof( jcd );
-    //jcd.columnid =
-    jcd.coltyp = JET_coltypCurrency;
-    //jcd.wCountry =
-    //jcd.langid =
-    //jcd.cp =
-    //jcd.wCollate =        /* Must be 0 */
-    //jcd.cbMax =
-    jcd.grbit = JET_bitColumnVariable;
-
-    JET_COLUMNID jcid;
-
-    Call( ErrIsamAddColumn( m_ppibGlobalLock, m_pfucbGlobalLock, "qwValue", &jcd, NULL, 0, &jcid ) );
-
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaInternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&dwUpgradeVersion, sizeof( dwUpgradeVersion ) ) );
-
-    Assert( fInTransaction );
-    Call( ErrDIRCommitTransaction( m_ppibGlobalLock, NO_GRBIT ) );
-    fInTransaction = fFalse;
-
-    OSTrace( JET_tracetagUpgrade, OSFormat( "KVPStore( %ws ) upgraded update version: %u -> %u\n", p_wszTableName, dwUpgradeVersion - 1, dwUpgradeVersion ) );
-
-HandleError:
-
-    if( fInTransaction )
-    {
-        const ERR errRollback = ErrDIRRollback( m_ppibGlobalLock );
-        CallSx( errRollback, JET_errRollbackError );
-        Assert( errRollback >= JET_errSuccess || PinstFromPpib( m_ppibGlobalLock )->FInstanceUnavailable( ) );
-        fInTransaction = fFalse;
-    }
-
-    return err;
-}
-
-#endif
-
-INLINE BOOL FSkipUpgrade()
-{
-    return (BOOL)UlConfigOverrideInjection( 43991, fFalse );
-}
-
-ERR CKVPStore::ErrKVPIInitIUpgradeTable()
+ERR CKVPStore::ErrKVPIInitIUpgradeTable( const IFMP ifmp, bool fReadOnly )
 {
     ERR err = JET_errSuccess;
 
     Assert( m_critGlobalTableLock.FOwner() );
 
-    INT dwKeyValueTableMajorVersion;
-    INT dwKeyValueTableMinorVersion;
-    INT dwKeyValueTableUpdateVersion;
+    ULONG ulKeyValueTableMajorVersion;
+    ULONG ulKeyValueTableMinorVersion;
+    ULONG ulKeyValueTableUpdateVersion;
     //  Technically not in a trx ... but has global lock ... this is OK, during init ... for reading only ...
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableMajorVersion, sizeof( dwKeyValueTableMajorVersion ) ) );
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableMinorVersion, sizeof( dwKeyValueTableMinorVersion ) ) );
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableUpdateVersion, sizeof( dwKeyValueTableUpdateVersion ) ) );
+    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&ulKeyValueTableMajorVersion, sizeof( ulKeyValueTableMajorVersion ) ) );
+    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&ulKeyValueTableMinorVersion, sizeof( ulKeyValueTableMinorVersion ) ) );
+    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&ulKeyValueTableUpdateVersion, sizeof( ulKeyValueTableUpdateVersion ) ) );
 
     BOOL fVersionMismatch = fFalse;
-    if ( p_dwInternalMajorVersion != dwKeyValueTableMajorVersion ||
-            p_dwInternalMinorVersion != dwKeyValueTableMinorVersion ||
-            p_dwInternalUpdateVersion != dwKeyValueTableUpdateVersion )
+
+    // p_ulInternalMinorVersion, p_ulInternalMajorVersion, and p_ulInternalUpdateVersion are baked into the binary;
+    // they represent the maximum the binary is capable of supporting.
+    // However, the actual upgrade is limited by an efv value.  So, figure out how far we really need to upgrade.
+    if ( (BOOL)UlConfigOverrideInjection( 43991, fFalse ) )
     {
-        OSTrace( JET_tracetagUpgrade, OSFormat( "KVPStore( %ws ) Internal Schema Version (initial): %u.%u.%u\n", p_wszTableName, dwKeyValueTableMajorVersion, dwKeyValueTableMinorVersion, dwKeyValueTableUpdateVersion ) );
+        // A test scenario.  Hold the version to the initial release values.
+        m_ulInternalMajorVersion = 1;
+        m_ulInternalMinorVersion = 0;
+        m_ulInternalUpdateVersion = 0;
+    }
+    else if ( fReadOnly )
+    {
+        // Since we're read only, our target is just the stored values. But we still come through
+        // here to sanity check the stored values against the this.p_XXX values.
+        m_ulInternalMajorVersion = ulKeyValueTableMajorVersion;
+        m_ulInternalMinorVersion = ulKeyValueTableMinorVersion;
+        m_ulInternalUpdateVersion = ulKeyValueTableUpdateVersion;
+    }
+    else if ( g_rgfmp[ifmp].FEfvSupported( JET_efvKVPStoreV2 ) )
+    {
+        m_ulInternalMajorVersion = 1;
+        m_ulInternalMinorVersion = 0;
+        m_ulInternalUpdateVersion = 2;
+    }
+    else
+    {
+        // These are the values from the initial release of the KVP Store.
+        m_ulInternalMajorVersion = 1;
+        m_ulInternalMinorVersion = 0;
+        m_ulInternalUpdateVersion = 0;
+    }    
+
+    Assert( m_ulInternalMajorVersion <= p_ulInternalMajorVersion );
+    Assert( m_ulInternalMinorVersion <= p_ulInternalMinorVersion );
+    Assert( m_ulInternalUpdateVersion <= p_ulInternalUpdateVersion );
+    
+    if ( m_ulInternalMajorVersion != ulKeyValueTableMajorVersion ||
+         m_ulInternalMinorVersion != ulKeyValueTableMinorVersion ||
+         m_ulInternalUpdateVersion != ulKeyValueTableUpdateVersion )
+    {
+        OSTrace(
+            JET_tracetagUpgrade,
+            OSFormat(
+                "KVPStore( %ws ) Internal Schema Version (initial): %u.%u.%u\n",
+                p_wszTableName,
+                ulKeyValueTableMajorVersion,
+                ulKeyValueTableMinorVersion,
+                ulKeyValueTableUpdateVersion ) );
         fVersionMismatch = fTrue;
     }
 
     //  Major Version
     //
-
-    if ( p_dwInternalMajorVersion != dwKeyValueTableMajorVersion )
+    if ( m_ulInternalMajorVersion != ulKeyValueTableMajorVersion )
     {
         //  We are not forward or backward compatible in this regard, bail ...
         AssertSz( fFalse, "Huh, opening a mismatched major version?!?" );
@@ -353,105 +432,123 @@ ERR CKVPStore::ErrKVPIInitIUpgradeTable()
 
     //  Minor Version
     //
-
-    if ( p_dwInternalMinorVersion < dwKeyValueTableMinorVersion )
+    if ( m_ulInternalMinorVersion < ulKeyValueTableMinorVersion )
     {
         //  We are not forward compatible in this regard, bail ...
         AssertSz( fFalse, "Huh, opening a newer minor version?" );
         Error( ErrERRCheck( JET_errInvalidDatabaseVersion ) );
     }
-
-    if ( p_dwInternalMinorVersion > dwKeyValueTableMinorVersion )
+    else if ( m_ulInternalMinorVersion > ulKeyValueTableMinorVersion )
     {
         //  Perform upgrade to latest minor version ...
         //
-        for( INT dwUpgradeVersion = dwKeyValueTableMinorVersion + 1; dwUpgradeVersion <= p_dwInternalMinorVersion; dwUpgradeVersion++ )
+        for( ULONG ulMinorVersion = ulKeyValueTableMinorVersion + 1; ulMinorVersion <= m_ulInternalMinorVersion; ulMinorVersion++ )
         {
-            if ( FSkipUpgrade() )
+            switch( ulMinorVersion )
             {
-                //  Yup, that's good enough!
+                // We don't have any Minor Version upgrades at this point.
+                
+            case ULONG_MAX:
+            default:
+                AssertSz( fFalse, "Unexpected upgrade version ... was the upgrade table not updated with all intermediate versions" );
                 break;
             }
-
-            switch( dwUpgradeVersion )
-            {
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-                case p_dwMinorAddBlobValueType:
-                {
-                    Call( ErrKVPIInitIUpgradeIAddBlobValueType( p_dwMinorAddBlobValueType ) );
-                }
-                    break;
-#endif
-
-                case INT_MAX:
-                default:
-                    AssertSz( fFalse, "Unexpected upgrade version ... was the upgrade table not updated with all intermediate versions" );
-                    break;
-            }
-
+            
             //  Everything should be complete, check our version is right ...
-
-            Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableMinorVersion, sizeof( dwKeyValueTableMinorVersion ) ) );
-            Assert( dwKeyValueTableMinorVersion == dwUpgradeVersion );
+            
+            Call( ErrKVPIGetValue(
+                      eHasTrx,
+                      p_wszSchemaInternalMinorVersion,
+                      kvpvtSchemaValueType,
+                      (BYTE*)&ulKeyValueTableMinorVersion,
+                      sizeof( ulKeyValueTableMinorVersion ) ) );
+            Assert( ulKeyValueTableMinorVersion == ulMinorVersion );
         }
-
-        Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableMinorVersion, sizeof( dwKeyValueTableMinorVersion ) ) );
-        Assert( dwKeyValueTableMinorVersion == p_dwInternalMinorVersion || FSkipUpgrade() );
-
+        
+        Call( ErrKVPIGetValue(
+                  eHasTrx,
+                  p_wszSchemaInternalMinorVersion,
+                  kvpvtSchemaValueType,
+                  (BYTE*)&ulKeyValueTableMinorVersion,
+                  sizeof( ulKeyValueTableMinorVersion ) ) );
+        Assert( ulKeyValueTableMinorVersion == m_ulInternalMinorVersion );
     }
-
+        
     //  Update Version
     //
-
-    if ( p_dwInternalUpdateVersion != dwKeyValueTableUpdateVersion )
+    if ( m_ulInternalUpdateVersion < ulKeyValueTableUpdateVersion )
     {
-        OSTrace( JET_tracetagUpgrade, OSFormat( "KVPStore( %ws ) had differnet update versions, OnDisk = %d, Code = %d\n", p_wszTableName, dwKeyValueTableUpdateVersion, p_dwInternalUpdateVersion ) );
     }
-    if ( p_dwInternalUpdateVersion > dwKeyValueTableUpdateVersion )
+    else if ( m_ulInternalUpdateVersion > ulKeyValueTableUpdateVersion )
     {
         //  Perform upgrade to latest update version ...
         //
-        for( INT dwUpgradeVersion = dwKeyValueTableUpdateVersion + 1; dwUpgradeVersion <= p_dwInternalUpdateVersion; dwUpgradeVersion++ )
+        for( ULONG ulUpdateVersion = ulKeyValueTableUpdateVersion + 1; ulUpdateVersion <= m_ulInternalUpdateVersion; ulUpdateVersion++ )
         {
-            if ( FSkipUpgrade() )
+            switch( ulUpdateVersion )
             {
-                //  Yup, that's good enough!
+            case p_ulUpdateAddLongBinaryValueType:
+                Call( ErrKVPIAddValueTypeToSchema( kvpvtLongBinaryValueType ) );
+                break;
+                
+            case p_ulUpdateAddLongLongValueType:
+                Call( ErrKVPIAddValueTypeToSchema( kvpvtLongLongValueType ) );
+                break;
+                
+            default:
+                AssertSz( fFalse, "Unexpected upgrade version ... was the upgrade table not updated with all intermediate versions" );
                 break;
             }
-
-            switch( dwUpgradeVersion )
-            {
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-                case p_dwUpdateAddQwordValueType:
-                {
-                    Call( ErrKVPIInitIUpgradeIAddQwordValueType( p_dwUpdateAddQwordValueType ) );
-                }
-                    break;
-#endif
-
-                case INT_MAX:
-                default:
-                    AssertSz( fFalse, "Unexpected upgrade version ... was the upgrade table not updated with all intermediate versions" );
-                    break;
-            }
-
+            
             //  Everything should be complete, check our version is right ...
-
-            Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableUpdateVersion, sizeof( dwKeyValueTableUpdateVersion ) ) );
-            Assert( dwKeyValueTableUpdateVersion == dwUpgradeVersion );
+            
+            Call( ErrKVPIGetValue(
+                      eHasTrx,
+                      p_wszSchemaInternalUpdateVersion,
+                      kvpvtSchemaValueType,
+                      (BYTE*)&ulKeyValueTableUpdateVersion,
+                      sizeof( ulKeyValueTableUpdateVersion ) ) );
+            Assert( ulKeyValueTableUpdateVersion == ulUpdateVersion );
         }
-
-        Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableUpdateVersion, sizeof( dwKeyValueTableUpdateVersion ) ) );
-        Assert( dwKeyValueTableUpdateVersion == p_dwInternalMinorVersion || FSkipUpgrade() );
+        
+        Call( ErrKVPIGetValue(
+                  eHasTrx,
+                  p_wszSchemaInternalUpdateVersion,
+                  kvpvtSchemaValueType,
+                  (BYTE*)&ulKeyValueTableUpdateVersion,
+                  sizeof( ulKeyValueTableUpdateVersion ) ) );
+        Assert( ulKeyValueTableUpdateVersion == m_ulInternalUpdateVersion );
     }
-
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableMajorVersion, sizeof( dwKeyValueTableMajorVersion ) ) );
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableMinorVersion, sizeof( dwKeyValueTableMinorVersion ) ) );
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaInternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&dwKeyValueTableUpdateVersion, sizeof( dwKeyValueTableUpdateVersion ) ) );
+    
+    Call( ErrKVPIGetValue(
+              eHasTrx,
+              p_wszSchemaInternalMajorVersion,
+              kvpvtSchemaValueType,
+              (BYTE*)&ulKeyValueTableMajorVersion,
+              sizeof( ulKeyValueTableMajorVersion ) ) );
+    Call( ErrKVPIGetValue(
+              eHasTrx,
+              p_wszSchemaInternalMinorVersion,
+              kvpvtSchemaValueType,
+              (BYTE*)&ulKeyValueTableMinorVersion,
+              sizeof( ulKeyValueTableMinorVersion ) ) );
+    Call( ErrKVPIGetValue(
+              eHasTrx,
+              p_wszSchemaInternalUpdateVersion,
+              kvpvtSchemaValueType,
+              (BYTE*)&ulKeyValueTableUpdateVersion,
+              sizeof( ulKeyValueTableUpdateVersion ) ) );
 
     if ( fVersionMismatch )
     {
-        OSTrace( JET_tracetagUpgrade, OSFormat( "KVPStore( %ws ) Internal Schema Version (final): %u.%u.%u\n", p_wszTableName, dwKeyValueTableMajorVersion, dwKeyValueTableMinorVersion, dwKeyValueTableUpdateVersion ) );
+        OSTrace(
+            JET_tracetagUpgrade,
+            OSFormat(
+                "KVPStore( %ws ) Internal Schema Version (final): %u.%u.%u\n",
+                p_wszTableName,
+                ulKeyValueTableMajorVersion,
+                ulKeyValueTableMinorVersion,
+                ulKeyValueTableUpdateVersion ) );
     }
 
 HandleError:
@@ -467,54 +564,34 @@ ERR CKVPStore::ErrKVPIInitILoadValueTypeCOLIDs()
     jcd.cbStruct = sizeof( jcd );
 
     Assert( m_ppibGlobalLock->Level() == 0 );
-
+    
     KVPIValueType iValueType;
-    Assert( 1 == kvpvtSchemaValueType );
-    for( iValueType = kvpvtSchemaValueType; iValueType < kvpvtMaxValueType; iValueType = KVPIValueType( iValueType + 1 ) )
+    for( iValueType = kvpvtLongValueType; iValueType < kvpvtMaxValueType; iValueType = KVPIValueType( iValueType + 1 ) )
     {
         Assert( m_rgDataTypeInfo[iValueType].m_type == iValueType );
 
-        CHAR * pszValueDataColumn = NULL;
-        INT cbColumnSize = cbKVPIVariableDataSize;
-
-        //  Main "table" of ValueTypes and thier properties.
-        //
-        switch ( iValueType )
+        if ( ( m_rgDataTypeInfo[iValueType].m_ulMajor > m_ulInternalMajorVersion ) ||
+             ( m_rgDataTypeInfo[iValueType].m_ulMinor > m_ulInternalMinorVersion ) ||
+             ( m_rgDataTypeInfo[iValueType].m_ulUpdate > m_ulInternalUpdateVersion )  )
         {
-            case kvpvtSchemaValueType:
-            case kvpvtIntValueType:
-                pszValueDataColumn = "iValue";
-                cbColumnSize = 4;
-                break;
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-            case kvpvtQwordValueType:
-                pszValueDataColumn = "qwValue";
-                cbColumnSize = 8;
-                break;
-            case kvpvtBlobValueType:
-                pszValueDataColumn = "rgValue";
-                cbColumnSize = cbKVPIVariableDataSize;
-                break;
-#endif
-            default:
-                AssertSz( fFalse, "Unknown KVPIValueType = %d!\n", iValueType );
+            // Although we're aware of this data type, we don't actually support it right now.
+            // Don't need to try to read any more columnids, the columns are in version order.
+            break;
         }
 
-        //  Load the ColumnID out of the table
+        //  Load the ColumnID out of the table, ignoring warnings.
 
-        const ERR errT = ErrIsamGetTableColumnInfo( (JET_SESID)m_ppibGlobalLock, (JET_VTID)m_pfucbGlobalLock, pszValueDataColumn, NULL, &jcd, sizeof( jcd ), JET_ColInfo, fFalse );
-        if ( errT < JET_errSuccess && FSkipUpgrade() )
-        {
-            //  pretend we didn't see this
-            continue;
-        }
-        Call( errT );
-
-        //  Set all the properties of the ValueType
-        //
+        Call( ErrIsamGetTableColumnInfo(
+                  (JET_SESID)m_ppibGlobalLock,
+                  (JET_VTID)m_pfucbGlobalLock,
+                  m_rgDataTypeInfo[iValueType].m_szName,
+                  NULL,
+                  &jcd,
+                  sizeof( jcd ),
+                  JET_ColInfo,
+                  fFalse ) );
 
         m_rgDataTypeInfo[iValueType].m_cid = jcd.columnid;
-        m_rgDataTypeInfo[iValueType].m_cbDataCol = cbColumnSize;
     }
 
 HandleError:
@@ -600,7 +677,7 @@ VOID CKVPStore::KVPICloseGlobalPibAndFucb()
     }
 }
 
-ERR CKVPStore::ErrKVPInitStore( PIB * const ppibProvided, const TrxUpdate eTrxUpd, const DWORD dwMajorVersionExpected )
+ERR CKVPStore::ErrKVPInitStore( PIB * const ppibProvided, const TrxUpdate eTrxUpd, const ULONG ulMajorVersionExpected )
 {
     ERR err = JET_errSuccess;
     IFMP ifmp = g_ifmpMax;
@@ -655,7 +732,7 @@ ERR CKVPStore::ErrKVPInitStore( PIB * const ppibProvided, const TrxUpdate eTrxUp
     {
         //  if it does not exist, create the table
 
-        Call( ErrKVPIInitICreateTable( m_ppibGlobalLock, m_ifmp, (CHAR*)szTableName, dwMajorVersionExpected ) );
+        Call( ErrKVPIInitICreateTable( m_ppibGlobalLock, m_ifmp, (CHAR*)szTableName, ulMajorVersionExpected ) );
 
         //  then re-open it.
         Call( ErrFILEOpenTable( m_ppibGlobalLock, m_ifmp, &m_pfucbGlobalLock, (CHAR*)szTableName ) );
@@ -671,20 +748,18 @@ ERR CKVPStore::ErrKVPInitStore( PIB * const ppibProvided, const TrxUpdate eTrxUp
     Assert( m_cidKey != m_cidType /* tricky way checking one is not zero as they start zero */ );
 
     //  check the internal version of the KVP table for compatibility and upgrades ...
-
-    Call( ErrKVPIInitIUpgradeTable() );
+    Call( ErrKVPIInitIUpgradeTable( m_ifmp, fReadOnly ) );
 
     //  load the data-type columnids
-
     Call( ErrKVPIInitILoadValueTypeCOLIDs() );
 
     //  check the user major version of the table
 
-    DWORD dwUserMajorVersion = 0;
+    ULONG ulUserMajorVersion = 0;
 
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaExternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&dwUserMajorVersion, sizeof( dwUserMajorVersion ) ) );
+    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaExternalMajorVersion, kvpvtSchemaValueType, (BYTE*)&ulUserMajorVersion, sizeof( ulUserMajorVersion ) ) );
 
-    if ( dwUserMajorVersion != dwMajorVersionExpected )
+    if ( ulUserMajorVersion != ulMajorVersionExpected )
     {
         Error( ErrERRCheck( JET_errInvalidDatabaseVersion ) );
     }
@@ -746,7 +821,7 @@ VOID CKVPStore::KVPTermStore()
 //  Version Handling
 //  ================================================================
 
-ERR CKVPStore::ErrKVPGetUserVersion( _Out_ DWORD * pdwMinorVersion, _Out_ DWORD * pwUpdateVersion )
+ERR CKVPStore::ErrKVPGetUserVersion( _Out_ ULONG * pulMinorVersion, _Out_ ULONG * pulUpdateVersion )
 {
     ERR err = JET_errSuccess;
 
@@ -756,8 +831,8 @@ ERR CKVPStore::ErrKVPGetUserVersion( _Out_ DWORD * pdwMinorVersion, _Out_ DWORD 
 
     //  fetch values
 
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaExternalMinorVersion, kvpvtSchemaValueType, (BYTE*)pdwMinorVersion, sizeof( *pdwMinorVersion ) ) );
-    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaExternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)pwUpdateVersion, sizeof( *pwUpdateVersion ) ) );
+    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaExternalMinorVersion, kvpvtSchemaValueType, (BYTE*)pulMinorVersion, sizeof( *pulMinorVersion ) ) );
+    Call( ErrKVPIGetValue( eHasTrx, p_wszSchemaExternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)pulUpdateVersion, sizeof( *pulUpdateVersion ) ) );
 
 HandleError:
 
@@ -768,7 +843,7 @@ HandleError:
     return err;
 }
 
-ERR CKVPStore::ErrKVPSetUserVersion( const DWORD dwMinorVersion, const DWORD dwUpdateVersion )
+ERR CKVPStore::ErrKVPSetUserVersion( const ULONG ulMinorVersion, const ULONG ulUpdateVersion )
 {
     ERR err = JET_errSuccess;
 
@@ -778,8 +853,8 @@ ERR CKVPStore::ErrKVPSetUserVersion( const DWORD dwMinorVersion, const DWORD dwU
 
     //  update values
 
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&dwMinorVersion, sizeof( dwMinorVersion ) ) );
-    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&dwUpdateVersion, sizeof( dwUpdateVersion ) ) );
+    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalMinorVersion, kvpvtSchemaValueType, (BYTE*)&ulMinorVersion, sizeof( ulMinorVersion ) ) );
+    Call( ErrKVPISetValue( eHasTrx, p_wszSchemaExternalUpdateVersion, kvpvtSchemaValueType, (BYTE*)&ulUpdateVersion, sizeof( ulUpdateVersion ) ) );
 
 HandleError:
 
@@ -870,7 +945,12 @@ ERR CKVPStore::ErrKVPIEndTrx( const ERR errRet )
     }
     if ( errC >= JET_errSuccess )
     {
-        return errC;    // if commit succeeded, communicate that (errR is invalid)
+        // we don't actually expect commit to warn.
+        CallS( errC );
+
+        // Commit succeeded. Original operation succeeded or warned.  Return
+        // original operation, which is the same as commit OR has more info.
+        return errRet;
     }
     if ( errR < JET_errSuccess )
     {
@@ -985,7 +1065,12 @@ ERR CKVPStore::ErrKVPIReleaseTrx( const ERR errRet )
     }
     if ( errC >= JET_errSuccess )
     {
-        return errC;    // if commit succeeded, communicate that (errR is invalid)
+        // we don't actually expect commit to warn.
+        CallS( errC );
+
+        // Commit succeeded. Original operation succeeded or warned.  Return
+        // original operation, which is the same as commit OR has more info.
+        return errRet;
     }
     if ( errR < JET_errSuccess )
     {
@@ -998,7 +1083,7 @@ ERR CKVPStore::ErrKVPIReleaseTrx( const ERR errRet )
 
 
 //  ================================================================
-//  Internal KVP/Entry Insertion and Update
+//  Internal KVP/Entry Prepare for Insertion and Replace
 //  ================================================================
 
 ERR CKVPStore::ErrKVPIPrepUpdate(  const WCHAR * const wszKey, KVPIValueType kvpvt )
@@ -1098,7 +1183,7 @@ HandleError:
 
 
 //  ================================================================
-//  Internal KVP/Entry Setting / Getting
+//  Internal KVP/Entry Setting / Getting / Deleting
 //  ================================================================
 
 VOID CKVPStore::AssertKVPIValidUserKey( const KVPIValueType kvpvt, const WCHAR * const wszKey )
@@ -1109,7 +1194,100 @@ VOID CKVPStore::AssertKVPIValidUserKey( const KVPIValueType kvpvt, const WCHAR *
     Assert( NULL == wcschr( wszKey, L'*' ) );   // otherwise wildcard searches would be weird
 }
 
-ERR CKVPStore::ErrKVPISetValue( const TrxPosition eTrxPos, const WCHAR * const wszKey, const KVPIValueType kvpvt, _In_opt_bytecount_( cbValue ) const BYTE * const pbValue, const INT cbValue )
+ERR CKVPStore::ErrKVPIDeleteKey(
+    const TrxPosition eTrxPos,
+    const WCHAR * const wszKey)
+{
+    ERR     err = JET_errSuccess;
+    BOOL    fOwnsTrx = fFalse;
+
+    //
+    //  Validate args
+    //
+
+    // We don't allow deleting a schema value type, which is indicated by the key beginning with
+    // the secret character.
+    if ( ( NULL == wszKey ) ||
+         ( wszKey[0] == 0 ) ||
+         ( wszKey[0] == s_wchSecret ) ||
+         ( NULL != wcschr( wszKey, L'*' ) ) )   // Can't delete with a wildcard key
+    {
+        AssertSz( FNegTest( fInvalidUsage ), "Invalid deletion of KVPI key here.\n" );
+        return ErrERRCheck( JET_errInvalidParameter );
+    }
+
+    //  Begin a transaction if necessary ...
+    //
+
+    if ( eTrxPos == eNewTrx )
+    {
+        CallR( ErrKVPIBeginTrx( eReadWrite, 60086 ) );
+        fOwnsTrx = fTrue;
+    }
+    else
+    {
+        Assert( eTrxPos == eHasTrx );
+    }
+    Assert( m_critGlobalTableLock.FOwner() );
+
+    Assert( m_ppibGlobalLock != ppibNil && m_ppibGlobalLock != (PIB*)JET_sesidNil );
+    Assert( m_pfucbGlobalLock != pfucbNil && m_pfucbGlobalLock != (FUCB*)JET_tableidNil );
+
+    // Note: We store this w/ the NUL ...
+    const INT cbKey = CbKVPKeySize( wszKey );
+
+    Call( ErrIsamMakeKey( m_ppibGlobalLock, m_pfucbGlobalLock, wszKey, cbKey, JET_bitNewKey ) );
+
+    err = ErrIsamSeek( m_ppibGlobalLock, m_pfucbGlobalLock, JET_bitSeekEQ );
+    // Expect no warnings
+    if ( err > JET_errSuccess )
+    {
+        CallS( err );
+        err = JET_errInternalError;
+    }
+
+    switch ( err )
+    {
+    case JET_errSuccess:
+        Call( ErrIsamDelete( m_ppibGlobalLock, m_pfucbGlobalLock ) );
+        break;
+
+    case JET_errRecordNotFound:
+        // Record is already not here.  Just make that a warning.
+        err = ErrERRCheck( wrnKVPEntryAlreadyNotPresent );
+        break;
+
+    default:
+        Call( err );
+    }
+    
+HandleError:
+
+    if ( JET_errRecordNotFound == err )
+    {
+        AssertSz( fFalse, "We don't expect this error from any other API other than ErrIsamSeek()!" );
+        err = ErrERRCheck( JET_errInternalError );
+    }
+
+    if ( fOwnsTrx )
+    {
+        err = ErrKVPIEndTrx( err );
+        fOwnsTrx = fFalse;
+    }
+
+    Assert( m_critGlobalTableLock.FNotOwner() || !fOwnsTrx );
+
+    Assert( fOwnsTrx == fFalse );
+
+    return err;
+}
+
+ERR CKVPStore::ErrKVPISetValue(
+    const TrxPosition eTrxPos,
+    const WCHAR * const wszKey,
+    const KVPIValueType kvpvt,
+    _In_opt_bytecount_( cbValue ) const BYTE * const pbValue,
+    const ULONG cbValue )
 {
     ERR     err = JET_errSuccess;
 
@@ -1125,8 +1303,7 @@ ERR CKVPStore::ErrKVPISetValue( const TrxPosition eTrxPos, const WCHAR * const w
     //  Validate this is a has a value type we know of ...
     //
 
-    if ( kvpvt <= kvpvtInvalidType ||
-            kvpvt >= kvpvtMaxValueType )
+    if ( kvpvt <= kvpvtInvalidType || kvpvt >= kvpvtMaxValueType )
     {
         AssertSz( fFalse, "Invalid KVPIValueType = %d here.\n", kvpvt );
         return ErrERRCheck( JET_errInvalidColumnType );
@@ -1163,15 +1340,15 @@ ERR CKVPStore::ErrKVPISetValue( const TrxPosition eTrxPos, const WCHAR * const w
     //
     Call( ErrKVPIPrepUpdate( wszKey, kvpvt ) );
     fInUpdate = fTrue;
-
+    
     //  This sets the value of the KVP.
     //
-
+    
     Call( ErrIsamSetColumn( m_ppibGlobalLock, m_pfucbGlobalLock, m_rgDataTypeInfo[kvpvt].m_cid, pbValue, cbValue, NO_GRBIT, NULL ) );
-
+    
     Call( ErrIsamUpdate( m_ppibGlobalLock, m_pfucbGlobalLock, NULL, 0, NULL, NO_GRBIT ) );
     fInUpdate = fFalse;
-
+    
     CallS( err );
 
 HandleError:
@@ -1202,7 +1379,13 @@ HandleError:
     return err;
 }
 
-ERR CKVPStore::ErrKVPIGetValue( const TrxPosition eTrxPos, const WCHAR * const wszKey, const KVPIValueType kvpvt, _Out_bytecap_( cbValue ) BYTE * const pbValue, const INT cbValue )
+ERR CKVPStore::ErrKVPIGetValue(
+    const TrxPosition eTrxPos,
+    const WCHAR * const wszKey,
+    const KVPIValueType kvpvt,
+    _Out_bytecap_( cbValue ) BYTE * const pbValue,
+    const ULONG cbValue,
+    _Out_opt_ ULONG *pcbActual )
 {
     ERR err = JET_errSuccess;
 
@@ -1215,8 +1398,7 @@ ERR CKVPStore::ErrKVPIGetValue( const TrxPosition eTrxPos, const WCHAR * const w
 
     //  Validate this is a has a value type we know of ...
 
-    if ( kvpvt <= kvpvtInvalidType ||
-            kvpvt >= kvpvtMaxValueType )
+    if ( kvpvt <= kvpvtInvalidType || kvpvt >= kvpvtMaxValueType )
     {
         AssertSz( fFalse, "Invalid KVPIValueType = %d here.\n", kvpvt );
         return ErrERRCheck( JET_errInvalidColumnType );
@@ -1245,6 +1427,11 @@ ERR CKVPStore::ErrKVPIGetValue( const TrxPosition eTrxPos, const WCHAR * const w
     //  Do the "get" operation
     //
 
+    if ( pcbActual )
+    {
+        *pcbActual = 0;
+    }
+    
     //  Begin a transaction if necessary ...
 
     if ( eTrxPos == eNewTrx )
@@ -1282,7 +1469,7 @@ ERR CKVPStore::ErrKVPIGetValue( const TrxPosition eTrxPos, const WCHAR * const w
     //  Retrieve the actual value
 
     Call( ErrIsamRetrieveColumn( m_ppibGlobalLock, m_pfucbGlobalLock, m_rgDataTypeInfo[kvpvt].m_cid, pbValue, cbValue, &cbActual, NO_GRBIT, NULL ) );
-
+    
     if ( m_rgDataTypeInfo[kvpvt].m_cbDataCol != (INT)cbActual &&
             m_rgDataTypeInfo[kvpvt].m_cbDataCol != cbKVPIVariableDataSize )
     {
@@ -1290,6 +1477,11 @@ ERR CKVPStore::ErrKVPIGetValue( const TrxPosition eTrxPos, const WCHAR * const w
         return ErrERRCheck( JET_errInvalidBufferSize );
     }
 
+    if ( pcbActual )
+    {
+        *pcbActual = cbActual;
+    }
+    
 HandleError:
 
     if ( fOwnsTrx )
@@ -1305,7 +1497,7 @@ HandleError:
 
 
 //  ================================================================
-//  API KVP Setting / Getting
+//  API KVP Setting / Getting / Deleting
 //  ================================================================
 
 INT CKVPStore::CbKVPKeySize( const WCHAR * const wszKey ) const
@@ -1318,22 +1510,25 @@ INT CKVPStore::CbKVPKeySize( const WCHAR * const wszKey ) const
     return cbKey;
 }
 
-ERR CKVPStore::ErrKVPSetValue( const WCHAR * const wszKey, const INT iValue )
+ERR CKVPStore::ErrKVPDeleteKey( const WCHAR * const wszKey )
 {
-    return ErrKVPISetValue( eNewTrx, wszKey, kvpvtIntValueType, (BYTE*)&iValue, sizeof( iValue ) );
+    return ErrKVPIDeleteKey( eNewTrx, wszKey );
 }
 
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
+ERR CKVPStore::ErrKVPSetValue( const WCHAR * const wszKey, const INT iValue )
+{
+    return ErrKVPISetValue( eNewTrx, wszKey, kvpvtLongValueType, (BYTE*)&iValue, sizeof( iValue ) );
+}
+
 ERR CKVPStore::ErrKVPSetValue( const WCHAR * const wszKey, const INT64 i64Value )
 {
-    return ErrKVPISetValue( eNewTrx, wszKey, kvpvtQwordValueType, (BYTE*)&i64Value, sizeof( i64Value ) );
+    return ErrKVPISetValue( eNewTrx, wszKey, kvpvtLongLongValueType, (BYTE*)&i64Value, sizeof( i64Value ) );
 }
 
 ERR CKVPStore::ErrKVPSetValue( const WCHAR * const wszKey, const BYTE * const pbValue, const ULONG cbValue )
 {
-    return ErrKVPISetValue( eNewTrx, wszKey, kvpvtBlobValueType, pbValue, cbValue );
+    return ErrKVPISetValue( eNewTrx, wszKey, kvpvtLongBinaryValueType, pbValue, cbValue );
 }
-#endif
 
 ERR CKVPStore::ErrKVPAdjValue( __inout PIB * ppibProvided, const WCHAR * const wszKey, const INT iAdjustment )
 {
@@ -1355,7 +1550,7 @@ ERR CKVPStore::ErrKVPAdjValue( __inout PIB * ppibProvided, const WCHAR * const w
 
     //  fetch the original value
 
-    err = ErrKVPIGetValue( eHasTrx, wszKey, kvpvtIntValueType, (BYTE*)&iValue, sizeof( iValue ) );
+    err = ErrKVPIGetValue( eHasTrx, wszKey, kvpvtLongValueType, (BYTE*)&iValue, sizeof( iValue ) );
 
     //  presume 0 value if not exists yet
 
@@ -1378,7 +1573,7 @@ ERR CKVPStore::ErrKVPAdjValue( __inout PIB * ppibProvided, const WCHAR * const w
 
     //  set the value
 
-    Call( ErrKVPISetValue( eHasTrx, wszKey, kvpvtIntValueType, (BYTE*)&iValue, sizeof( iValue ) ) );
+    Call( ErrKVPISetValue( eHasTrx, wszKey, kvpvtLongValueType, (BYTE*)&iValue, sizeof( iValue ) ) );
 
 HandleError:
 
@@ -1403,20 +1598,20 @@ ERR CKVPStore::ErrKVPAdjValue( const WCHAR * const wszKey, const INT iAdjustment
 
 ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT * piValue )
 {
-    return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtIntValueType, (BYTE*)piValue, sizeof( *piValue ) );
+    return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtLongValueType, (BYTE*)piValue, sizeof( *piValue ) );
 }
 
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
 ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT64 * pi64Value )
 {
-    return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtQwordValueType, (BYTE*)pi64Value, sizeof( *pi64Value ) );
+    return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtLongLongValueType, (BYTE*)pi64Value, sizeof( *pi64Value ) );
 }
 
-ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, _Out_ BYTE * const pbValue, const ULONG cbValue )
+// Retrieves variable size binary buffer from KVP store.
+// Note:  If a value was set as INT or INT64, this routine will not retrieve it.  Keep the same typed routines for Set/Get.
+ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, _Out_ BYTE * const pbValue, const ULONG cbValueMax, _Out_opt_ ULONG *pcbValueActual )
 {
-    return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtBlobValueType, (BYTE*)pbValue, cbValue );
+    return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtLongBinaryValueType, (BYTE*)pbValue, cbValueMax, pcbValueActual );
 }
-#endif
 
 VOID CKVPStore::Dump( CPRINTF* pcprintf, const BOOL fInternalToo )
 {
@@ -1642,7 +1837,7 @@ ERR CKVPStore::CKVPSCursor::ErrKVPSCursorGetValue( _Out_ INT * piValue )
     CallR( ErrKVPSCursorIGetType( &kvpvt ) );
 
     if( kvpvt == CKVPStore::kvpvtSchemaValueType ||
-        kvpvt == CKVPStore::kvpvtIntValueType )
+        kvpvt == CKVPStore::kvpvtLongValueType )
     {
         return m_pkvps->ErrKVPIGetValue( eHasTrx, m_wszCurrentKey, kvpvt, (BYTE*)piValue, sizeof( *piValue ) );
     }
@@ -1667,7 +1862,7 @@ ERR CKVPStore::CKVPSCursor::ErrKVPSCursorUpdValue( _In_ INT iValue )
     CallR( ErrKVPSCursorIGetType( &kvpvt ) );
 
     if( kvpvt == CKVPStore::kvpvtSchemaValueType ||
-        kvpvt == CKVPStore::kvpvtIntValueType )
+        kvpvt == CKVPStore::kvpvtLongValueType )
     {
         return m_pkvps->ErrKVPISetValue( eHasTrx, m_wszCurrentKey, kvpvt, (BYTE*)&iValue, sizeof( iValue ) );
     }
@@ -1888,6 +2083,48 @@ JETUNITTESTDB( KVPStore, TestSetValue, dwOpenDatabase )
     CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, 2 ) );
     CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, &iValue ) );
     CHECK( iValue == 2 );
+
+    kvpstore.KVPTermStore();
+}
+
+JETUNITTESTDB( KVPStore, TestDeleteValue, dwOpenDatabase )
+{
+    CKVPStore kvpstore( IfmpTest(), L"MSysTESTING_KVPStoreTestDeleteValue" );
+
+    const WCHAR * wszOneName = L"JustAKeyName";
+    const WCHAR * wszAnotherName = L"JustAnotherKeyName";
+    const WCHAR * wszALongName = L"ThisIsAVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryVeryLongName";
+    const WCHAR * wszASplatName = L"JustA*Name";
+    
+    CHECKCALLS( kvpstore.ErrKVPInitStore( 1 ) );
+
+    INT iValue = 42;
+
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &iValue ) );
+    CHECK( iValue == 42 );
+
+    CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, 2 ) );
+    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, &iValue ) );
+    CHECK( iValue == 2 );
+
+    // Delete the key that exists.
+    CHECK( JET_errSuccess == kvpstore.ErrKVPDeleteKey( wszOneName ) );
+    // Fail to delete the key that used to exist.
+    CHECK( wrnKVPEntryAlreadyNotPresent == kvpstore.ErrKVPDeleteKey( wszOneName ) );
+    // Fail to delete a key that never existed.
+    CHECK( wrnKVPEntryAlreadyNotPresent == kvpstore.ErrKVPDeleteKey( wszAnotherName ) );
+    // Fail to delete a key that never existed and is very long.
+    FNegTestSet( fInvalidUsage );
+    CHECK( wrnKVPEntryAlreadyNotPresent == kvpstore.ErrKVPDeleteKey( wszALongName ) );
+    FNegTestUnset( fInvalidUsage ); 
+    // Fail to delete a key that never existed that has a * in it.
+    FNegTestSet( fInvalidUsage );
+    CHECK( JET_errInvalidParameter == kvpstore.ErrKVPDeleteKey( wszASplatName ) );
+    FNegTestUnset( fInvalidUsage ); 
+    // Fail to delete a schema key.
+    FNegTestSet( fInvalidUsage );
+    CHECK( JET_errInvalidParameter == kvpstore.ErrKVPDeleteKey( p_wszSchemaInternalMajorVersion ) );
+    FNegTestUnset( fInvalidUsage ); 
 
     kvpstore.KVPTermStore();
 }
@@ -2141,75 +2378,249 @@ JETUNITTESTDB( KVPStore, ReOpenTable, dwOpenDatabase )
     delete pkvps;
 }
 
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-
-JETUNITTESTDB( KVPStore, TestSetQwordValue, dwOpenDatabase )
+JETUNITTESTDB( KVPStore, TestSetLongLongValue, dwOpenDatabase )
 {
-    CKVPStore kvpstore( IfmpTest(), L"MSysTESTING_KVPStoreTestSetQwordValue" );
+    CKVPStore kvpstore( IfmpTest(), L"MSysTESTING_KVPStoreTestSetLongLongValue" );
+
+    const WCHAR * wszOneName = L"JustAKeyName";
+    const WCHAR * wszAnotherName = L"TotallyDifferentKeyName";
+    
+    CHECKCALLS( kvpstore.ErrKVPInitStore( 1 ) );
+
+    const INT iValueDefault = 42;
+    const INT64 i64ValueDefault = 0x100000001;
+    const INT cbSomeData = 32;
+    BYTE rgbSomeData[cbSomeData];
+    for ( int i = 0; i < cbSomeData; i++ )
+    {
+        rgbSomeData[i] = (BYTE)TickOSTimeCurrent();
+    }
+
+    const INT64 i64Value1 = 2;
+    const INT64 i64Value2 = 34;
+    const INT64 i64ValueAnother = 25;
+
+    INT iValueResults;
+    INT64 i64ValueResults;
+    BYTE rgbSomeResults[cbSomeData];
+    ULONG cbDataRead;
+
+    // Read various value types, none of which should be there.  On error,
+    // the _Out variables should be untouched, except for cbDataRead, which
+    // should be 0.
+    iValueResults = iValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &iValueResults ) );
+    CHECK( iValueResults == iValueDefault );
+    
+    i64ValueResults = i64ValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    CHECK( i64ValueResults == i64ValueDefault );
+
+    cbDataRead = iValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, sizeof( rgbSomeResults ), &cbDataRead ) );
+    CHECK( 0 == cbDataRead );
+
+    // Set an INT64
+    CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, i64Value1 ) );
+
+    // Try reading again, which should only succeed when reading an INT64
+    iValueResults = iValueDefault;
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPGetValue( wszOneName, &iValueResults ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+    CHECK( iValueResults == iValueDefault );
+
+    i64ValueResults = i64ValueDefault;
+    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    CHECK( i64ValueResults == i64Value1 );
+
+    cbDataRead = iValueDefault;
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, sizeof( rgbSomeResults ), &cbDataRead ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+    CHECK( cbDataRead == 0 );
+
+    // Verify that we can set another key-value pair without disturbing this one.
+    CHECKCALLS( kvpstore.ErrKVPSetValue( wszAnotherName, i64ValueAnother ) );
+    i64ValueResults = i64ValueDefault;
+    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    CHECK( i64ValueResults == i64Value1 );  // original un-peturbed
+    CHECKCALLS( kvpstore.ErrKVPGetValue( wszAnotherName, &i64ValueResults ) );
+    CHECK( i64ValueResults == i64ValueAnother );
+    
+    // Change the value.
+    CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, i64Value2 ) );
+
+    // Reread.
+    iValueResults = iValueDefault;
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPGetValue( wszOneName, &iValueResults ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+    CHECK( iValueResults == iValueDefault );
+    
+    i64ValueResults = i64ValueDefault;
+    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    CHECK( i64ValueResults == i64Value2 );
+
+    cbDataRead = iValueDefault;
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, sizeof( rgbSomeResults ), &cbDataRead ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+    CHECK( cbDataRead == 0 );
+
+    // Try to change INT64 to a LongBinary.
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPSetValue( wszOneName, rgbSomeData, cbSomeData ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+
+    // Finally, delete the data.
+    CHECKCALLS( kvpstore.ErrKVPDeleteKey( wszOneName ) );
+
+    // And try to reread.
+    iValueResults = iValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &iValueResults ) );
+    CHECK( iValueResults == iValueDefault );
+    
+    i64ValueResults = i64ValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    CHECK( i64ValueResults == i64ValueDefault );
+
+    cbDataRead = iValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, sizeof( rgbSomeResults ), &cbDataRead ) );
+    CHECK( 0 == cbDataRead );
+    
+    kvpstore.KVPTermStore();
+}
+
+JETUNITTESTDB( KVPStore, TestSetLongBinary, dwOpenDatabase )
+{
+
+    CKVPStore kvpstore( IfmpTest(), L"MSysTESTING_KVPStoreTestSetLongBinaryValue" );
 
     const WCHAR * wszOneName = L"JustAKeyName";
 
     CHECKCALLS( kvpstore.ErrKVPInitStore( 1 ) );
 
-    INT64 iValue = 42;
+    const INT iValueDefault = 42;
+    const INT64 i64ValueDefault = 0x100000001;
+    const INT cbSomeData = 2048;
+    BYTE rgbSomeData[cbSomeData];
+    for ( int i = 0; i < cbSomeData; i++ )
+    {
+        rgbSomeData[i] = (BYTE)TickOSTimeCurrent();
+    }
+    const INT cbALittleData = 32;
 
-    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &iValue ) );
-    CHECK( iValue == 42 );
+    Assert( cbALittleData < cbSomeData / 2 );  // goal is to test significant different data size.
+    const INT iValue1 = 2;
+    
+    INT iValueResults;
+    INT64 i64ValueResults;
+    BYTE rgbSomeResults[cbSomeData];
+    ULONG cbDataRead;
+    
+    // Read various value types, none of which should be there.  On error,
+    // the _Out variables should be untouched, except for cbDataRead, which
+    // should be 0.
+    iValueResults = iValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &iValueResults ) );
+    CHECK( iValueResults == iValueDefault );
+    
+    i64ValueResults = i64ValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    CHECK( i64ValueResults == i64ValueDefault );
 
-    CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, (INT64)2 ) );
-    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, &iValue ) );
-    CHECK( iValue == 2 );
+    cbDataRead = iValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, sizeof( rgbSomeResults ), &cbDataRead ) );
+    CHECK( 0 == cbDataRead );
 
-    CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, (INT64)34 ) );
-    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, &iValue ) );
-    CHECK( iValue == 34 );
+    // Set some binary data.
+    CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, rgbSomeData, cbALittleData ) );
+    
+    // Try reading again, which should only succeed when reading as a binary data.
+    iValueResults = iValueDefault;
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPGetValue( wszOneName, &iValueResults ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+    CHECK( iValueResults == iValueDefault );
+    
+    i64ValueResults = i64ValueDefault;
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+    CHECK( i64ValueResults == i64ValueDefault );
 
-    CHECKCALLS( kvpstore.ErrKVPSetValue( L"TotallyDifferentKeyName", (INT64)25 ) );
-    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, &iValue ) );
-    CHECK( iValue == 34 );  // original un-peturbed
+    cbDataRead = iValueDefault;
+    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, sizeof( rgbSomeResults ), &cbDataRead ) );
+    CHECK( cbDataRead == cbALittleData );
+    CHECK( 0 == memcmp( rgbSomeData, rgbSomeResults, cbDataRead ) );
 
-    CHECKCALLS( kvpstore.ErrKVPGetValue( L"TotallyDifferentKeyName", &iValue ) );
-    CHECK( iValue == 25 );
+    // Change the binary data to  much bigger binary data.
+    CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, rgbSomeData, cbSomeData ) );
+
+    // Reread.
+    iValueResults = iValueDefault;
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPGetValue( wszOneName, &iValueResults ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+    CHECK( iValueResults == iValueDefault );
+    
+    i64ValueResults = i64ValueDefault;
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+    CHECK( i64ValueResults == i64ValueDefault );
+
+    cbDataRead = iValueDefault;
+    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, sizeof( rgbSomeResults ), &cbDataRead ) );
+    CHECK( cbDataRead == cbSomeData );
+    CHECK( 0 == memcmp( rgbSomeData, rgbSomeResults, cbDataRead ) );
+
+    // Try to read into a result buffer that's NULL
+    CHECK( JET_wrnBufferTruncated == kvpstore.ErrKVPGetValue( wszOneName, NULL, 0, &cbDataRead ) );
+    CHECK( cbDataRead == cbSomeData ); // How much data was really there, not how much we read.
+
+    // Try to read into a result buffer that's too small.
+    CHECK( JET_wrnBufferTruncated == kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, cbALittleData, &cbDataRead ) );
+    CHECK( cbDataRead == cbSomeData ); // How much data was really there, not how much we read.
+    CHECK( 0 == memcmp( rgbSomeData, rgbSomeResults, cbALittleData ) );
+
+    // Try to change binary data to an INT64.
+    OnNonRTM( CHECK( 0 == FNegTestSet( fInvalidUsage ) ) );
+    CHECK( JET_errInvalidColumnType == kvpstore.ErrKVPSetValue( wszOneName, iValue1 ) );
+    OnNonRTM( (void)FNegTestUnset( fInvalidUsage ) );
+
+    // Finally, delete the data.
+    CHECKCALLS( kvpstore.ErrKVPDeleteKey( wszOneName ) );
+
+    // And try to reread.
+    iValueResults = iValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &iValueResults ) );
+    CHECK( iValueResults == iValueDefault );
+    
+    i64ValueResults = i64ValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &i64ValueResults ) );
+    CHECK( i64ValueResults == i64ValueDefault );
+
+    cbDataRead = iValueDefault;
+    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, rgbSomeResults, sizeof( rgbSomeResults ), &cbDataRead ) );
+    CHECK( 0 == cbDataRead );
 
     kvpstore.KVPTermStore();
 }
 
-
-JETUNITTESTDB( KVPStore, TestSetBlobValue, dwOpenDatabase )
-{
-    CKVPStore kvpstore( IfmpTest(), L"MSysTESTING_KVPStoreTestSetBlobValue" );
-
-    const WCHAR * wszOneName = L"JustAKeyName";
-
-    CHECKCALLS( kvpstore.ErrKVPInitStore( 1 ) );
-
-    INT iValue = 42;
-
-    CHECK( JET_errRecordNotFound == kvpstore.ErrKVPGetValue( wszOneName, &iValue ) );
-    CHECK( iValue == 42 );
-
-    CHAR szSomeData[] = "MyMyThisIsLessThan30";
-    CHAR szSomeResults[30];
-    ULONG cbData = strlen( szSomeData ) + 1;
-
-    CHECKCALLS( kvpstore.ErrKVPSetValue( wszOneName, (BYTE*)szSomeData, cbData ) );
-    CHECKCALLS( kvpstore.ErrKVPGetValue( wszOneName, (BYTE*)szSomeResults, sizeof( szSomeResults ) ) );
-
-    CHECK( 0 == memcmp( szSomeData, szSomeResults, cbData ) );
-
-    kvpstore.KVPTermStore();
-}
-
-
+#ifdef DEBUG
+// This test uses TestInjection, which only works in Debug builds.
 JETUNITTESTDB( KVPStore, UpgradeKVPInternalSchema, dwOpenDatabase )
 {
     const WCHAR * wszMSysTestTableName = L"MSysTESTING_UpgradeKVPInternalSchema";
     const WCHAR * wszOneName = L"JustAKeyName";
+    const WCHAR * wszAnotherName = L"TotallyDifferentKeyName";
+    const WCHAR * wszANewName = L"A new name";
 
     //  tell CKVPStore to skip normal upgrade and create an "old" / original KVPStore table / schema ...
     //
     ErrEnableTestInjection( 43991, fTrue, JET_TestInjectConfigOverride, 100, JET_bitInjectionProbabilityPct );
-    //  sets FSkipUpgrade() effectively
 
     CKVPStore * pkvps = new CKVPStore( IfmpTest(), wszMSysTestTableName );
     CHECK( NULL != pkvps );
@@ -2217,6 +2628,12 @@ JETUNITTESTDB( KVPStore, UpgradeKVPInternalSchema, dwOpenDatabase )
     CHECKCALLS( pkvps->ErrKVPInitStore( 1 ) );
 
     INT iValue = 42;
+
+    //  Data for a column that is not present in a non-upgraded table.
+    CHAR szSomeData[] = "MyMyThisIsLessThan30";
+    CHAR szSomeResults[30];
+    ULONG cbData = strlen( szSomeData ) + 1;
+    
 
     //  Load it with some data and basic operations...
     //
@@ -2228,12 +2645,15 @@ JETUNITTESTDB( KVPStore, UpgradeKVPInternalSchema, dwOpenDatabase )
     CHECKCALLS( pkvps->ErrKVPSetValue( wszOneName, 34 ) );
     CHECKCALLS( pkvps->ErrKVPGetValue( wszOneName, &iValue ) );
     CHECK( iValue == 34 );
-    CHECKCALLS( pkvps->ErrKVPSetValue( L"TotallyDifferentKeyName", 25 ) );
+    CHECKCALLS( pkvps->ErrKVPSetValue( wszAnotherName, 25 ) );
     CHECKCALLS( pkvps->ErrKVPGetValue( wszOneName, &iValue ) );
     CHECK( iValue == 34 );
-    CHECKCALLS( pkvps->ErrKVPGetValue( L"TotallyDifferentKeyName", &iValue ) );
+    CHECKCALLS( pkvps->ErrKVPGetValue( wszAnotherName, &iValue ) );
     CHECK( iValue == 25 );
 
+    // Try to write a data type that isn't present in a non-upgraded schema.
+    CHECK( JET_errBadColumnId == pkvps->ErrKVPSetValue( wszANewName, (BYTE*)szSomeData, cbData ) );
+    
     //  Term and Destroy the KVPStore ...
     //
     pkvps->KVPTermStore();
@@ -2242,7 +2662,6 @@ JETUNITTESTDB( KVPStore, UpgradeKVPInternalSchema, dwOpenDatabase )
     //  Tell KVPStore to upgrade to current table / schema ...
     //
     ErrEnableTestInjection( 43991, fTrue, JET_TestInjectConfigOverride, 0, JET_bitInjectionProbabilityPct );
-    //  sets FSkipUpgrade() back to false
 
     //  Now re-initialize and UPGRADE a new KVPStore ...
     //
@@ -2255,17 +2674,13 @@ JETUNITTESTDB( KVPStore, UpgradeKVPInternalSchema, dwOpenDatabase )
     //
     CHECKCALLS( pkvps->ErrKVPGetValue( wszOneName, &iValue ) );
     CHECK( iValue == 34 );
-    CHECKCALLS( pkvps->ErrKVPGetValue( L"TotallyDifferentKeyName", &iValue ) );
+    CHECKCALLS( pkvps->ErrKVPGetValue( wszAnotherName, &iValue ) );
     CHECK( iValue == 25 );
 
-    //  Now load it with some new blob operations ...
+    //  Now load it with some new binary data operations ...
     //
-    CHAR szSomeData[] = "MyMyThisIsLessThan30";
-    CHAR szSomeResults[30];
-    ULONG cbData = strlen( szSomeData ) + 1;
-
-    CHECKCALLS( pkvps->ErrKVPSetValue( L"A new name", (BYTE*)szSomeData, cbData ) );
-    CHECKCALLS( pkvps->ErrKVPGetValue( L"A new name", (BYTE*)szSomeResults, sizeof( szSomeResults ) ) );
+    CHECKCALLS( pkvps->ErrKVPSetValue( wszANewName, (BYTE*)szSomeData, cbData ) );
+    CHECKCALLS( pkvps->ErrKVPGetValue( wszANewName, (BYTE*)szSomeResults, sizeof( szSomeResults ) ) );
 
     CHECK( 0 == memcmp( szSomeData, szSomeResults, cbData ) );
 
@@ -2280,9 +2695,7 @@ JETUNITTESTDB( KVPStore, UpgradeKVPInternalSchema, dwOpenDatabase )
     pkvps->KVPTermStore();
     delete pkvps;
 }
-
 #endif
-
 
 //  ================================================================
 //  Unit testing for CKVPStore::CKVPSCursor stuff ...
@@ -2522,12 +2935,12 @@ JETUNITTESTDB( KVPStore, TestUserMajorVersionIncompat, dwOpenDatabase )
 
     CHECKCALLS( pkvps->ErrKVPInitStore( 1 ) );
 
-    DWORD dwMinor = 42;
-    DWORD dwUpdate = 42;
+    ULONG ulMinor = 42;
+    ULONG ulUpdate = 42;
 
-    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &dwMinor, &dwUpdate ) );
-    CHECK( 0 == dwMinor );
-    CHECK( 0 == dwUpdate );
+    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &ulMinor, &ulUpdate ) );
+    CHECK( 0 == ulMinor );
+    CHECK( 0 == ulUpdate );
 
     INT iValue = 42;
 
@@ -2569,12 +2982,12 @@ JETUNITTESTDB( KVPStore, TestUserVersionUpgrade, dwOpenDatabase )
 
     CHECKCALLS( pkvps->ErrKVPInitStore( 1 ) );
 
-    DWORD dwMinor = 42;
-    DWORD dwUpdate = 42;
+    ULONG ulMinor = 42;
+    ULONG ulUpdate = 42;
 
-    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &dwMinor, &dwUpdate ) );
-    CHECK( 0 == dwMinor );
-    CHECK( 0 == dwUpdate );
+    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &ulMinor, &ulUpdate ) );
+    CHECK( 0 == ulMinor );
+    CHECK( 0 == ulUpdate );
 
     INT iValue = 42;
 
@@ -2600,9 +3013,9 @@ JETUNITTESTDB( KVPStore, TestUserVersionUpgrade, dwOpenDatabase )
 
     //  Check the initial user minor/update versions are zero / default.
     //
-    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &dwMinor, &dwUpdate ) );
-    CHECK( 0 == dwMinor );
-    CHECK( 0 == dwUpdate );
+    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &ulMinor, &ulUpdate ) );
+    CHECK( 0 == ulMinor );
+    CHECK( 0 == ulUpdate );
 
     //  Should have old values, as table is opened, not re-created ...
     //
@@ -2616,9 +3029,9 @@ JETUNITTESTDB( KVPStore, TestUserVersionUpgrade, dwOpenDatabase )
 
     //  Check the upgrade of minor/update versions worked.
     //
-    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &dwMinor, &dwUpdate ) );
-    CHECK( 2 == dwMinor );
-    CHECK( 3 == dwUpdate );
+    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &ulMinor, &ulUpdate ) );
+    CHECK( 2 == ulMinor );
+    CHECK( 3 == ulUpdate );
 
     //  Term and Destroy the KVPStore ... again.
     //
@@ -2634,9 +3047,9 @@ JETUNITTESTDB( KVPStore, TestUserVersionUpgrade, dwOpenDatabase )
 
     //  Check the upgrade of minor/update versions stuck (through uninit/init)
     //
-    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &dwMinor, &dwUpdate ) );
-    CHECK( 2 == dwMinor );
-    CHECK( 3 == dwUpdate );
+    CHECKCALLS( pkvps->ErrKVPGetUserVersion( &ulMinor, &ulUpdate ) );
+    CHECK( 2 == ulMinor );
+    CHECK( 3 == ulUpdate );
 
     //  Term and Destroy the KVPStore ... finally.
     //
@@ -2653,9 +3066,9 @@ JETUNITTESTDB( KVPStoreForMSysLocales, ExpectedLCIDTableUsage, dwOpenDatabase )
 {
     CKVPStore * pkvps = new CKVPStore( IfmpTest(), L"MSysTESTING_MSysLocales" );
 
-    const DWORD dwMSysLocalesMajorVersion = 1;
+    const ULONG ulMSysLocalesMajorVersion = 1;
 
-    CHECKCALLS( pkvps->ErrKVPInitStore( dwMSysLocalesMajorVersion ) );
+    CHECKCALLS( pkvps->ErrKVPInitStore( ulMSysLocalesMajorVersion ) );
 
     WCHAR wszLcidVerKey[60];
 
