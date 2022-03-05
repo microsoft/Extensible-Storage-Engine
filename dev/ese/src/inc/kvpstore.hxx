@@ -7,7 +7,7 @@
 
 //  This module implements store that supports a loosely-schematized 
 //  key and semi-strongly typed value pair that can handle 3 basic 
-//  types: int, qword, and blob.
+//  types: LONG, LONGLONG, and BYTE[].
 //
 //  Any key of 111 WCHARs (w/o NUL) or less is accepted, as long as 
 //  it does not begin with a ".", which is reserved for internal 
@@ -20,12 +20,11 @@
 //  past this limitation if needed.
 //
 //  It favors simplicity over space usage, storing most likely ASCII
-//  keys as Unicode.
+//  keys as BYTE[].
 //
 //  Has upgrade support facilities, in case the usage of the 
 //  KVPStore needs to evolve.
 //
-
 
 class CKVPStore : CZeroInit
 {
@@ -47,23 +46,31 @@ private:
     //      .Schema Versions
     //
 
-    //  upgrades to the internal schema of the KVPStore
-    //
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-    PERSISTED static const INT  p_dwMinorAddBlobValueType = 1;
-    PERSISTED static const INT  p_dwUpdateAddQwordValueType = 1;
-#endif
+    //   Versions:
+    //   1.0.0 - Initial release
+    //   1.0.1 - Added LongBinary value type.    JET_efvKVPStoreV2 transitory upgrade state.
+    //   1.0.2 - Added LongLong value type.      JET_efvKVPStoreV2 end upgrade state.
 
-    //  internal upgrades and internal .schema versions
+    //  Updates to the internal schema of the KVPStore
     //
-    PERSISTED static const INT  p_dwInternalMajorVersion        = 1;                            //  initial value 1
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-    PERSISTED static const INT  p_dwInternalMinorVersion        = p_dwMinorAddBlobValueType;    //  initial value 0
-    PERSISTED static const INT  p_dwInternalUpdateVersion       = p_dwUpdateAddQwordValueType;  //  initial value 0
-#else
-    PERSISTED static const INT  p_dwInternalMinorVersion        = 0;                            //  initial value 0
-    PERSISTED static const INT  p_dwInternalUpdateVersion       = 0;                            //  initial value 0
-#endif
+    PERSISTED static const ULONG  p_ulUpdateAddLongBinaryValueType = 1;
+    PERSISTED static const ULONG  p_ulUpdateAddLongLongValueType = 2;
+
+    // Minor version upgrades to the internal schema of the KVPStore
+    // None yet.
+
+    // No support for major version upgrades yet.
+
+    //  Maximum supported internal upgrades and internal .schema versions
+    //  The initial release was version 1.0.0.
+    PERSISTED static const ULONG  p_ulInternalMajorVersion  = 1;
+    PERSISTED static const ULONG  p_ulInternalMinorVersion  = 0;
+    PERSISTED static const ULONG  p_ulInternalUpdateVersion = p_ulUpdateAddLongLongValueType;
+
+    // Current supported internal upgrades and internal .schema versions
+    ULONG  m_ulInternalMajorVersion;
+    ULONG  m_ulInternalMinorVersion;
+    ULONG  m_ulInternalUpdateVersion;
 
     //  --------------------------------------------------------------------------
     //
@@ -82,33 +89,88 @@ private:
     //
     JET_COLUMNID            m_cidType;
 
+    //  data column information (indexed by type enum)
+    //
+    static const ULONG      cbKVPIVariableDataSize = 0;
+
     PERSISTED typedef enum _ValueType
     {
         kvpvtInvalidType = 0,       //
 
-        kvpvtSchemaValueType,       //  internal schema value
+        kvpvtSchemaValueType,       //  internal schema value (LONG)
 
-        kvpvtIntValueType,          //  standard integer value
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-        kvpvtQwordValueType,        //  large integer value
-        kvpvtBlobValueType,         //  data blobs
-#endif
+        kvpvtLongValueType,         //  LONG value
+
+        kvpvtLongBinaryValueType,   //  Binary data (stored as LVs so > 255 bytes is OK).
+        
+        kvpvtLongLongValueType,     //  LONGLONG value
 
         kvpvtMaxValueType,          //  <sentinel>
 
     } KVPIValueType;
 
-    //  data column information (indexed by type enum)
-    //
-    static const INT        cbKVPIVariableDataSize = 0;
     struct KVPIDataColInfo
     {
-        KVPIValueType       m_type; // index variable...
-        JET_COLUMNID        m_cid;
-        INT                 m_cbDataCol;
+        KVPIValueType       m_type;      // index variable...
+        JET_COLUMNID        m_cid;       // Column ID of column in table.
+        JET_COLTYP          m_coltyp;    // Column type to use when creating column.
+        JET_GRBIT           m_grbit;     // Grbit to use when creating column.
+        ULONG               m_cbDataCol; // Size of data storable in column.
+        ULONG               m_ulMajor;   // What version of the table
+        ULONG               m_ulMinor;   //    -    introduced this
+        ULONG               m_ulUpdate;  //    -    schema element?
+        PCSTR               m_szName;
     };
-    struct KVPIDataColInfo  m_rgDataTypeInfo[kvpvtMaxValueType];
-
+    struct KVPIDataColInfo  m_rgDataTypeInfo[kvpvtMaxValueType] =
+    {
+        {
+            kvpvtInvalidType,
+            JET_columnidNil,
+            0,
+            NO_GRBIT,
+            cbKVPIVariableDataSize,
+            1, 0, 0,
+            "Invalid"
+        },
+        {
+            // Note that this data type is stored in the same column as kvpvtLongValueType,
+            // we know what we're reading from context.
+            kvpvtSchemaValueType,
+            JET_columnidNil,
+            JET_coltypLong,
+            ( JET_bitColumnFixed | JET_bitColumnEscrowUpdate ),
+            sizeof( LONG ),
+            1, 0, 0,
+            "iValue"
+        },
+        {
+            kvpvtLongValueType,
+            JET_columnidNil,
+            JET_coltypLong,
+            ( JET_bitColumnFixed | JET_bitColumnEscrowUpdate ),
+            sizeof( LONG ),
+            1, 0, 0,
+            "iValue"
+        },
+        {
+            kvpvtLongBinaryValueType,
+            JET_columnidNil,
+            JET_coltypLongBinary,
+            JET_bitColumnTagged,
+            cbKVPIVariableDataSize,
+            1, 0, p_ulUpdateAddLongBinaryValueType,
+            "rgbValue"
+        },
+        {
+            kvpvtLongLongValueType,
+            JET_columnidNil,
+            JET_coltypCurrency,
+            JET_bitColumnVariable,
+            sizeof( LONGLONG ),
+            1, 0, p_ulUpdateAddLongLongValueType,
+            "i64Value"
+        }
+    };
 
     //  --------------------------------------------------------------------------
     //
@@ -119,12 +181,9 @@ private:
     //
     
     ERR ErrKVPIInitIBootstrapCriticalCOLIDs();
-    ERR ErrKVPIInitICreateTable( PIB * ppib, const IFMP ifmp, const CHAR * const szTableName, const DWORD dwMajorVersionExpected );
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-    ERR ErrKVPIInitIUpgradeIAddBlobValueType( const DWORD dwUpgradeVersion );
-    ERR ErrKVPIInitIUpgradeIAddQwordValueType( const DWORD dwUpgradeVersion );
-#endif
-    ERR ErrKVPIInitIUpgradeTable();
+    ERR ErrKVPIInitICreateTable( PIB * ppib, const IFMP ifmp, const CHAR * const szTableName, const ULONG ulMajorVersionExpected );
+    ERR ErrKVPIAddValueTypeToSchema( const KVPIValueType kvpvt );
+    ERR ErrKVPIInitIUpgradeTable( const IFMP ifmp, bool fReadOnly );
     ERR ErrKVPIInitILoadValueTypeCOLIDs();
 
 
@@ -161,8 +220,24 @@ private:
     //  Internal DML operations on the KVP Table
     //
 
-    ERR ErrKVPISetValue( const TrxPosition eTrxPos, const WCHAR * const wszKey, const KVPIValueType eValueType, _In_opt_bytecount_( cbValue ) const BYTE * const pbValue, const INT cbValue );
-    ERR ErrKVPIGetValue( const TrxPosition eTrxPos, const WCHAR * const wszKey, const KVPIValueType eValueType, _Out_bytecap_( cbValue ) BYTE * const pbValue, const INT cbValue );
+    ERR ErrKVPIDeleteKey(
+        const TrxPosition eTrxPos,
+        const WCHAR * const wszKey );
+
+    ERR ErrKVPISetValue(
+        const TrxPosition eTrxPos,
+        const WCHAR * const wszKey,
+        const KVPIValueType eValueType,
+        _In_opt_bytecount_( cbValue ) const BYTE * const pbValue,
+        const ULONG cbValue );
+
+    ERR ErrKVPIGetValue(
+        const TrxPosition eTrxPos,
+        const WCHAR * const wszKey,
+        const KVPIValueType kvpvt,
+        _Out_bytecap_( cbValue ) BYTE * const pbValue,
+        const ULONG cbValue,
+        _Out_opt_ ULONG *pcbActual = NULL );
 
     //  Internal Validation
     //
@@ -180,16 +255,16 @@ public:
     //
 
     CKVPStore( IFMP ifmp, const WCHAR * const wszTableName );
-    ERR ErrKVPInitStore( PIB * const ppibProvided, const TrxUpdate eTrxUpd, const DWORD dwMajorVersionExpected );
-    ERR ErrKVPInitStore( const DWORD dwMajorVersionExpected )   { return ErrKVPInitStore( NULL, eReadWrite, dwMajorVersionExpected ); }
+    ERR ErrKVPInitStore( PIB * const ppibProvided, const TrxUpdate eTrxUpd, const ULONG ulMajorVersionExpected );
+    ERR ErrKVPInitStore( const ULONG ulMajorVersionExpected )   { return ErrKVPInitStore( NULL, eReadWrite, ulMajorVersionExpected ); }
     VOID KVPTermStore();
     ~CKVPStore( );
 
     //  user version control
     //
 
-    ERR ErrKVPGetUserVersion( _Out_ DWORD * pdwMinorVersion, _Out_ DWORD * pwUpdateVersion );
-    ERR ErrKVPSetUserVersion( const DWORD dwMinorVersion, const DWORD dwUpdateVersion );
+    ERR ErrKVPGetUserVersion( _Out_ ULONG * pulMinorVersion, _Out_ ULONG * pwUpdateVersion );
+    ERR ErrKVPSetUserVersion( const ULONG ulMinorVersion, const ULONG ulUpdateVersion );
 
     //  key limitations
     //
@@ -201,10 +276,8 @@ public:
     //
 
     ERR ErrKVPSetValue( const WCHAR * const wszKey, const INT iValue );
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
     ERR ErrKVPSetValue( const WCHAR * const wszKey, const INT64 i64Value );
     ERR ErrKVPSetValue( const WCHAR * const wszKey, const BYTE * const pbValue, const ULONG cbValue );
-#endif
     ERR ErrKVPAdjValue( const WCHAR * const wszKey, const INT iAdjustment );
     ERR ErrKVPAdjValue( __inout PIB * ppibProvided, const WCHAR * const wszKey, const INT iAdjustment );
 
@@ -212,10 +285,13 @@ public:
     //
     
     ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT * piValue );
-#ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
     ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT64 * pi64Value );
-    ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ BYTE * const pbValue, const ULONG cbValue );
-#endif
+    ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ BYTE * const pbValue, const ULONG cbValueMax, _Out_opt_ ULONG *pcbValueActual = NULL );
+
+    //  deleting keys
+    //
+
+    ERR ErrKVPDeleteKey( const WCHAR * const wszKey );
 
     //  debugging
     //
