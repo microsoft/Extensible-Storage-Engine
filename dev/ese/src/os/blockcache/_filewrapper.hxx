@@ -429,11 +429,11 @@ class TFileWrapper  //  fw
                     s_iocompleteHash.WriteLockKey( CIOCompleteKey( piocomplete ), &lock );
                     if ( ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrRetrieveEntry( &lock, &entry ) ) == JET_errSuccess )
                     {
-                        piocomplete->m_ms.Partition();
-
                         CallS( ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrDeleteEntry( &lock ) ) );
                     }
                     s_iocompleteHash.WriteUnlockKey( &lock );
+
+                    piocomplete->m_ms.Partition();
                 }
 
             private:
