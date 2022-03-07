@@ -22,7 +22,8 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
                 m_ctidAsyncIOWorker( ctidInvalid ),
                 m_critAsyncIOWorkerState( CLockBasicInfo( CSyncBasicInfo( "CHashedLRUKCacheThreadLocalStorage::m_critAsyncIOWorkerState" ), rankIssued, 0 ) ),
                 m_rgibSlab { 0 },
-                m_rgpcbsSlab { NULL }
+                m_rgpcbsSlab { NULL },
+                m_ibSlabWait( 0 )
         {
             m_semAsyncIOWorkerRequest.Release();
             m_semAsyncIOWorkerRequest.Release();
@@ -50,6 +51,7 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
         CCountedInvasiveList<CRequest, CRequest::OffsetOfIOs>& IlFinalizeIORequested() { return m_ilFinalizeIORequested; }
         CCountedInvasiveList<CRequest, CRequest::OffsetOfIOs>& IlFinalizeIOPending() { return m_ilFinalizeIOPending; }
         CCountedInvasiveList<CRequest, CRequest::OffsetOfIOs>& IlFinalizeIOCompleted() { return m_ilFinalizeIOCompleted; }
+        QWORD IbSlabWait() const { return AtomicRead( (__int64*)&m_ibSlabWait ); }
 
         void AddRequest( _Inout_ CRequest** const pprequest )
         {
@@ -164,6 +166,20 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
             EnforceSz( fFalse, "UnregisterOpenSlab" );
         }
 
+        void RegisterOpenSlabWait( _In_ const QWORD ibSlab )
+        {
+            Assert( ibSlab );
+            EnforceSz( !IbSlabWait(), "RegisterOpenSlabWait" );
+            AtomicExchange( (__int64*)&m_ibSlabWait, ibSlab );
+        }
+
+        void UnregisterOpenSlabWait( _In_ const QWORD ibSlab )
+        {
+            Assert( ibSlab );
+            EnforceSz( IbSlabWait(), "UnregisterOpenSlabWait" );
+            AtomicExchange( (__int64*)&m_ibSlabWait, 0 );
+        }
+
         void BeginAsyncIOWorker()
         {
             //  serialize execution of the async IO worker because more than one can be requested and executing concurrently
@@ -254,4 +270,5 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
         static const size_t                                                 s_cibSlab                           = 2;
         QWORD                                                               m_rgibSlab[ s_cibSlab ];
         ICachedBlockSlab*                                                   m_rgpcbsSlab[ s_cibSlab ];
+        volatile QWORD                                                      m_ibSlabWait;
 };

@@ -3226,14 +3226,30 @@ class THashedLRUKCache
                                     _In_ const DWORD_PTR                dwCompletionKey );
         void ResumeStateAccess();
 
+        ERR ErrSuspendBlockedThreadsFromStateAccess();
+        static BOOL FSuspendBlockedThreadFromStateAccess_(  _In_ CHashedLRUKCacheThreadLocalStorage<I>* const   pctls,
+                                                            _In_ const DWORD_PTR                                keyVisitTls )
+        {
+            THashedLRUKCacheBase<I>::PfnVisitTls pfnVisitTls = (THashedLRUKCacheBase<I>::PfnVisitTls)FSuspendBlockedThreadFromStateAccess_;
+            Unused( pfnVisitTls );
+
+            THashedLRUKCache<I>* const pc = (THashedLRUKCache<I>*)keyVisitTls;
+            return pc->FSuspendBlockedThreadFromStateAccess( pctls );
+        }
+        BOOL FSuspendBlockedThreadFromStateAccess( _In_ CHashedLRUKCacheThreadLocalStorage<I>* const pctls );
+
         ERR ErrRegisterOpenSlab( _In_ ICachedBlockSlab* const pcbs );
+        void RegisterOpenSlab( _In_ CHashedLRUKCacheThreadLocalStorage<I>* const pctls, _In_ ICachedBlockSlab* const pcbs );
         void UnregisterOpenSlab( _In_ ICachedBlockSlab* const pcbs );
+
+        void RegisterOpenSlabWait( _In_ CHashedLRUKCacheThreadLocalStorage<I>* const pctls, _In_ const QWORD ibSlab );
+        void UnregisterOpenSlabWait( _In_ CHashedLRUKCacheThreadLocalStorage<I>* const pctls, _In_ const QWORD ibSlab );
 
         ERR ErrGetJournalSlab( _Out_ ICachedBlockSlab** const ppcbs );
 
-        size_t IcrefJournalSlab( _In_ QWORD ibSlab );
-        void ReferenceJournalSlab( _In_ QWORD ibSlab );
-        void ReleaseJournalSlab( _In_ QWORD ibSlab );
+        size_t IcrefJournalSlab( _In_ const QWORD ibSlab );
+        void ReferenceJournalSlab( _In_ const QWORD ibSlab );
+        void ReleaseJournalSlab( _In_ const QWORD ibSlab );
 
         ERR ErrGetJournalCluster(   _In_    const CCachedBlockSlot&     slot,
                                     _Inout_ ICachedBlockSlab** const    ppcbsJournal,
@@ -3298,6 +3314,7 @@ class THashedLRUKCache
         CManualResetSignal*                                                                 m_rgpmsigStateAccess[ 2 ];
         CCriticalSection                                                                    m_critSuspendedThreads;
         CArray<CHashedLRUKCacheThreadLocalStorage<I>*>                                      m_rgarraySuspendedThreads[ 2 ];
+        ERR                                                                                 m_errSuspendBlockedThreads;
 
         size_t                                                                              m_ccrefJournalSlab;
         volatile int*                                                                       m_rgcrefJournalSlab;
@@ -4052,6 +4069,7 @@ THashedLRUKCache<I>::THashedLRUKCache(  _In_    IFileSystemFilter* const        
                     CArray<CHashedLRUKCacheThreadLocalStorage<I>*>(),
                     CArray<CHashedLRUKCacheThreadLocalStorage<I>*>(),
                 },
+                m_errSuspendBlockedThreads( JET_errSuccess ),
                 m_ccrefJournalSlab( 0 ),
                 m_rgcrefJournalSlab( NULL ),
                 m_critClusterWrites( CLockBasicInfo( CSyncBasicInfo( "THashedLRUKCache<I>::m_critClusterWrites" ), rankClusterWrites, 0 ) ),
@@ -5495,6 +5513,10 @@ ERR THashedLRUKCache<I>::ErrFlushAllState( _In_ const JournalPosition jposDurabl
 
     while ( !m_ilSlabsToWriteBackByJposMin.FEmpty() )
     {
+        //  register any effectively suspended threads
+
+        Call( ErrSuspendBlockedThreadsFromStateAccess() );
+
         //  get a list of all dirty slabs
 
         Call( ErrToErr<CArray<QWORD>>( arrayIbSlab.ErrSetCapacity( m_ilSlabsToWriteBackByJposMin.Count() ) ) );
@@ -6941,14 +6963,18 @@ ERR THashedLRUKCache<I>::ErrGetSlabInternal(    _In_    const QWORD             
                                                 _In_    const BOOL                  fForSlabWriteBack,
                                                 _Out_   ICachedBlockSlab** const    ppcbs )
 {
-    ERR                         err         = JET_errSuccess;
-    const BOOL                  fWait       = !fForSlabWriteBack;
-    ICachedBlockSlabManager*    pcbsm       = NULL;
-    BOOL                        fRelease    = fFalse;
-    ERR                         errSlab     = JET_errSuccess;
-    ICachedBlockSlab*           pcbs        = NULL;
+    ERR                                     err             = JET_errSuccess;
+    const BOOL                              fWait           = !fForSlabWriteBack;
+    CHashedLRUKCacheThreadLocalStorage<I>*  pctls           = NULL;
+    ICachedBlockSlabManager*                pcbsm           = NULL;
+    BOOL                                    fRelease        = fFalse;
+    BOOL                                    fUnregisterWait = fFalse;
+    ERR                                     errSlab         = JET_errSuccess;
+    ICachedBlockSlab*                       pcbs            = NULL;
 
     *ppcbs = NULL;
+
+    Call( THashedLRUKCacheBase<I>::ErrGetThreadLocalStorage( &pctls ) );
 
     //  determine which slab manager owns this slab
 
@@ -6973,17 +6999,33 @@ ERR THashedLRUKCache<I>::ErrGetSlabInternal(    _In_    const QWORD             
         fRelease = fTrue;
     }
 
+    //  register as a waiter for the slab
+
+    if ( fWait && !fForSlabWriteBack )
+    {
+        RegisterOpenSlabWait( pctls, ibSlab );
+        fUnregisterWait = fTrue;
+    }
+
     //  get the slab
 
     errSlab = pcbsm->ErrGetSlab( ibSlab, fWait, fIgnoreVerificationErrors, &pcbs );
     Call( fIgnoreVerificationErrors ? ErrIgnoreVerificationErrors( errSlab ) : errSlab );
     fRelease = fRelease && !pcbs;
 
+    //  unregister as a waiter for the slab
+
+    if ( fUnregisterWait )
+    {
+        UnregisterOpenSlabWait( pctls, ibSlab );
+        fUnregisterWait = fFalse;
+    }
+
     //  register our open slab
 
     if ( pcbs && !fForSlabWriteBack )
     {
-        Call( ErrRegisterOpenSlab( pcbs ) );
+        RegisterOpenSlab( pctls, pcbs );
     }
 
     //  return the slab
@@ -6994,6 +7036,10 @@ ERR THashedLRUKCache<I>::ErrGetSlabInternal(    _In_    const QWORD             
     err = errSlab;
 
 HandleError:
+    if ( fUnregisterWait )
+    {
+        UnregisterOpenSlabWait( pctls, ibSlab );
+    }
     if ( fRelease )
     {
         ReleaseJournalSlab( ibSlab );
@@ -7003,6 +7049,7 @@ HandleError:
     {
         ReleaseSlab( err, ppcbs );
     }
+    CHashedLRUKCacheThreadLocalStorage<I>::Release( &pctls );
     return err;
 }
 
@@ -7126,7 +7173,7 @@ ERR THashedLRUKCache<I>::ErrSuspendThreadFromStateAccess(   _In_ const CMeteredS
     fLeave = fFalse;
 
 HandleError:
-    if (fLeave)
+    if ( fLeave )
     {
         m_critSuspendedThreads.Leave();
     }
@@ -7172,6 +7219,64 @@ void THashedLRUKCache<I>::ResumeStateAccess()
 }
 
 template<class I>
+ERR THashedLRUKCache<I>::ErrSuspendBlockedThreadsFromStateAccess()
+{
+    ERR err = JET_errSuccess;
+
+    //  reset error state
+
+    m_errSuspendBlockedThreads = JET_errSuccess;
+
+    //  walk all thread local storage
+
+    VisitThreadLocalStorage( (THashedLRUKCacheBase<I>::PfnVisitTls)FSuspendBlockedThreadFromStateAccess_, DWORD_PTR( this ) );
+
+    //  sync with error state from enumeration
+
+    Call( m_errSuspendBlockedThreads );
+
+HandleError:
+    return err;
+}
+
+template<class I>
+BOOL THashedLRUKCache<I>::FSuspendBlockedThreadFromStateAccess( _In_ CHashedLRUKCacheThreadLocalStorage<I>* const pctls )
+{
+    ERR                                                     err                         = JET_errSuccess;
+    const QWORD                                             ibSlabWait                  = pctls->IbSlabWait();
+    const CMeteredSection::Group                            group                       = m_msStateAccess.GroupActive();
+    CArray<CHashedLRUKCacheThreadLocalStorage<I>*>* const   parraySuspendedThreads      = &m_rgarraySuspendedThreads[ group ];
+    BOOL                                                    fSuspendedThread            = fFalse;
+    BOOL                                                    fBlockedBySuspendedThread   = fFalse;
+
+    if ( ibSlabWait )
+    {
+        m_critSuspendedThreads.Enter();
+
+        for ( size_t i = 0; i < parraySuspendedThreads->Size(); i++ )
+        {
+            fSuspendedThread = fSuspendedThread || parraySuspendedThreads->Entry( i ) == pctls;
+            fBlockedBySuspendedThread = (   fBlockedBySuspendedThread ||
+                                            parraySuspendedThreads->Entry( i )->PcbsOpenSlab( ibSlabWait ) != NULL );
+        }
+
+        m_critSuspendedThreads.Leave();
+
+        if ( !fSuspendedThread && fBlockedBySuspendedThread )
+        {
+            Call( ErrSuspendThreadFromStateAccess( group, pctls ) );
+        }
+    }
+
+HandleError:
+    if ( err < JET_errSuccess )
+    {
+        m_errSuspendBlockedThreads = m_errSuspendBlockedThreads < JET_errSuccess ? m_errSuspendBlockedThreads : err;
+    }
+    return m_errSuspendBlockedThreads >= JET_errSuccess;
+}
+
+template<class I>
 ERR THashedLRUKCache<I>::ErrRegisterOpenSlab( _In_ ICachedBlockSlab* const pcbs )
 {
     ERR                                     err     = JET_errSuccess;
@@ -7179,11 +7284,17 @@ ERR THashedLRUKCache<I>::ErrRegisterOpenSlab( _In_ ICachedBlockSlab* const pcbs 
 
     Call( ErrGetThreadLocalStorage( &pctls ) );
 
-    pctls->RegisterOpenSlab( pcbs );
+    RegisterOpenSlab( pctls, pcbs );
 
 HandleError:
     CHashedLRUKCacheThreadLocalStorage<I>::Release( &pctls );
     return err;
+}
+
+template<class I>
+void THashedLRUKCache<I>::RegisterOpenSlab( _In_ CHashedLRUKCacheThreadLocalStorage<I>* const pctls, _In_ ICachedBlockSlab* const pcbs )
+{
+    pctls->RegisterOpenSlab( pcbs );
 }
 
 template<class I>
@@ -7201,6 +7312,18 @@ void THashedLRUKCache<I>::UnregisterOpenSlab( _In_ ICachedBlockSlab* const pcbs 
     }
 
     CHashedLRUKCacheThreadLocalStorage<I>::Release( &pctls );
+}
+
+template<class I>
+void THashedLRUKCache<I>::RegisterOpenSlabWait( _In_ CHashedLRUKCacheThreadLocalStorage<I>* const pctls, _In_ const QWORD ibSlab )
+{
+    pctls->RegisterOpenSlabWait( ibSlab );
+}
+
+template<class I>
+void THashedLRUKCache<I>::UnregisterOpenSlabWait( _In_ CHashedLRUKCacheThreadLocalStorage<I>* const pctls, _In_ const QWORD ibSlab )
+{
+    pctls->UnregisterOpenSlabWait( ibSlab );
 }
 
 template<class I>
@@ -7261,19 +7384,19 @@ HandleError:
 }
 
 template<class I>
-size_t THashedLRUKCache<I>::IcrefJournalSlab( _In_ QWORD ibSlab )
+size_t THashedLRUKCache<I>::IcrefJournalSlab( _In_ const QWORD ibSlab )
 {
     return ( ibSlab - m_pch->IbChunkJournal() ) / CbChunkPerSlab();
 }
 
 template<class I>
-void THashedLRUKCache<I>::ReferenceJournalSlab( _In_ QWORD ibSlab )
+void THashedLRUKCache<I>::ReferenceJournalSlab( _In_ const QWORD ibSlab )
 {
     AtomicIncrement( (LONG*)&m_rgcrefJournalSlab[ IcrefJournalSlab( ibSlab ) ] );
 }
 
 template<class I>
-void THashedLRUKCache<I>::ReleaseJournalSlab( _In_ QWORD ibSlab )
+void THashedLRUKCache<I>::ReleaseJournalSlab( _In_ const QWORD ibSlab )
 {
     AtomicDecrement( (LONG*)&m_rgcrefJournalSlab[ IcrefJournalSlab( ibSlab ) ] );
 }
