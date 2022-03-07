@@ -8,7 +8,6 @@
 const INT rankFilePathHash = 0;
 const INT rankCachedFileHash = 0;
 const INT rankCacheThreadLocalStorage = 0;
-const INT rankSuspendedThreads = 0;
 const INT rankClusterReferenceHash = 0;
 const INT rankClusterWrites = 0;
 const INT rankSlabWrites = 0;
@@ -22,6 +21,7 @@ const INT rankIOCompleteHash = 0;
 const INT rankJournalSegment = 0;
 const INT rankIORangeLock = 0;
 const INT rankCachedFileSparseMap = 0;
+const INT rankSuspendedThreads = 1;
 const INT rankSlabsToWriteBack = 1;
 const INT rankIssued = 1;
 const INT rankJournalAppend = 5;

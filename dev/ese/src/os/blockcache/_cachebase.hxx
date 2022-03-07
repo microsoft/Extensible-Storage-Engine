@@ -65,6 +65,11 @@ class TCacheBase  //  c
 
         virtual ERR ErrGetThreadLocalStorage( _Out_ CTLS** const ppctls );
 
+        typedef typename TCacheThreadLocalStorage<CTLS>::PfnVisitTls PfnVisitTls;
+
+        void VisitThreadLocalStorage(   _In_ const typename TCacheBase<I, CFTE, CTLS>::PfnVisitTls  pfnVisitTls,
+                                        _In_ const DWORD_PTR                                        keyVisitTls );
+
         //  Reports a cache miss for a file/block and if that block should be cached.
 
         void ReportMiss(    _In_ CFTE* const    pcfte,
@@ -687,6 +692,13 @@ template< class I, class CFTE, class CTLS >
 ERR TCacheBase<I, CFTE, CTLS>::ErrGetThreadLocalStorage( _Out_ CTLS** const ppctls )
 {
     return m_cacheThreadLocalStorage.ErrGetThreadLocalStorage( ppctls );
+}
+
+template<class I, class CFTE, class CTLS>
+void TCacheBase<I, CFTE, CTLS>::VisitThreadLocalStorage(    _In_ const typename TCacheBase<I, CFTE, CTLS>::PfnVisitTls  pfnVisitTls,
+                                                            _In_ const DWORD_PTR                                        keyVisitTls )
+{
+    return m_cacheThreadLocalStorage.VisitThreadLocalStorage( pfnVisitTls, keyVisitTls );
 }
 
 template< class I, class CFTE, class CTLS >

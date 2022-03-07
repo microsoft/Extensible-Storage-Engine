@@ -29,6 +29,12 @@ class TCacheThreadLocalStorage
             return ErrGetThreadLocalStorageInternal( ppctls );
         }
 
+        typedef BOOL (*PfnVisitTls)(    _In_ const CTLS* const  pctls,
+                                        _In_ const DWORD_PTR    keyVisitTls );
+
+        void VisitThreadLocalStorage(   _In_ const TCacheThreadLocalStorage::PfnVisitTls    pfnVisitTls,
+                                        _In_ const DWORD_PTR                                keyVisitTls );
+
     private:
 
         BOOL FThreadLocalStorageTableIsInit() const { return m_initOnceThreadLocalStorageTable.FIsInit(); }
@@ -51,6 +57,32 @@ class TCacheThreadLocalStorage
         typename CInvasiveList<CTLS, CCacheThreadLocalStorageBase::OffsetOfILE> m_ilThreadLocalStorage;
         CTLS*                                                                   m_pctlsCleanup;
 };
+
+template<class CTLS>
+void TCacheThreadLocalStorage<CTLS>::VisitThreadLocalStorage(   _In_ const TCacheThreadLocalStorage::PfnVisitTls    pfnVisitTls,
+                                                                _In_ const DWORD_PTR                                keyVisitTls )
+{
+    CTLS* pctls = NULL;
+
+    do
+    {
+        m_critThreadLocalStorage.Enter();
+
+        CTLS* const pctlsNext = pctls ? m_ilThreadLocalStorage.Next( pctls ) : m_ilThreadLocalStorage.PrevMost();
+
+        if ( pctlsNext )
+        {
+            pctlsNext->AddRef();
+        }
+
+        m_critThreadLocalStorage.Leave();
+
+        CTLS::Release( &pctls );
+        pctls = pctlsNext;
+    } while ( pctls && pfnVisitTls( pctls, keyVisitTls ) );
+
+    CTLS::Release( &pctls );
+}
 
 template< class CTLS >
 ERR TCacheThreadLocalStorage<CTLS>::ErrInitThreadLocalStorageTable()
