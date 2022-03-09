@@ -1095,7 +1095,6 @@ class THashedLRUKCache
                     const QWORD                         ibCachedBlock       = (QWORD)cbid.Cbno() * cbCachedBlock;
                     const COffsets                      offsets             = COffsets( ibCachedBlock, ibCachedBlock - 1 + cbCachedBlock );
                     CHashedLRUKCachedFileTableEntry<I>* pcfte               = NULL;
-                    BOOL                                fExternalClose      = fFalse;
                     BOOL                                fIORangeLocked      = fFalse;
                     BOOL                                fWriteBackRequired  = fFalse;
 
@@ -1147,18 +1146,7 @@ class THashedLRUKCache
 
                     //  try to obtain the cached file handle associated with the slot for internal use
 
-                    Call( ErrTryGetCachedFile( cbid, &pcfte, &fExternalClose ) );
-
-                    //  if the cached file cannot be opened because it is being externally closed then we must skip
-                    //  it for now
-                    //
-                    //  UNDONE:  external close could cause clean to fail to produce enough space but only if we are
-                    //  caching files with high open/write/close churn
-
-                    if ( fExternalClose )
-                    {
-                        Error( JET_errSuccess );
-                    }
+                    Call( ErrTryGetCachedFile( cbid, &pcfte ) );
 
                     //  try to get the IO range lock
 
@@ -1456,23 +1444,19 @@ class THashedLRUKCache
                 }
 
                 ERR ErrTryGetCachedFile(    _In_    const CCachedBlockId&                       cbid, 
-                                            _Out_   CHashedLRUKCachedFileTableEntry<I>** const  ppcfte,
-                                            _Out_   BOOL* const                                 pfExternalClose )
+                                            _Out_   CHashedLRUKCachedFileTableEntry<I>** const  ppcfte )
                 {
-                    return ErrTryGetCachedFile( m_pc, cbid, ppcfte, pfExternalClose );
+                    return ErrTryGetCachedFile( m_pc, cbid, ppcfte );
                 }
 
                 static ERR ErrTryGetCachedFile( _In_    THashedLRUKCache<I>* const                  pc,
                                                 _In_    const CCachedBlockId&                       cbid, 
-                                                _Out_   CHashedLRUKCachedFileTableEntry<I>** const  ppcfte,
-                                                _Out_   BOOL* const                                 pfExternalClose )
+                                                _Out_   CHashedLRUKCachedFileTableEntry<I>** const  ppcfte )
                 {
                     ERR                                 err             = JET_errSuccess;
                     CHashedLRUKCachedFileTableEntry<I>* pcfte           = NULL;
-                    BOOL                                fExternalClose  = fFalse;
 
                     *ppcfte = NULL;
-                    *pfExternalClose = fFalse;
 
                     //  try to open the cached file for this cached block id
 
@@ -1496,13 +1480,6 @@ class THashedLRUKCache
                         Error( JET_errSuccess );
                     }
 
-                    //  if the file can't be opened because it is being externally closed then indicate that
-
-                    if ( err == errDiskTilt )
-                    {
-                        fExternalClose = fTrue;
-                    }
-
                     //  fail on any other error
 
                     Call( err );
@@ -1511,7 +1488,6 @@ class THashedLRUKCache
 
                     *ppcfte = pcfte;
                     pcfte = NULL;
-                    *pfExternalClose = fExternalClose;
 
                 HandleError:
                     pc->ReleaseCachedFile( &pcfte );
@@ -1521,7 +1497,6 @@ class THashedLRUKCache
                         {
                             pc->ReleaseCachedFile( ppcfte );
                         }
-                        *pfExternalClose = fFalse;
                     }
                     return err;
                 }
@@ -2260,7 +2235,6 @@ class THashedLRUKCache
                         {
                             ERR                                 err             = JET_errSuccess;
                             CHashedLRUKCachedFileTableEntry<I>* pcfte           = NULL;
-                            BOOL                                fExternalClose  = fFalse;
                             CCachedBlockSlot                    slotNewSwapped;
 
                             //  ignore any slot that is invalid
@@ -2272,9 +2246,9 @@ class THashedLRUKCache
 
                             //  ignore any slot containing data for a valid cached file
 
-                            Call( ErrTryGetCachedFile( m_pc, slotstCurrent.Cbid(), &pcfte, &fExternalClose ) );
+                            Call( ErrTryGetCachedFile( m_pc, slotstCurrent.Cbid(), &pcfte ) );
 
-                            if ( pcfte || fExternalClose )
+                            if ( pcfte )
                             {
                                 Error( JET_errSuccess );
                             }
@@ -3091,12 +3065,10 @@ class THashedLRUKCache
         ERR ErrVerifyTruncate( _In_ const JournalPosition jposReplay );
         ERR ErrFlushAllState( _In_ const JournalPosition jposDurableForWriteBack );
         ERR ErrTryStartSlabWriteBacks(  _In_ CArray<QWORD>&         arrayIbSlab,
-                                        _In_ const JournalPosition  jposDurableForWriteBack,
                                         _In_ const BOOL             fSaveOpenSlabs );
         ICachedBlockSlab* PcbsGetOpenSlabSafeForWriteBack( _In_ const QWORD ibSlab );
         ERR ErrFinishSlabWriteBacks();
         ERR ErrTryStartSlabWriteBack(   _Inout_ ICachedBlockSlab** const    ppcbs,
-                                        _In_    const JournalPosition       jposDurableForWriteBack,
                                         _In_    const BOOL                  fReleaseSlabOnSave,
                                         _Out_   BOOL* const                 pfSaved );
         ERR ErrSaveWriteCounts();
@@ -5332,6 +5304,7 @@ void THashedLRUKCache<I>::PerformOpportunisticSlabWriteBacks()
     CArray<QWORD>           arrayIbSlab;
     JournalPosition         jposEndLastMost         = jposInvalid;
     JournalPosition         jposDurableForWriteBack = jposInvalid;
+    JournalPosition         jposRedo                = jposInvalid;
     JournalPosition         jposReplaySlab          = jposInvalid;
     JournalPosition         jposReplayWriteCounts   = jposInvalid;
     JournalPosition         jposReplayCandidate     = jposInvalid;
@@ -5396,7 +5369,7 @@ void THashedLRUKCache<I>::PerformOpportunisticSlabWriteBacks()
 
         //  try to write back these dirty slabs
 
-        Call( ErrTryStartSlabWriteBacks( arrayIbSlab, jposDurableForWriteBack, fFalse ) );
+        Call( ErrTryStartSlabWriteBacks( arrayIbSlab, fFalse ) );
     }
 
     //  save our write counts if they are impeding the replay pointer
@@ -5408,25 +5381,28 @@ void THashedLRUKCache<I>::PerformOpportunisticSlabWriteBacks()
 
     //  truncate the journal if possible
 
-    m_critSlabsToWriteBack.Enter();
-    if ( m_ilSlabsToWriteBackByJposMin.PrevMost() )
-    {
-        CSlabWriteBack* const pswb = m_ilSlabsToWriteBackByJposMin.PrevMost();
+    Call( m_pj->ErrGetProperties( NULL, &jposDurableForWriteBack, NULL, NULL, NULL ) );
 
-        jposReplaySlab = pswb->JposMin();
+    jposRedo = m_jposRedo;
+
+    m_critSlabsToWriteBack.Enter();
+    for (   CSlabWriteBack* pswbT = m_ilSlabsToWriteBackByJposMin.PrevMost();
+            pswbT;
+            pswbT = m_ilSlabsToWriteBackByJposMin.Next( pswbT ) )
+    {
+        jposReplaySlab = min( jposReplaySlab, pswbT->JposMin() );
     }
     m_critSlabsToWriteBack.Leave();
 
     jposReplayWriteCounts = (JournalPosition)AtomicRead( (QWORD*)&m_jposReplayWriteCounts );
 
-    jposReplayCandidate = min( jposReplayCandidate, m_jposRedo );
+    jposReplayCandidate = min( jposReplayCandidate, jposDurableForWriteBack );
+    jposReplayCandidate = min( jposReplayCandidate, jposRedo );
     jposReplayCandidate = min( jposReplayCandidate, jposReplaySlab );
     jposReplayCandidate = min( jposReplayCandidate, jposReplayWriteCounts );
-    jposReplayCandidate = min( jposReplayCandidate, jposDurableForWriteBack );
 
     if ( jposReplayCandidate != jposInvalid && jposReplay < jposReplayTarget )
     {
-
         Call( m_pj->ErrTruncate( jposReplayCandidate ) );
         Call( m_pj->ErrFlush() );
     }
@@ -5458,10 +5434,14 @@ ERR THashedLRUKCache<I>::ErrVerifyTruncate( _In_ const JournalPosition jposRepla
     m_critSlabsToWriteBack.Enter();
     fLeave = fTrue;
 
-    if (    m_ilSlabsToWriteBackByJposMin.PrevMost() &&
-            jposReplay > m_ilSlabsToWriteBackByJposMin.PrevMost()->JposMin() )
+    for (   CSlabWriteBack* pswb = m_ilSlabsToWriteBackByJposMin.PrevMost();
+            pswb;
+            pswb = m_ilSlabsToWriteBackByJposMin.Next( pswb ) )
     {
-        BlockCacheInternalError( "HashedLRUKCacheTruncateWAL" );
+        if ( jposReplay > pswb->JposMin() )
+        {
+            BlockCacheInternalError( "HashedLRUKCacheTruncateWAL" );
+        }
     }
 
     m_critSlabsToWriteBack.Leave();
@@ -5548,7 +5528,7 @@ ERR THashedLRUKCache<I>::ErrFlushAllState( _In_ const JournalPosition jposDurabl
 
         if ( arrayIbSlab.Size() > 0 )
         {
-            Call( ErrTryStartSlabWriteBacks( arrayIbSlab, jposDurableForWriteBack, fTrue ) );
+            Call( ErrTryStartSlabWriteBacks( arrayIbSlab, fTrue ) );
         }
     }
 
@@ -5576,7 +5556,6 @@ HandleError:
 
 template<class I>
 ERR THashedLRUKCache<I>::ErrTryStartSlabWriteBacks( _In_ CArray<QWORD>&         arrayIbSlab,
-                                                    _In_ const JournalPosition  jposDurableForWriteBack,
                                                     _In_ const BOOL             fSaveOpenSlabs )
 {
     ERR                 err                 = JET_errSuccess;
@@ -5617,7 +5596,7 @@ ERR THashedLRUKCache<I>::ErrTryStartSlabWriteBacks( _In_ CArray<QWORD>&         
         if ( pcbs )
         {
             BOOL fSaved = fFalse;
-            Call( ErrTryStartSlabWriteBack( &pcbs, jposDurableForWriteBack, fReleaseSlabOnSave, &fSaved ) );
+            Call( ErrTryStartSlabWriteBack( &pcbs, fReleaseSlabOnSave, &fSaved ) );
             fIssue = fIssue || fSaved;
         }
     }
@@ -5686,18 +5665,22 @@ HandleError:
 
 template<class I>
 ERR THashedLRUKCache<I>::ErrTryStartSlabWriteBack(  _Inout_ ICachedBlockSlab** const    ppcbs,
-                                                    _In_    const JournalPosition       jposDurableForWriteBack,
                                                     _In_    const BOOL                  fReleaseSlabOnSave,
                                                     _Out_   BOOL* const                 pfSaved )
 {
-    ERR                                 err     = JET_errSuccess;
-    ICachedBlockSlab*                   pcbs    = *ppcbs;
-    CSlabWriteBack*                     pswb    = NULL;
-    BOOL                                fLeave  = fFalse;
-    const CSlabWriteCompletionContext*  pswcc   = NULL;
+    ERR                                 err                     = JET_errSuccess;
+    ICachedBlockSlab*                   pcbs                    = *ppcbs;
+    JournalPosition                     jposDurableForWriteBack = jposInvalid;
+    CSlabWriteBack*                     pswb                    = NULL;
+    BOOL                                fLeave                  = fFalse;
+    const CSlabWriteCompletionContext*  pswcc                   = NULL;
 
     *ppcbs = NULL;
     *pfSaved = fFalse;
+
+    //  get the durable for write back pointer
+
+    Call( m_pj->ErrGetProperties( NULL, &jposDurableForWriteBack, NULL, NULL, NULL ) );
 
     //  get the slab's write back context if any
 
