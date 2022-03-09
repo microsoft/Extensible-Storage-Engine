@@ -269,42 +269,12 @@ HandleError:
 template<class I>
 ERR CHashedLRUKCachedFileTableEntry<I>::ErrUpdateSparseMapForSetSize( _In_ const COffsets invalidate )
 {
-    ERR                         err             = JET_errSuccess;
-    BOOL                        fLeave          = fTrue;
-    CArray<SparseFileSegment>   arraysparseseg;
+    //  we will not remove sparse ranges as the result of a IFileAPI::ErrSetSize operation to err on the side of
+    //  caution.  we cannot be sure that the subsequent call to ErrSetSize will actually succeed.  so we will force the
+    //  next write to these sparse ranges to be write through to ensure we catch any zero overwrite to make them not
+    //  sparse after a failed file size change
 
-    m_critCachedFileSparseMap.Enter();
-    fLeave = fTrue;
-
-    //  remove all the sparse segments in the invalidation range which corresponds to the new file size configured by
-    //  IFileAPI::ErrSetSize to the max possible offset.  these sparse ranges must be deleted because if we grow back
-    //  into this offset range then the file will not be sparse.  COSFile::ErrSetSize forces newly allocated offset
-    //  ranges in the file to be backed by storage so that insufficient storage errors are encountered only by the call
-    //  to ErrSetSize and not by later calls to IFileAPI::ErrIOWrite.
-
-    for ( size_t i = 0; i < m_arraysparseseg.Size(); i++ )
-    {
-        if ( m_arraysparseseg[ i ].ibLast < invalidate.IbStart() )
-        {
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), m_arraysparseseg[ i ] ) ) );
-        }
-        else if ( m_arraysparseseg[ i ].ibFirst < invalidate.IbStart() )
-        {
-            SparseFileSegment sparsesegNew;
-            sparsesegNew.ibFirst = m_arraysparseseg[ i ].ibFirst;
-            sparsesegNew.ibLast = invalidate.IbStart() - 1;
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), sparsesegNew ) ) );
-        }
-    }
-
-    Call( ErrToErr<CArray<SparseFileSegment>>( m_arraysparseseg.ErrClone( arraysparseseg ) ) );
-
-HandleError:
-    if ( fLeave )
-    {
-        m_critCachedFileSparseMap.Leave();
-    }
-    return err;
+    return JET_errSuccess;
 }
 
 template<class I>
