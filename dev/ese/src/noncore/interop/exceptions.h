@@ -8902,6 +8902,54 @@ namespace Isam
         }
 
     };
+
+    [Serializable]
+    public ref class IsamClientSpaceBeginException : public IsamUsageException
+    {
+    public:
+        IsamClientSpaceBeginException() : IsamUsageException( "Begin of the error space reserved for JET client use", JET_errClientSpaceBegin)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamClientSpaceBeginException( String ^ description, Exception^ innerException ) :
+            IsamUsageException( description, innerException )
+        {
+        }
+
+        IsamClientSpaceBeginException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamUsageException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
+    public ref class IsamClientSpaceEndException : public IsamUsageException
+    {
+    public:
+        IsamClientSpaceEndException() : IsamUsageException( "End of the error space reserved for JET client use", JET_errClientSpaceEnd)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamClientSpaceEndException( String ^ description, Exception^ innerException ) :
+            IsamUsageException( description, innerException )
+        {
+        }
+
+        IsamClientSpaceEndException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamUsageException( info, context )
+        {
+        }
+
+    };
 public ref class EseExceptionHelper
 {
 public:
@@ -9613,6 +9661,10 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamFileIOBeyondEOFException;
         case JET_errFileCompressed:
             return gcnew IsamFileCompressedException;
+        case JET_errClientSpaceBegin:
+            return gcnew IsamClientSpaceBeginException;
+        case JET_errClientSpaceEnd:
+            return gcnew IsamClientSpaceEndException;
         default:
             return gcnew IsamErrorException( L"Unknown error", err );
         }
