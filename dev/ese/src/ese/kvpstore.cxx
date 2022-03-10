@@ -448,7 +448,7 @@ ERR CKVPStore::ErrKVPIInitIUpgradeTable( const IFMP ifmp, bool fReadOnly )
             {
                 // We don't have any Minor Version upgrades at this point.
                 
-            case ULONG_MAX:
+            case ulMax:
             default:
                 AssertSz( fFalse, "Unexpected upgrade version ... was the upgrade table not updated with all intermediate versions" );
                 break;
@@ -1243,7 +1243,7 @@ ERR CKVPStore::ErrKVPIDeleteKey(
     if ( err > JET_errSuccess )
     {
         CallS( err );
-        err = JET_errInternalError;
+        err = ErrERRCheck( JET_errInternalError );
     }
 
     switch ( err )
