@@ -1080,7 +1080,6 @@ class THashedLRUKCache
                 QWORD CbAvailProduced() const
                 {
                     return  m_cbAvailInvalid +
-                            m_cbAvailIORangeLocked +
                             m_cbAvailWriteBackPending + 
                             m_cbAvailEvicted + 
                             m_cbAvailInvalidatePending;
@@ -1531,13 +1530,12 @@ class THashedLRUKCache
                 };
 
                 ERR ErrTryGetIORangeLock(   _In_    CHashedLRUKCachedFileTableEntry<I>* const   pcfte,
-                                            _In_    const COffsets                              offsets,
+                                            _In_    const COffsets                              offsetsSlot,
                                             _Out_   BOOL* const                                 pfIORangeLocked )
                 {
                     ERR             err             = JET_errSuccess;
                     CIORangeLock*   piorlExisting   = NULL;
                     CIORangeLock*   piorlNew        = NULL;
-                    BOOL            fIORangeLocked  = fFalse;
 
                     *pfIORangeLocked = fFalse;
 
@@ -1551,7 +1549,7 @@ class THashedLRUKCache
                     //  determine if we already have an IO range lock that covers the cached file block containing this
                     //  cache block
 
-                    piorlExisting = PiorlTryGetExistingIORangeLock( pcfte, offsets );
+                    piorlExisting = PiorlTryGetExistingIORangeLock( pcfte, offsetsSlot );
 
                     //  try to get an IO range lock for the offsets if we don't already have it
                     //
@@ -1566,30 +1564,46 @@ class THashedLRUKCache
 
                     if ( !piorlExisting )
                     {
-                        Alloc( piorlNew = new CIORangeLock( m_pc, pcfte, offsets ) );
+                        //  expand the IO range lock to cover the cached file block containing the offsets of the
+                        //  cached file represented by this slot
+
+                        const QWORD cbBlockSize     = pcfte->CbBlockSize();
+                        const QWORD ibStart         = rounddn( offsetsSlot.IbStart(), cbBlockSize );
+                        COffsets    offsetsBlock( ibStart, ibStart + ( cbBlockSize - 1 ) );
+
+                        Alloc( piorlNew = new CIORangeLock( m_pc, pcfte, offsetsBlock ) );
+
                         if ( pcfte->FTryRequestIORangeLock( piorlNew, fFalse ) )
                         {
+                            OSTrace(    JET_tracetagBlockCacheOperations,
+                                        OSFormat(   "C=%s R=0x%016I64x Clean IORangeLock F=%s ib=%llu cb=%llu Grant",
+                                                    OSFormatFileId( m_pc ),
+                                                    QWORD( m_prequest ),
+                                                    OSFormatFileId( piorlNew->Pcfte()->Pff()),
+                                                    piorlNew->Offsets().IbStart(),
+                                                    piorlNew->Offsets().Cb() ) );
+
+                            m_cbAvailIORangeLocked += piorlNew->Offsets().Cb();
+
                             m_ilIORangeLock.InsertAsNextMost( piorlNew );
                             piorlExisting = piorlNew;
                             piorlNew = NULL;
                         }
-                    }
-
-                    //  determine if we acquired the IO range lock
-
-                    fIORangeLocked = piorlExisting != NULL;
-
-                    //  note the pending clean activity (which could be write back or evict) corresponding to this IO
-                    //  range lock if acquired
-
-                    if ( fIORangeLocked )
-                    {
-                        m_cbAvailIORangeLocked += offsets.Cb();
+                        else
+                        {
+                            OSTrace(    JET_tracetagBlockCacheOperations,
+                                        OSFormat(   "C=%s R=0x%016I64x Clean IORangeLock F=%s ib=%llu cb=%llu not available",
+                                                    OSFormatFileId( m_pc ),
+                                                    QWORD( m_prequest ),
+                                                    OSFormatFileId( piorlNew->Pcfte()->Pff()),
+                                                    piorlNew->Offsets().IbStart(),
+                                                    piorlNew->Offsets().Cb() ) );
+                        }
                     }
 
                     //  return if we acquired the IO range lock
 
-                    *pfIORangeLocked = fIORangeLocked;
+                    *pfIORangeLocked = piorlExisting != NULL;
 
                 HandleError:
                     delete piorlNew;
@@ -1668,6 +1682,14 @@ class THashedLRUKCache
                 {
                     while ( CIORangeLock* const piorl = m_ilIORangeLock.PrevMost() )
                     {
+                        OSTrace(    JET_tracetagBlockCacheOperations,
+                                    OSFormat(   "C=%s R=0x%016I64x Clean IORangeLock F=%s ib=%llu cb=%llu Release",
+                                                OSFormatFileId( m_pc ),
+                                                QWORD( m_prequest ),
+                                                OSFormatFileId( piorl->Pcfte()->Pff()),
+                                                piorl->Offsets().IbStart(),
+                                                piorl->Offsets().Cb() ) );
+
                         m_ilIORangeLock.Remove( piorl );
                         piorl->Release();
                         delete piorl;
@@ -3145,10 +3167,10 @@ class THashedLRUKCache
         void RequestFinalizeWrite(  _In_    CRequest* const             prequestIO,
                                     _Inout_ ICachedBlockSlab** const    ppcbs );
 
-        ERR ErrCleanSlabIfNecessary(    _In_ CRequest* const            prequest,
-                                        _In_ ICachedBlockSlab* const    pcbs,
-                                        _In_ const BOOL                 fRead,
-                                        _In_ const QWORD                ib );
+        ERR ErrCleanSlab(   _In_ CRequest* const            prequest,
+                            _In_ ICachedBlockSlab* const    pcbs,
+                            _In_ const BOOL                 fRead,
+                            _In_ const QWORD                ib );
 
         void FailIO( _In_ CRequest* const prequestIO, _In_ const ERR err );
 
@@ -6596,7 +6618,7 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
             //
             //  NOTE:  this can wait on cached file IO if the async clean process has fallen behind
 
-            Call( ErrCleanSlabIfNecessary( prequest, *ppcbs, fTrue, ibCachedBlock ) );
+            Call( ErrCleanSlab( prequest, *ppcbs, fTrue, ibCachedBlock ) );
 
             //  try to get a slot to cache this cluster
 
@@ -6706,7 +6728,7 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
                 //
                 //  NOTE:  this can wait on cached file IO if the async clean process has fallen behind
 
-                Call( ErrCleanSlabIfNecessary( prequest, *ppcbs, fFalse, ibCachedBlock ) );
+                Call( ErrCleanSlab( prequest, *ppcbs, fFalse, ibCachedBlock ) );
 
                 //  try to get a slot to write this cluster
 
@@ -6808,38 +6830,24 @@ void THashedLRUKCache<I>::RequestFinalizeWrite( _In_    CRequest* const         
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrCleanSlabIfNecessary(   _In_ CRequest* const            prequest,
-                                                    _In_ ICachedBlockSlab* const    pcbs,
-                                                    _In_ const BOOL                 fRead,
-                                                    _In_ const QWORD                ib )
+ERR THashedLRUKCache<I>::ErrCleanSlab(  _In_ CRequest* const            prequest,
+                                        _In_ ICachedBlockSlab* const    pcbs,
+                                        _In_ const BOOL                 fRead,
+                                        _In_ const QWORD                ib )
 {
     ERR         err                 = JET_errSuccess;
 
     const DWORD cbBlockSize         = prequest->Pcfte()->CbBlockSize();
     const DWORD ibBlock             = ib % cbBlockSize;
-    const BOOL  fStartBlock         = ibBlock == 0;
 
     const QWORD cbCachedFilePerSlab = m_pch->CbCachedFilePerSlab();
     const QWORD ibSlice             = ib % cbCachedFilePerSlab;
-    const BOOL  fStartSlice         = ibSlice == 0;
 
     const DWORD cbCleanBlock        = cbBlockSize - ibBlock;
     const DWORD cbCleanSlice        = (DWORD)min( cbBlockSize, cbCachedFilePerSlab - ibSlice );
     const DWORD cbClean             = min( cbCleanBlock, cbCleanSlice );
 
-    if ( fStartBlock || fStartSlice )
-    {
-        Call( CCleanSlabVisitor::ErrExecute( this, prequest, pcbs, fRead, cbClean ) );
-    }
-    else
-    {
-        OSTrace(    JET_tracetagBlockCacheOperations,
-                    OSFormat(   "C=%s R=0x%016I64x Clean skipped fRead=%s cbClean=%u",
-                                OSFormatFileId( this ),
-                                QWORD( prequest ),
-                                fRead ? "fTrue" : "fFalse",
-                                cbClean ) );
-    }
+    Call( CCleanSlabVisitor::ErrExecute( this, prequest, pcbs, fRead, cbClean ) );
 
 HandleError:
     return err;
