@@ -47,7 +47,7 @@ namespace Internal
                         }
 
                         virtual JournalPosition AppendEntry(
-                            array<ArraySegment<byte>>^ payload,
+                            array<ArraySegment<BYTE>>^ payload,
                             [Out] JournalPosition% journalPositionEnd )
                         {
                             return this->target->AppendEntry( payload, journalPositionEnd );

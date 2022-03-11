@@ -113,8 +113,8 @@ namespace Internal
 
                     ExCall( cacheType = I()->GetCacheType() );
 
-                    array<Byte>^ cacheTypeBytes = cacheType.ToByteArray();
-                    pin_ptr<Byte> cacheTypeBytesT = &cacheTypeBytes[ 0 ];
+                    array<BYTE>^ cacheTypeBytes = cacheType.ToByteArray();
+                    pin_ptr<BYTE> cacheTypeBytesT = &cacheTypeBytes[ 0 ];
                     UtilMemCpy( rgbCacheType, cacheTypeBytesT, cbGuid );
 
                 HandleError:
@@ -144,8 +144,8 @@ namespace Internal
                     *pvolumeid = (::VolumeId)volumeid;
                     *pfileid = (::FileId)fileid;
 
-                    array<Byte>^ uniqueIdBytes = guid.ToByteArray();
-                    pin_ptr<Byte> uniqueId = &uniqueIdBytes[ 0 ];
+                    array<BYTE>^ uniqueIdBytes = guid.ToByteArray();
+                    pin_ptr<BYTE> uniqueId = &uniqueIdBytes[ 0 ];
                     UtilMemCpy( rgbUniqueId, uniqueId, cbGuid );
 
                 HandleError:
@@ -213,8 +213,8 @@ namespace Internal
                                                             _In_opt_                const DWORD_PTR                 keyComplete )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
-                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^    buffer      = !pbData ? nullptr : gcnew array<BYTE>( cbData );
+                    pin_ptr<BYTE>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, true );
                     Complete^       complete    = pfnComplete ?
                                                         gcnew Complete( false, pbData, pfnComplete, keyComplete ) :
@@ -258,8 +258,8 @@ namespace Internal
                                                             _In_opt_                const DWORD_PTR                 keyComplete )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
-                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^    buffer      = !pbData ? nullptr : gcnew array<BYTE>( cbData );
+                    pin_ptr<BYTE>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, false );
                     Complete^       complete    = pfnComplete ?
                                                         gcnew Complete( true, 

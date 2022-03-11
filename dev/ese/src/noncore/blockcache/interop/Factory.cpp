@@ -313,7 +313,7 @@ namespace Internal
                                                                 FileId fileid,
                                                                 ICachedFileConfiguration^ icfconfig,
                                                                 ICache^ ic,
-                                                                ArraySegment<byte> header )
+                                                                ArraySegment<BYTE> header )
                         {
                             return factory->CreateFileFilter( fInner, fsf, fsconfig, ctm, volumeid, fileid, icfconfig, ic, header );
                         }

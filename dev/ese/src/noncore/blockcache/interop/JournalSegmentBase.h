@@ -39,7 +39,7 @@ namespace Internal
                         virtual void VisitRegions( IJournalSegment::VisitRegion^ visitRegion );
 
                         virtual RegionPosition AppendRegion(
-                            array<ArraySegment<byte>>^ payload,
+                            array<ArraySegment<BYTE>>^ payload,
                             Int32 minimumAppendSizeInBytes,
                             [Out] RegionPosition% regionPositionEnd,
                             [Out] Int32% payloadAppendedInBytes );
@@ -130,7 +130,7 @@ namespace Internal
 
                 template<class TM, class TN, class TW>
                 inline RegionPosition JournalSegmentBase<TM, TN, TW>::AppendRegion(
-                    array<ArraySegment<byte>>^ payload, 
+                    array<ArraySegment<BYTE>>^ payload, 
                     Int32 minimumAppendSizeInBytes, 
                     RegionPosition% regionPositionEnd, 
                     Int32% payloadAppendedInBytes )
@@ -164,7 +164,7 @@ namespace Internal
 
                         if ( cb )
                         {
-                            pin_ptr<byte> rgbIn = &payload[ ijb ].Array[ payload[ ijb ].Offset ];
+                            pin_ptr<BYTE> rgbIn = &payload[ ijb ].Array[ payload[ ijb ].Offset ];
                             UtilMemCpy( rgb, (BYTE*)rgbIn, cb );
                         }
                     }

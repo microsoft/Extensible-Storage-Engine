@@ -95,8 +95,8 @@ namespace Internal
                                                                 _In_opt_                const VOID *                    pioreq )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
-                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^    buffer      = !pbData ? nullptr : gcnew array<BYTE>( cbData );
+                    pin_ptr<BYTE>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, true );
                     IOComplete^     iocomplete  = ( pfnIOComplete || pfnIOHandoff ) ?
                                                         gcnew IOComplete(   this,
@@ -143,8 +143,8 @@ namespace Internal
                                                                     _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
-                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^    buffer      = !pbData ? nullptr : gcnew array<BYTE>( cbData );
+                    pin_ptr<BYTE>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, false );
                     IOComplete^     iocomplete  = ( pfnIOComplete || pfnIOHandoff ) ?
                                                         gcnew IOComplete(   this,

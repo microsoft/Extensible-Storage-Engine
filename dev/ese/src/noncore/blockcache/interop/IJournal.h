@@ -47,7 +47,7 @@ namespace Internal
                     delegate bool VisitEntry(
                         JournalPosition journalPosition,
                         JournalPosition journalPositionEnd,
-                        ArraySegment<byte> entry );
+                        ArraySegment<BYTE> entry );
 
                     /// <summary>
                     /// Visits every entry in the journal.
@@ -75,11 +75,11 @@ namespace Internal
                     /// fail.  Truncate must be called with a sufficiently advanced replay pointer to resolve the
                     /// situation.
                     /// </remarks>
-                    /// <param name="payload">The payload as an array of byte arrays.</param>
+                    /// <param name="payload">The payload as an array of BYTE arrays.</param>
                     /// <param name="journalPositionEnd">The last position occupied by the entry.</param>
                     /// <returns>The position of the entry appended.</returns>
                     JournalPosition AppendEntry(
-                        array<ArraySegment<byte>>^ payload,
+                        array<ArraySegment<BYTE>>^ payload,
                         [Out] JournalPosition% journalPositionEnd );
 
                     /// <summary>

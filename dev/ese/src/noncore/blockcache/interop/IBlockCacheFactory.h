@@ -42,7 +42,7 @@ namespace Internal
                         FileId fileid,
                         ICachedFileConfiguration^ icfconfig,
                         ICache^ ic,
-                        ArraySegment<byte> header );
+                        ArraySegment<BYTE> header );
 
                     FileFilter^ CreateFileFilterWrapper( IFileFilter^ iffInner, IOMode ioMode );
 
