@@ -111,8 +111,8 @@ namespace Internal
                             {
                                 if ( this->data != nullptr && this->data->Length > 0 )
                                 {
-                                    array<byte>^ bytes = gcnew array<byte>( (int)this->data->Length );
-                                    pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                                    array<BYTE>^ bytes = gcnew array<BYTE>( (int)this->data->Length );
+                                    pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                                     UtilMemCpy( (BYTE*)rgbData, pvBuffer, bytes->Length );
                                     this->data->Position = 0;
                                     this->data->Write( bytes, 0, bytes->Length );

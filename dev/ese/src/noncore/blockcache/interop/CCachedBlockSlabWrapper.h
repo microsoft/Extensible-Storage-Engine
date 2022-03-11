@@ -109,8 +109,8 @@ namespace Internal
                 {
                     ERR                 err     = JET_errSuccess;
                     ::CCachedBlockId*   pcbid   = NULL;
-                    array<byte>^        buffer  = !rgb ? nullptr : gcnew array<byte>( cb );
-                    pin_ptr<byte>       rgbData = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^        buffer  = !rgb ? nullptr : gcnew array<BYTE>( cb );
+                    pin_ptr<BYTE>       rgbData = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^       stream  = !rgb ? nullptr : gcnew MemoryStream( buffer, false );
                     CachedBlockSlot^    slot    = nullptr;
 
@@ -148,8 +148,8 @@ namespace Internal
                 {
                     ERR                 err     = JET_errSuccess;
                     ::CCachedBlockId*   pcbid   = NULL;
-                    array<byte>^        buffer  = !rgb ? nullptr : gcnew array<byte>( cb );
-                    pin_ptr<byte>       rgbData = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^        buffer  = !rgb ? nullptr : gcnew array<BYTE>( cb );
+                    pin_ptr<BYTE>       rgbData = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^       stream  = !rgb ? nullptr : gcnew MemoryStream( buffer, false );
                     CachedBlockSlot^    slot    = nullptr;
 
@@ -218,8 +218,8 @@ namespace Internal
                 {
                     ERR                 err             = JET_errSuccess;
                     ::CCachedBlockSlot* pslot           = NULL;
-                    array<byte>^        buffer          = !rgb ? nullptr : gcnew array<byte>( cb );
-                    pin_ptr<byte>       rgbData         = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^        buffer          = !rgb ? nullptr : gcnew array<BYTE>( cb );
+                    pin_ptr<BYTE>       rgbData         = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^       stream          = !rgb ? nullptr : gcnew MemoryStream( buffer, false );
                     ClusterWritten^     clusterWritten  = ( pfnClusterWritten || pfnClusterHandoff ) ?
                                                                 gcnew ClusterWritten(   pfnClusterWritten, 
@@ -275,8 +275,8 @@ namespace Internal
                 {
                     ERR                 err         = JET_errSuccess;
                     ::CCachedBlockSlot* pslot       = NULL;
-                    array<byte>^        buffer      = !rgb ? nullptr : gcnew array<byte>( cb );
-                    pin_ptr<byte>       rgbData     = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^        buffer      = !rgb ? nullptr : gcnew array<BYTE>( cb );
+                    pin_ptr<BYTE>       rgbData     = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^       stream      = !rgb ? nullptr : gcnew MemoryStream( buffer, true );
                     ClusterRead^        clusterRead = ( pfnClusterRead|| pfnClusterHandoff ) ?
                                                             gcnew ClusterRead(  cb,
@@ -320,8 +320,8 @@ namespace Internal
                 {
                     ERR                 err     = JET_errSuccess;
                     ::CCachedBlockSlot* pslot   = NULL;
-                    array<byte>^        buffer      = !rgb ? nullptr : gcnew array<byte>( cb );
-                    pin_ptr<byte>       rgbData     = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
+                    array<BYTE>^        buffer      = !rgb ? nullptr : gcnew array<BYTE>( cb );
+                    pin_ptr<BYTE>       rgbData     = ( !rgb || !cb ) ? nullptr : &buffer[ 0 ];
                     MemoryStream^       stream      = !rgb ? nullptr : gcnew MemoryStream( buffer, false );
 
                     Alloc( pslot = new ::CCachedBlockSlot() );

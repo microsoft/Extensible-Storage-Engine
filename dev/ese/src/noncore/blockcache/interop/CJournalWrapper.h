@@ -174,7 +174,7 @@ namespace Internal
                                                                     _Out_               ::JournalPosition* const    pjposEnd )
                 {
                     ERR                         err                 = JET_errSuccess;
-                    array<ArraySegment<byte>>^  payload             = rgjb ? gcnew array<ArraySegment<byte>>( cjb ) : nullptr;
+                    array<ArraySegment<BYTE>>^  payload             = rgjb ? gcnew array<ArraySegment<BYTE>>( cjb ) : nullptr;
                     JournalPosition             journalPosition     = JournalPosition::Invalid;
                     JournalPosition             journalPositionEnd  = JournalPosition::Invalid;
 
@@ -184,15 +184,15 @@ namespace Internal
                     for ( int ijb = 0; ijb < cjb; ijb++ )
                     {
                         const size_t cb = rgjb[ ijb ].Cb();
-                        array<byte>^ data = rgjb[ ijb ].Rgb() ? gcnew array<byte>( cb ) : nullptr;
+                        array<BYTE>^ data = rgjb[ ijb ].Rgb() ? gcnew array<BYTE>( cb ) : nullptr;
                         if ( cb )
                         {
-                            pin_ptr<byte> rgbData = &data[ 0 ];
+                            pin_ptr<BYTE> rgbData = &data[ 0 ];
                             UtilMemCpy( (BYTE*)rgbData, rgjb[ ijb ].Rgb(), cb );
                         }
                         if ( data != nullptr )
                         {
-                            payload[ ijb ] = ArraySegment<byte>( data );
+                            payload[ ijb ] = ArraySegment<BYTE>( data );
                         }
                     }
 

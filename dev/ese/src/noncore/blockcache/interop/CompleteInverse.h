@@ -101,8 +101,8 @@ namespace Internal
                             {
                                 if ( this->isWrite == false && this->data != nullptr && cbData )
                                 {
-                                    array<byte>^ bytes = gcnew array<byte>( cbData );
-                                    pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                                    array<BYTE>^ bytes = gcnew array<BYTE>( cbData );
+                                    pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                                     UtilMemCpy( (BYTE*)rgbData, pbData, bytes->Length );
                                     this->data->Position = 0;
                                     this->data->Write( bytes, 0, bytes->Length );

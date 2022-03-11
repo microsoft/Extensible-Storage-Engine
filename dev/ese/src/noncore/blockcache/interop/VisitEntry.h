@@ -27,12 +27,12 @@ namespace Internal
                         bool VisitEntry_(
                             JournalPosition journalPosition,
                             JournalPosition journalPositionEnd,
-                            ArraySegment<byte> entry )
+                            ArraySegment<BYTE> entry )
                         {
-                            pin_ptr<const byte> rgbEntry =
+                            pin_ptr<const BYTE> rgbEntry =
                                 entry.Array == nullptr
                                     ? nullptr
-                                    : ( entry.Count == 0 ? &(gcnew array<byte>(1))[0] : &entry.Array[ entry.Offset ]);
+                                    : ( entry.Count == 0 ? &(gcnew array<BYTE>(1))[0] : &entry.Array[ entry.Offset ]);
                             return pfnVisitEntry(   (::JournalPosition)journalPosition,
                                                     (::JournalPosition)journalPositionEnd,
                                                     CJournalBuffer( entry.Count, rgbEntry ),

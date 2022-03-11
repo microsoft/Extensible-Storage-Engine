@@ -96,8 +96,8 @@ namespace Internal
                     if ( cbData )
                     {
                         Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
-                        array<byte>^ bytes = data->ToArray();
-                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        array<BYTE>^ bytes = data->ToArray();
+                        pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                         UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
                     }
 
@@ -130,8 +130,8 @@ namespace Internal
                     if ( cbData )
                     {
                         Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
-                        array<byte>^ bytes = data->ToArray();
-                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        array<BYTE>^ bytes = data->ToArray();
+                        pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                         UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
                     }
 
@@ -183,8 +183,8 @@ namespace Internal
                     if ( cbData )
                     {
                         Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
-                        array<byte>^ bytes = data->ToArray();
-                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        array<BYTE>^ bytes = data->ToArray();
+                        pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                         UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
                     }
 
@@ -242,8 +242,8 @@ namespace Internal
                     if ( cbData )
                     {
                         Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
-                        array<byte>^ bytes = data->ToArray();
-                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        array<BYTE>^ bytes = data->ToArray();
+                        pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                         UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
                     }
 
@@ -262,8 +262,8 @@ namespace Internal
                 HandleError:
                     if ( clusterRead == nullptr && cbData )
                     {
-                        array<byte>^ bytes = gcnew array<byte>( cbData );
-                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        array<BYTE>^ bytes = gcnew array<BYTE>( cbData );
+                        pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                         UtilMemCpy( (BYTE*)rgbData, clusterReadInverse == nullptr ? pvBuffer : clusterReadInverse->PvBuffer, cbData );
                         data->Position = 0;
                         data->Write( bytes, 0, bytes->Length );
@@ -290,8 +290,8 @@ namespace Internal
                     if ( cbData )
                     {
                         Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
-                        array<byte>^ bytes = data->ToArray();
-                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        array<BYTE>^ bytes = data->ToArray();
+                        pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                         UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
                     }
 

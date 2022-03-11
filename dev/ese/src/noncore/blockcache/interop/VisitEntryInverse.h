@@ -77,13 +77,13 @@ namespace Internal
                                 return fFalse;
                             }
 
-                            array<byte>^ buffer = jb.Rgb() ? gcnew array<byte>( jb.Cb() ) : nullptr;
-                            pin_ptr<byte> rgbData = ( buffer == nullptr || buffer->Length == 0 ) ? nullptr : &buffer[ 0 ];
+                            array<BYTE>^ buffer = jb.Rgb() ? gcnew array<BYTE>( jb.Cb() ) : nullptr;
+                            pin_ptr<BYTE> rgbData = ( buffer == nullptr || buffer->Length == 0 ) ? nullptr : &buffer[ 0 ];
                             UtilMemCpy( (BYTE*)rgbData, jb.Rgb(), jb.Cb() );
 
                             return this->visitEntry(    (JournalPosition)jpos,
                                                         (JournalPosition)jposEnd,
-                                                        ArraySegment<byte>( buffer ) );
+                                                        ArraySegment<BYTE>( buffer ) );
                         }
 
                     private:

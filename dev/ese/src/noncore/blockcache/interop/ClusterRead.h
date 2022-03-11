@@ -36,8 +36,8 @@ namespace Internal
                         {
                             if ( this->buffer != nullptr && this->buffer->Length > 0 )
                             {
-                                array<byte>^ bytes = this->buffer->ToArray();
-                                pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                                array<BYTE>^ bytes = this->buffer->ToArray();
+                                pin_ptr<const BYTE> rgbData = &bytes[ 0 ];
                                 UtilMemCpy( this->rgb, (const BYTE*)rgbData, bytes->Length );
                             }
 

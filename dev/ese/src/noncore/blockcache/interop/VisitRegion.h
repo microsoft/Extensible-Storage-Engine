@@ -27,12 +27,12 @@ namespace Internal
                         bool VisitRegion_(
                             RegionPosition regionPosition,
                             RegionPosition regionPositionEnd,
-                            ArraySegment<byte> region )
+                            ArraySegment<BYTE> region )
                         {
-                            pin_ptr<const byte> rgbRegion =
+                            pin_ptr<const BYTE> rgbRegion =
                                 region.Array == nullptr
                                     ? nullptr
-                                    : (region.Count == 0 ? &(gcnew array<byte>(1))[0] : &region.Array[ region.Offset ]);
+                                    : (region.Count == 0 ? &(gcnew array<BYTE>(1))[0] : &region.Array[ region.Offset ]);
                             return pfnVisitRegion(  (::RegionPosition)regionPosition,
                                                     (::RegionPosition)regionPositionEnd,
                                                     CJournalBuffer( region.Count, rgbRegion ),
