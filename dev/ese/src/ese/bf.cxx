@@ -11700,7 +11700,6 @@ void BFIMaintScavengeTerm( void )
 CSemaphore      g_semMaintCheckpointDepthRequest( CSyncBasicInfo( _T( "g_semMaintCheckpointDepthRequest" ) ) );
 
 IFMP            g_ifmpMaintCheckpointDepthStart;
-ERR             errLastCheckpointMaint = JET_errSuccess;
 
 POSTIMERTASK    g_posttBFIMaintCheckpointDepthITask = NULL;
 
@@ -11710,20 +11709,47 @@ POSTIMERTASK    g_posttBFIMaintCheckpointDepthITask = NULL;
 //  requests that checkpoint depth maintenance be performed on dirty pages in
 //  the cache
 
-void BFIMaintCheckpointDepthRequest( FMP * pfmp, const BFCheckpointDepthMainReason eRequestReason )
+void BFIMaintCheckpointIDepthRequest_( BF * pbfImplicitlyPinnedDatabase, FMP * pfmp, const BFCheckpointDepthMainReason eRequestReason )
 {
-    //  if we are asking to remove clean entries then skip all these checks and
-    //  just try to schedule checkpoint depth maintenance
-
-    if ( eRequestReason != bfcpdmrRequestRemoveCleanEntries )
+    if ( eRequestReason == bfcpdmrRequestRemoveCleanEntries )
     {
+        //  if we are asking to remove clean entries then skip all these checks and
+        //  just try to schedule checkpoint depth maintenance.  So we don't need to
+        //  lock BF Context.
+    }
+    else if ( eRequestReason == bfcpdmrRequestIOThreshold )
+    {
+        if ( pbfImplicitlyPinnedDatabase == NULL )
+        {
+            FireWall( "CheckpointDepthIoThresholdProvidePinnedPbfArg" );
+            return;
+        }
+        Expected( FIOThread() );
+        Expected( !Ptls()->fCheckpoint );
+        Assert( pbfImplicitlyPinnedDatabase->err == wrnBFPageFlushPending );
+        Assert( NULL == pbfImplicitlyPinnedDatabase->pWriteSignalComplete );
 
+        // schedule immediately
+
+        // Restart checkpoint depth maint immediately.  We don't need to do all IFMPs 
+        // as we just need to find one IO to do, and the others will restart in 10 ms
+        // (dtickMaintCheckpointDepthRetry) if nothing else.
+        pfmp = &g_rgfmp[ pbfImplicitlyPinnedDatabase->ifmp ];
+        BFFMPContext* pbffmp = (BFFMPContext*)pfmp->DwBFContext();
+        if ( pbffmp && pbffmp->fCurrentlyAttached )
+        {
+            pbffmp->tickMaintCheckpointDepthNext = TickOSTimeCurrent();
+        }
+    }
+    else
+    {
         //  make sure this is not already the checkpoint maintenance thread
         //  (otherwise, we will likely deadlock trying to obtain
         //  pfmp->RwlIBFContext())
 
         if ( Ptls()->fCheckpoint )
         {
+            FireWall( "CheckpointMaintToRequestIsntRecursive" );
             return;
         }
 
@@ -11744,29 +11770,6 @@ void BFIMaintCheckpointDepthRequest( FMP * pfmp, const BFCheckpointDepthMainReas
             {
                 pfmp->LeaveBFContextAsReader();
                 return;
-            }
-        }
-        else if ( eRequestReason == bfcpdmrRequestIOThreshold )
-        {
-
-            //  Since the IO stack is globally we have to check globally if we stopped b/c
-            //  of this error.
-
-            if ( errLastCheckpointMaint != errDiskTilt )
-            {
-                pfmp->LeaveBFContextAsReader();
-                return;
-            }
-
-            // schedule immediately
-
-            // Ok, we did stop checkpoint advancement due to too much IO, restart it 
-            // immediately. We don't need to do all IFMPs as they will restart in 10ms 
-            // (dtickMaintCheckpointDepthRetry).
-            BFFMPContext* pbffmp = (BFFMPContext*)pfmp->DwBFContext();
-            if ( pbffmp && pbffmp->fCurrentlyAttached )
-            {
-                pbffmp->tickMaintCheckpointDepthNext = TickOSTimeCurrent();
             }
         }
         else if ( eRequestReason == bfcpdmrRequestConsumeSettings )
@@ -11817,6 +11820,31 @@ void BFIMaintCheckpointDepthRequest( FMP * pfmp, const BFCheckpointDepthMainReas
         g_semMaintCheckpointDepthRequest.Release();
     }
 
+}
+
+void BFIMaintCheckpointDepthRequest( FMP * pfmp, const BFCheckpointDepthMainReason bfcdmr )
+{
+    Assert( bfcdmr != bfcpdmrRequestIOThreshold );
+
+    BFIMaintCheckpointIDepthRequest_( NULL, pfmp, bfcdmr );
+}
+
+void BFIMaintCheckpointDepthRequest( BF * pbfImplicitlyPinnedDatabase, const BFCheckpointDepthMainReason bfcdmr )
+{
+    Assert( bfcdmr == bfcpdmrRequestIOThreshold );
+
+    //  This set of facts allows us to collective imply a implicit lock on the BFContext.
+
+    Assert( pbfImplicitlyPinnedDatabase != NULL );
+    Assert( pbfImplicitlyPinnedDatabase->err == wrnBFPageFlushPending );
+    Assert( NULL == pbfImplicitlyPinnedDatabase->pWriteSignalComplete );
+    Expected( FIOThread() );
+
+    g_rgfmp[ pbfImplicitlyPinnedDatabase->ifmp ].ImplicitBFContextPin();
+
+    BFIMaintCheckpointIDepthRequest_( pbfImplicitlyPinnedDatabase, NULL, bfcdmr );
+
+    g_rgfmp[ pbfImplicitlyPinnedDatabase->ifmp ].ImplicitBFContextUnpin();
 }
 
 //  executes an async request to perform checkpoint depth maintenance
@@ -12029,11 +12057,6 @@ void BFIMaintCheckpointDepthIFlushPages( TICK * pdtickNextSchedule )
 
         if ( err == errDiskTilt )
         {
-            //  Setting this allows the BFIMaintCheckpointDepthRequest() to ignore
-            //  the next schedule time and just immediately ask for more checkpoint
-            //  depth maint.
-            
-            errLastCheckpointMaint = err;
             break;
         }
 
@@ -24663,14 +24686,8 @@ void BFISyncWriteComplete(  const ERR           err,
         g_asigBFFlush.Set();
     }
 
-    //  Sync IOs QOS doesn't have QOS signals back ... so can not check for qosIOCompleteWriteGameOn here, but
-    //  we shouldn't have Sync iorpBFCheckpointAdv IOs anyways, always signal just in case.  If we were getting
-    //  them here - would have to decide if we are signaling checkpoint adv unnecessarily or too much.
-    Expected( tc.etc.iorReason.Iorp() != iorpBFCheckpointAdv );
-    if ( tc.etc.iorReason.Iorp() == iorpBFCheckpointAdv )
-    {
-        BFIMaintCheckpointDepthRequest( &g_rgfmp[pbf->ifmp], bfcpdmrRequestIOThreshold );
-    }
+    //  We shouldn't have Sync iorpBFCheckpointAdv IOs here.
+    Assert( tc.etc.iorReason.Iorp() != iorpBFCheckpointAdv );
 
 }
 
@@ -25493,6 +25510,14 @@ void BFIAsyncWriteComplete( const ERR           err,
 
     Assert( !fRemappedWriteLatched || err >= JET_errSuccess );  //  we can't paste the right error if there was an IO error.
 
+    //  signal appropriate DB specific tasks have more work ...
+
+    if ( tc.etc.iorReason.Iorp() == iorpBFCheckpointAdv &&
+         ( ( err < JET_errSuccess ) || ( grbitQOS & qosIOCompleteWriteGameOn ) ) )
+    {
+        BFIMaintCheckpointDepthRequest( pbf, bfcpdmrRequestIOThreshold );
+    }
+
     //  declare success or the appropriate I/O error or that remapped (and needs page validation)
 
     ERR errSignal = ( err < JET_errSuccess ) ?
@@ -25514,13 +25539,7 @@ void BFIAsyncWriteComplete( const ERR           err,
 
     //  NOTE: Now definitely no pbf usage. :)
 
-    //  signal appropriate threads more work ...
-
-    if ( tc.etc.iorReason.Iorp() == iorpBFCheckpointAdv &&
-         ( ( err < JET_errSuccess ) || ( grbitQOS & qosIOCompleteWriteGameOn ) ) )
-    {
-        BFIMaintCheckpointDepthRequest( &g_rgfmp[ifmp], bfcpdmrRequestIOThreshold );
-    }
+    //  signal appropriate global threads more work ...
 
     //  request avail pool maintenance to possibly reclaim the page we just
     //  wrote
