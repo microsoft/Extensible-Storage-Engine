@@ -782,6 +782,13 @@ void CFlushMap::TermFlushMap_()
     m_pfapi = NULL;
     m_fInitialized = fFalse;
     m_cfmpgAllocated = 0;
+
+    if ( m_posttWriteFmHeaderPageComplete )
+    {
+        OSTimerTaskCancelTask( m_posttWriteFmHeaderPageComplete );
+        OSTimerTaskDelete( m_posttWriteFmHeaderPageComplete );
+        m_posttWriteFmHeaderPageComplete = NULL;
+    }
 }
 
 INLINE ERR CFlushMap::ErrGetDescriptorFromFmPgno_( const FMPGNO fmpgno, FlushMapPageDescriptor** const ppfmd )
@@ -1361,7 +1368,6 @@ ERR CFlushMap::ErrReadFmPage_( FlushMapPageDescriptor* const pfmd, const BOOL fS
     if ( ( err < JET_errSuccess ) || fSync )
     {
         err = ErrReadIoComplete_( err, fSync, pfmd );
-        DecrementFlushMapIoCount_();
     }
 
     return err;
@@ -1394,8 +1400,7 @@ ERR CFlushMap::ErrWriteFmPage_( FlushMapPageDescriptor* const pfmd, const BOOL f
 
     if ( ( err < JET_errSuccess ) || fSync )
     {
-        err = ErrWriteIoComplete_( err, fSync, pfmd );
-        DecrementFlushMapIoCount_();
+        err = ErrWriteIoComplete_( err, fSync, fFalse, pfmd );
     }
 
     return err;
@@ -1424,9 +1429,9 @@ void CFlushMap::OsReadIoComplete_(
     AssertSz( !pfm->m_fDumpMode, "Dump mode is not supposed to perform async I/O." );
     CallS( pfm->ErrGetDescriptorFromFmPgno_( fmpgno, &pfmd ) );
     (void)pfm->ErrReadIoComplete_( errIo, fFalse, pfmd );
-    pfm->DecrementFlushMapIoCount_();
-    // WARNING: do not add any references to the CFlushMap object below here because
-    // decrementing the I/O count is what allows the object to be deleted.
+    // WARNING: do not add any references to the CFlushMap object below because
+    // completing the I/O decrements the pending I/O count, which is what allows the
+    // object to be deleted.
 }
 
 void CFlushMap::OsWriteIoComplete_(
@@ -1448,10 +1453,10 @@ void CFlushMap::OsWriteIoComplete_(
 
     AssertSz( !pfm->m_fDumpMode, "Dump mode is not supposed to perform async I/O." );
     CallS( pfm->ErrGetDescriptorFromFmPgno_( fmpgno, &pfmd ) );
-    (void)pfm->ErrWriteIoComplete_( errIo, fFalse, pfmd );
-    pfm->DecrementFlushMapIoCount_();
-    // WARNING: do not add any references to the CFlushMap object below here because
-    // decrementing the I/O count is what allows the object to be deleted.
+    (void)pfm->ErrWriteIoComplete_( errIo, fFalse, fTrue, pfmd );
+    // WARNING: do not add any references to the CFlushMap object below because
+    // completing the I/O decrements the pending I/O count, which is what allows the
+    // object to be deleted.
 }
 
 ERR CFlushMap::ErrReadIoComplete_( const ERR errIo, const BOOL fSync, FlushMapPageDescriptor* const pfmd )
@@ -1523,22 +1528,22 @@ ERR CFlushMap::ErrReadIoComplete_( const ERR errIo, const BOOL fSync, FlushMapPa
 
     OnDebug( AssertPostIo_( errIo, fSync, fFalse, pfmd ) );
 
+    DecrementFlushMapIoCount_();
+    // WARNING: do not add any references to members of this object below because
+    // decrementing the I/O count is what allows the object to be deleted.
+
     return err;
 }
 
-ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, FlushMapPageDescriptor* const pfmd )
+ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, const BOOL fIoThread, FlushMapPageDescriptor* const pfmd )
 {
     const FMPGNO fmpgno = pfmd->fmpgno;
     const BOOL fFmHeaderPage = FIsFmHeader_( fmpgno );
+    const BOOL fMayBlockIoThread = fIoThread && ( errIo >= JET_errSuccess ) && fFmHeaderPage;
 
+    Assert( !( fSync && fIoThread ) );
     Assert( ( pfmd->pvWriteBuffer != NULL ) || ( ( errIo == JET_errOutOfMemory ) && !fFmHeaderPage ) );
     OnDebug( AssertOnIoCompletion_( fSync, fTrue, pfmd ) );
-
-    // Update perf. counters.
-    if ( ( errIo >= JET_errSuccess ) && ( m_pinst != pinstNil ) )
-    {
-        PERFOpt( ( fSync ? cFMPagesWrittenSync : cFMPagesWrittenAsync ).Inc( m_pinst->m_iInstance ) );
-    }
 
     if ( !fSync )
     {
@@ -1551,7 +1556,17 @@ ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, FlushMapP
         // Refresh the persisted state of the header.
         if ( fFmHeaderPage )
         {
-            pfmd->sxwl.UpgradeExclusiveLatchToWriteLatch();
+            if ( !fMayBlockIoThread )
+            {
+                pfmd->sxwl.UpgradeExclusiveLatchToWriteLatch();
+            }
+            else if ( pfmd->sxwl.ErrTryUpgradeExclusiveLatchToWriteLatch() != CSXWLatch::ERR::errSuccess )
+            {
+                pfmd->sxwl.ReleaseOwnership( CSXWLatch::iExclusiveGroup );
+                OSTimerTaskScheduleTask( m_posttWriteFmHeaderPageComplete, (void*)(DWORD_PTR)(DWORD)errIo, 0, 0 );
+                return ErrERRCheck( errBFLatchConflict );
+            }
+            
             UtilMemCpy( pfmd->pv, pfmd->pvWriteBuffer, sizeof( FMFILEHDR ) );
             if ( !fSync )
             {
@@ -1570,6 +1585,12 @@ ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, FlushMapP
         }
 
         pfmd->SetDirty( m_pinst );
+    }
+
+    // Update perf. counters.
+    if ( ( errIo >= JET_errSuccess ) && ( m_pinst != pinstNil ) )
+    {
+        PERFOpt( ( fSync ? cFMPagesWrittenSync : cFMPagesWrittenAsync ).Inc( m_pinst->m_iInstance ) );
     }
 
     if ( fSync )
@@ -1608,7 +1629,22 @@ ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, FlushMapP
         m_msSectionFlush.Leave( m_groupSectionFlushWrite );
     }
 
+    DecrementFlushMapIoCount_();
+    // WARNING: do not add any references to members of this object below because
+    // decrementing the I/O count is what allows the object to be deleted.
+
     return errIo;
+}
+
+void CFlushMap::WriteFmHeaderPageComplete_( void* pvGroupContext, void* pvRuntimeContext )
+{
+    CFlushMap* const pfm = (CFlushMap*)pvGroupContext;
+    const ERR errIo = (ERR)(DWORD)(DWORD_PTR)pvRuntimeContext;
+
+    (void)pfm->ErrWriteIoComplete_( errIo, fFalse, fFalse, &pfm->m_fmdFmHdr );
+    // WARNING: do not add any references to the CFlushMap object below because
+    // completing the I/O decrements the pending I/O count, which is what allows the
+    // object to be deleted.
 }
 
 ERR CFlushMap::ErrSyncReadFmPage_( FlushMapPageDescriptor* const pfmd )
@@ -1990,7 +2026,7 @@ void CFlushMap::DecrementFlushMapIoCount_()
     OnDebug( AssertFlushMapIoAllowedAndInFlight_() );
     const LONG cInFlightIo = AtomicDecrement( &m_cInFlightIo );
     Assert( cInFlightIo >= 0 );
-    // WARNING: do not add any references to the CFlushMap object below here because
+    // WARNING: do not add any references to members of this object below because
     // decrementing the I/O count is what allows the object to be deleted.
 }
 
@@ -2596,7 +2632,8 @@ CFlushMap::CFlushMap() :
     m_cfmpgAllocated( 0 ),
     m_cbfmdReserved( 0 ),
     m_cbfmdCommitted( 0 ),
-    m_cbfmAllocated( 0 )
+    m_cbfmAllocated( 0 ),
+    m_posttWriteFmHeaderPageComplete( NULL )
 {
     m_sxwlSectionFlush.AcquireWriteLatch();
     m_sxwlSectionFlush.ReleaseOwnership( CSXWLatch::iWriteGroup );
@@ -2663,6 +2700,8 @@ ERR CFlushMap::ErrInitFlushMap()
             m_cbSectionFlushAsyncWriteBufferReserved = cbAsyncWriteBufferReserved;
             m_cbSectionFlushAsyncWriteBufferCommitted = 0;
             m_ibSectionFlushAsyncWriteBufferNext = 0;
+
+            Call( ErrOSTimerTaskCreate( WriteFmHeaderPageComplete_, this, &m_posttWriteFmHeaderPageComplete ) );
         }
 
         Call( ErrAttachFlushMap_() );
