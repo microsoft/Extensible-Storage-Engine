@@ -2027,6 +2027,8 @@ VOID CDBMScanFollower::ProcessedDBMScanCheckRecord( const FMP * const pfmp )
 ERR DBMScanReader::ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache* const pdbmObjectCache )
 {
     ERR err;
+    BFLatch bfl;
+    BOOL fLatched = fFalse;
 
     // Verify that reads have all been pre-read.
     Assert( pgno >= m_pgnoLastPreread );
@@ -2053,13 +2055,12 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache
         Assert( m_objidMSysObjids != objidNil );
     }
 
-    BFLatch bfl;
     Call( ErrBFRDWLatchPage( &bfl, m_ifmp, pgno, BFLatchFlags( bflfNoTouch | bflfNoFaultFail | bflfUninitPageOk | bflfExtensiveChecks | bflfDBScan ), BfpriBackgroundRead( m_ifmp, ppibNil ), *tcScope ) );
+    fLatched = fTrue;
     Assert( FBFRDWLatched( m_ifmp, pgno ) );
     const ERR errPageStatus = ErrBFLatchStatus( &bfl );
     if( errPageStatus < JET_errSuccess && errPageStatus != JET_errPageNotInitialized )
     {
-        BFRDWUnlatch( &bfl );
         Call( errPageStatus );
     }
     const BOOL fPageUninit = ( errPageStatus == JET_errPageNotInitialized );
@@ -2136,6 +2137,7 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache
 
 
     BFRDWUnlatch( &bfl );
+    fLatched = fFalse;
 
     // Also, if the page was already cached in buffer manager, also read from
     // disk
@@ -2165,6 +2167,17 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache
     }
 
 HandleError:
+
+    if ( fLatched )
+    {
+        Assert( FBFLatched( &bfl ) );
+        BFRDWUnlatch( &bfl );
+        fLatched = fFalse;
+    }
+    else
+    {
+        Assert( FBFNotLatched( &bfl ) );
+    }
 
     Expected( err != JET_errFileIOBeyondEOF );
 
