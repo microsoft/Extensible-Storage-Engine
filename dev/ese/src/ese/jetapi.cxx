@@ -4158,7 +4158,19 @@ class APICALL_SESID : public APICALL
                 m_ppib = (PIB *)sesid;
                 TLS* ptls = Ptls();
 
-                m_ppib->ptlsApi = ptls;
+                // Do not cache TLS in PIB if this is a callback, either it is already cached
+                // or we do not want to cache it because we are in parallel index rebuild and 
+                // the same PIB will be reused by multiple threads concurrently.
+                //
+                if ( !ptls->fInCallback )
+                {
+                    m_ppib->ptlsApi = ptls;
+                }
+                else
+                {
+                    Assert( m_ppib->ptlsApi == ptls || m_ppib->ptlsApi == NULL );
+                }
+
                 //  if someone else is already in the Jet API with
                 //  this session and this is not a callback, then
                 //  report a session-sharing violation
