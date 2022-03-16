@@ -956,7 +956,6 @@ INLINE INT __cdecl LogPrereaderBase::ILGPICmpPagerefs(  const LogPrereaderBase::
 PCWSTR g_rgwszLogCorruptReason[] =
 {
     L"Unknown",
-    L"EmptySegmentHigherLgen",
     L"CorruptAfterEmptySegment",
     L"BadSegmentLgpos",
     L"ValidSegmentAfterEmpty",
@@ -992,7 +991,7 @@ LOCAL VOID LGIReportChecksumMismatch(
     OSStrCbFormatW( szError, sizeof(szError), L"%i (0x%08x)", err, err );
     
     rgpszT[ irgpsz++ ] = wszLogName;
-    rgpszT[ irgpsz++ ] = g_rgwszLogCorruptReason[ reason < eLCMax ? reason : 0 ];
+    rgpszT[ irgpsz++ ] = g_rgwszLogCorruptReason[ reason < eLCMax ? reason : eLCUnknown ];
     rgpszT[ irgpsz++ ] = szLastValid;
     rgpszT[ irgpsz++ ] = szCurrent;
     rgpszT[ irgpsz++ ] = szChecksumStored;
@@ -1483,9 +1482,9 @@ LOG_READ_BUFFER::ErrLGCheckReadLastLogRecordFF(
                         // empty segments should be in non-increasing lGen's
                         if ( pSegHdr->le_lgposSegment.le_lGeneration > lGenLastEmptyPage )
                         {
-                            lLine = __LINE__;
-                            reason = eLCEmptySegmentHigherLgen;
-                            goto ReportCorruption;
+                            // This log had a lost write in a previous lifetime, do not error out because no data lost from current log,
+                            // assert so we can still complain about losing the write in the past.
+                            AssertTrack( FNegTest( fCorruptingLogFiles ), "CorruptLog: EmptySegmentHigherLgen" );
                         }
                         lGenLastEmptyPage = pSegHdr->le_lgposSegment.le_lGeneration;
                         fEmptyPageSeen = fTrue;
@@ -1525,9 +1524,9 @@ LOG_READ_BUFFER::ErrLGCheckReadLastLogRecordFF(
                     // empty segments should be in non-increasing lGen's
                     if ( pSegHdr->le_lgposSegment.le_lGeneration > lGenLastEmptyPage )
                     {
-                        lLine = __LINE__;
-                        reason = eLCEmptySegmentHigherLgen;
-                        goto ReportCorruption;
+                        // This log had a lost write in a previous lifetime, do not error out because no data lost from current log,
+                        // assert so we can still complain about losing the write in the past.
+                        AssertTrack( FNegTest( fCorruptingLogFiles ), "CorruptLog: EmptySegmentHigherLgen" );
                     }
                     lGenLastEmptyPage = pSegHdr->le_lgposSegment.le_lGeneration;
                     fEmptyPageSeen = fTrue;
@@ -1749,11 +1748,10 @@ ReportCorruption:
 
     //  prepare the event-log messages
 
-    OSStrCbFormatW( szCorruption, sizeof( szCorruption ), L"isec %d reason %ws", lgposCurrent.isec, g_rgwszLogCorruptReason[ reason < eLCMax ? reason : 0 ] );
+    OSStrCbFormatW( szCorruption, sizeof( szCorruption ), L"isec %d reason %ws", lgposCurrent.isec, g_rgwszLogCorruptReason[ reason < eLCMax ? reason : eLCUnknown ] );
 
-    //  this should only happen to edb.jtx/log...
     //  ... this can happen when doing bit-flip testing on logs
-    Assert( FNegTest( fCorruptingLogFiles ) );
+    AssertTrack( FNegTest( fCorruptingLogFiles ), OSFormat( "CorruptLog: %ls", g_rgwszLogCorruptReason[ reason < eLCMax ? reason : eLCUnknown ] ) );
 
     // SOFT_HARD: leave, at least for compatibility
     if ( m_pLog->FHardRestore() )
