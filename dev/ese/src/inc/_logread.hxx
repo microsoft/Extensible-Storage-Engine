@@ -15,7 +15,6 @@ struct SAVED_LOG_DATA
 enum eLogCorruptReason
 {
     eLCUnknown = 0,
-    eLCEmptySegmentHigherLgen,
     eLCCorruptAfterEmptySegment,
     eLCBadSegmentLgpos,
     eLCValidSegmentAfterEmpty,
