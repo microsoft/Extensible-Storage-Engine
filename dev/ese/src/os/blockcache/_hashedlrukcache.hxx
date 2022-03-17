@@ -634,7 +634,7 @@ class THashedLRUKCache
                     {
                         if ( slotAccepted.Clno() == slotstCurrent.Clno() )
                         {
-                            BlockCacheInternalError( "ClusterMustBeSwappedOnEvictOrInvalidate" );
+                            Error( m_pc->ErrBlockCacheInternalError( "ClusterMustBeSwappedOnEvictOrInvalidate" ) );
                         }
                     }
 
@@ -1469,7 +1469,7 @@ class THashedLRUKCache
 
                     if ( err == JET_errInvalidParameter )
                     {
-                        BlockCacheInternalError( "CleanSlabVisitorInvalidFileId" );
+                        Error( pc->ErrBlockCacheInternalError( "CleanSlabVisitorInvalidFileId" ) );
                     }
 
                     //  if the file no longer exists then don't return it
@@ -2712,6 +2712,8 @@ class THashedLRUKCache
                     JournalPosition     jposEmptyEnd    = jposInvalid;
                     JournalPosition     jposReplayNew   = jposInvalid;
 
+                    m_pc->BlockCacheNotableEvent( "HandleJournalFull" );
+
                     //  get the amount of space left in the journal
 
                     Call( m_pjInner->ErrGetProperties( NULL, NULL, NULL, &jposAppend, &jposFull ) );
@@ -2760,6 +2762,12 @@ class THashedLRUKCache
                     Call( m_pc->PffCaching()->ErrFlushFileBuffers( iofrBlockCache ) );
 
                 HandleError:
+                    if ( err < JET_errSuccess )
+                    {
+                        OSTraceSuspendGC();
+                        m_pc->BlockCacheNotableEvent( OSFormat( "HandleJournalFullFailure:%i", err ) );
+                        OSTraceResumeGC();
+                    }
                     return err;
                 }
 
@@ -3441,7 +3449,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
     if ( cbCachingFile > cbCachingFileMax )
     {
         //  not enough storage was granted to create the cache
-        BlockCacheInternalError( "HashedLRUKCacheTooSmall1" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTooSmall1" ) );
     }
 
     //  compute the offset range of the CHashedLRUKCacheHeader
@@ -3453,7 +3461,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
     if ( cbCachingFile > cbCachingFileMax )
     {
         //  not enough storage was granted to create the cache
-        BlockCacheInternalError( "HashedLRUKCacheTooSmall2" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTooSmall2" ) );
     }
 
     //  compute the offset range of the CJournalSegmentHeader Array backing the journal
@@ -3465,7 +3473,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
     if ( cbCachingFile > cbCachingFileMax )
     {
         //  not enough storage was granted to create the cache
-        BlockCacheInternalError( "HashedLRUKCacheTooSmall3" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTooSmall3" ) );
     }
 
     //  compute the offset range of the CCachedBlockChunk array backing the slabs
@@ -3479,7 +3487,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
     if ( cbCachingFile > cbCachingFileMax )
     {
         //  not enough storage was granted to create the cache
-        BlockCacheInternalError( "HashedLRUKCacheTooSmall4" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTooSmall4" ) );
     }
 
     //  compute the offset range of the write counts protecting the CCachedBlockChunk array from lost writes
@@ -3491,7 +3499,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
     if ( cbCachingFile > cbCachingFileMax )
     {
         //  not enough storage was granted to create the cache
-        BlockCacheInternalError( "HashedLRUKCacheTooSmall5" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTooSmall5" ) );
     }
 
     //  compute the offset range of the clusters
@@ -3503,7 +3511,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
     if ( cbCachingFile > cbCachingFileMax )
     {
         //  not enough storage was granted to create the cache
-        BlockCacheInternalError( "HashedLRUKCacheTooSmall6" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTooSmall6" ) );
     }
 
     //  compute the number of slabs used for the hash vs journal
@@ -3516,13 +3524,13 @@ ERR THashedLRUKCache<I>::ErrCreate()
     if ( cSlabHash == 0 || cSlabHash > cSlab )
     {
         //  not enough storage was granted to create the cache
-        BlockCacheInternalError( "HashedLRUKCacheTooSmall7" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTooSmall7" ) );
     }
 
     if ( cSlabJournal == 0 || cSlabJournal > cSlab )
     {
         //  not enough storage was granted to create the cache
-        BlockCacheInternalError( "HashedLRUKCacheTooSmall8" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTooSmall8" ) );
     }
 
     //  compute the offset ranges for the hash and journal chunks and clusters
@@ -3541,7 +3549,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
 
     if ( ibChunkJournal + cbChunkJournal > ibChunk + cbChunk )
     {
-        BlockCacheInternalError( "HashedLRUKCacheChunkAllocation" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheChunkAllocation" ) );
     }
 
     //  set the caching file size
@@ -4516,7 +4524,7 @@ ERR THashedLRUKCache<I>::ErrMountJournal( _In_ CHashedLRUKCacheHeader* const pch
     *ppj = NULL;
 
     Call( CJournalSegmentManager::ErrMount( PffCaching(), pch->IbJournal(), pch->CbJournal(), &pjsm ) );
-    Call( CJournal::ErrMount( &pjsm, cbJournalCache, &pj ) );
+    Call( CJournal::ErrMount( PffCaching(), &pjsm, cbJournalCache, &pj ) );
 
     *ppj = pj;
     pj = NULL;
@@ -4860,7 +4868,7 @@ ERR THashedLRUKCache<I>::ErrRedoJournalEntry( _In_ const CQueuedJournalEntry* co
             break;
 
         default:
-            BlockCacheInternalError( "HashedLRUKCacheUnknownJournalEntry" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheUnknownJournalEntry" ) );
     }
 
 HandleError:
@@ -5447,7 +5455,7 @@ ERR THashedLRUKCache<I>::ErrVerifyTruncate( _In_ const JournalPosition jposRepla
 
     if ( jposReplay > m_jposRedo )
     {
-        BlockCacheInternalError( "HashedLRUKCacheTruncateRedo" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTruncateRedo" ) );
     }
 
     //  it is illegal to delete journal entries corresponding to dirty slabs because that could prevent us from writing
@@ -5462,7 +5470,7 @@ ERR THashedLRUKCache<I>::ErrVerifyTruncate( _In_ const JournalPosition jposRepla
     {
         if ( jposReplay > pswb->JposMin() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheTruncateWAL" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheTruncateWAL" ) );
         }
     }
 
@@ -5474,7 +5482,7 @@ ERR THashedLRUKCache<I>::ErrVerifyTruncate( _In_ const JournalPosition jposRepla
 
     if ( jposReplay > (JournalPosition)AtomicRead( (QWORD*)&m_jposReplayWriteCounts ) )
     {
-        BlockCacheInternalError( "HashedLRUKCacheTruncateWriteCounts" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTruncateWriteCounts" ) );
     }
 
     //  it is illegal to advance the replay pointer past the durable for write back pointer because that could prevent
@@ -5484,7 +5492,7 @@ ERR THashedLRUKCache<I>::ErrVerifyTruncate( _In_ const JournalPosition jposRepla
 
     if ( jposReplay > jposDurableForWriteBack )
     {
-        BlockCacheInternalError( "HashedLRUKCacheTruncateDurable" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheTruncateDurable" ) );
     }
 
 HandleError:
@@ -5535,7 +5543,7 @@ ERR THashedLRUKCache<I>::ErrFlushAllState( _In_ const JournalPosition jposDurabl
 
             if ( pswb->JposEndLast() > jposDurableForWriteBack )
             {
-                BlockCacheInternalError( "HashedLRUKCacheFlushAllStateNotDurable" );
+                Error( ErrBlockCacheInternalError( "HashedLRUKCacheFlushAllStateNotDurable" ) );
             }
 
             //  collect the slab for write back
@@ -5558,7 +5566,7 @@ ERR THashedLRUKCache<I>::ErrFlushAllState( _In_ const JournalPosition jposDurabl
 
     if ( !m_ilSlabsToWriteBackByJposMin.FEmpty() )
     {
-        BlockCacheInternalError( "HashedLRUKCacheFlushAllStateIncomplete" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheFlushAllStateIncomplete" ) );
     }
 
     //  save our write counts
@@ -6735,7 +6743,7 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
                 Call( (*ppcbs)->ErrGetSlotForWrite( cbid, cbCachedBlock, pbCachedBlock, &slot ) );
                 if ( !slot.FValid() )
                 {
-                    BlockCacheInternalError( "HashedLRUKCacheRequestWriteNoSlotAvailable" );
+                    Error( ErrBlockCacheInternalError( "HashedLRUKCacheRequestWriteNoSlotAvailable" ) );
                 }
 
                 //  if the caching policy requires that this cached block never be written back then modify the slot to
@@ -6979,7 +6987,7 @@ ERR THashedLRUKCache<I>::ErrGetSlabInternal(    _In_    const QWORD             
     }
     else
     {
-        BlockCacheInternalError( "HashedLRUKCacheUnknownSlabType" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheUnknownSlabType" ) );
     }
 
     //  if this is a journal slab then note we are acquiring it

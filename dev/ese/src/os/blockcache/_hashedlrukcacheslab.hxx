@@ -701,6 +701,13 @@ class TCachedBlockSlab  //  cbs
 
     private:
 
+        ERR ErrBlockCacheInternalError( _In_ const char* const szTag )
+        {
+            return ::ErrBlockCacheInternalError( m_pff, szTag );
+        }
+
+    private:
+
         IFileFilter* const                              m_pff;
         const QWORD                                     m_ibSlab;
         const QWORD                                     m_cbSlab;
@@ -974,7 +981,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrUpdateSlot( _In_ const CCachedBlockSlot& slot
 
                 if ( !m_fIgnoreVerificationErrors )
                 {
-                    BlockCacheInternalError( "HashedLRUKCacheSlabUpdnoSequence" );
+                    Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlabUpdnoSequence" ) );
                 }
             }
 
@@ -1427,7 +1434,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrAcceptUpdates()
 
             if ( !m_fIgnoreVerificationErrors )
             {
-                BlockCacheInternalError( "HashedLRUKCacheSlabClusterUpdateExpected" );
+                Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlabClusterUpdateExpected" ) );
             }
         }
     }
@@ -1519,7 +1526,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrSave(    _In_opt_    const ICachedBlockSlab::
 
             if ( m_rgerrChunk[ icbc ] < JET_errSuccess )
             {
-                BlockCacheInternalError( "HashedLRUKCacheSlabUnpatchedAtSave" );
+                Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlabUnpatchedAtSave" ) );
             }
 
             //  finalize the chunk
@@ -1774,7 +1781,7 @@ ERR TCachedBlockSlab<I>::ErrComputeSupercededState()
 
                 if ( !m_fIgnoreVerificationErrors )
                 {
-                    BlockCacheInternalError( "HashedLRUKCacheSlabDuplicateUpdno" );
+                    Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlabDuplicateUpdno" ) );
                 }
             }
 
@@ -2105,7 +2112,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotState(    _In_    const CCachedBlockId
                 slotstCurrent.Cbid().Volumeid() != cbid.Volumeid() ||
                 slotstCurrent.FSuperceded() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlabGetSlotState" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlabGetSlotState" ) );
         }
     }
 
@@ -2136,18 +2143,18 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotAddress( _In_ const CCachedBlockSlo
 
     if ( slot.IbSlab() != m_ibSlab )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotIncorrectSlab" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotIncorrectSlab" ) );
     }
 
     //  the chunk number and slot number must always be valid
 
     if ( Icbc( slot.Chno() ) >= m_ccbc )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotInvalidChno" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotInvalidChno" ) );
     }
     if ( Icbl( slot.Slno() ) >= CCachedBlockChunk::Ccbl() )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotInvalidSlno" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotInvalidSlno" ) );
     }
 
 HandleError:
@@ -2176,14 +2183,14 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlot( _In_ const CCachedBlockSlot& slot
                 slot.Cbid().Fileserial() == fileserialInvalid ||
                 slot.Cbid().Cbno() == cbnoInvalid )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotInvalidCbid" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotInvalidCbid" ) );
     }
 
     //  the slot must always have a valid cluster
 
     if ( slot.Clno() < m_clnoMin || slot.Clno() >= m_clnoMax || slot.Clno() == clnoInvalid )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotInvalidClno" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotInvalidClno" ) );
     }
 
     //  the slot must either have all invalid touches, tono0 valid and tono1 invalid, or both valid and tono0 >= tono1
@@ -2199,57 +2206,57 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlot( _In_ const CCachedBlockSlot& slot
     }
     else
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotInvalidTono" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotInvalidTono" ) );
     }
 
     //  the slot must have a valid touch number iff valid
 
     if ( !slot.FValid() && ( slot.Tono0() != tonoInvalid || slot.Tono1() != tonoInvalid ) )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotIllegalTono" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotIllegalTono" ) );
     }
     if ( slot.FValid() && ( slot.Tono0() == tonoInvalid && slot.Tono1() == tonoInvalid ) )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotMissingTono" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotMissingTono" ) );
     }
 
     //  an invalid slot may not be pinned or dirty
 
     if ( !slot.FValid() && ( slot.FPinned() || slot.FDirty() ) )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotInvalidAndPinnedOrDirty" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotInvalidAndPinnedOrDirty" ) );
     }
 
     //  a dirty slot must also be marked as ever dirty
 
     if ( slot.FDirty() && !slot.FEverDirty() )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotDirtyAndNotEverDirty" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotDirtyAndNotEverDirty" ) );
     }
 
     //  a slot that may only have an update number iff it has ever been dirty
 
     if ( !slot.FEverDirty() && slot.Updno() != updnoInvalid )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotIllegalUpdno" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotIllegalUpdno" ) );
     }
     if ( slot.FEverDirty() && slot.Updno() == updnoInvalid )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotMissingUpdno" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotMissingUpdno" ) );
     }
 
     //  a purged slot may not be valid, pinned, or dirty
 
     if ( slot.FPurged() && ( slot.FValid() || slot.FPinned() || slot.FDirty() ) )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotPurgedAndValidOrPinnedOrDirty" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotPurgedAndValidOrPinnedOrDirty" ) );
     }
 
     //  the reserved space must always be zero
 
     if ( slot.RgbitReserved0() != 0 )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotReserved" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotReserved" ) );
     }
 
 HandleError:
@@ -2289,7 +2296,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
     else if (   slotNew.Chno() != slotstCurrent.Chno() ||
                 slotNew.Slno() != slotstCurrent.Slno() )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalAddressChange" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalAddressChange" ) );
     }
 
     //  the cached block id may not change unless we are caching new data
@@ -2302,7 +2309,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
                 slotNew.Cbid().Fileserial() != slotstCurrent.Cbid().Fileserial() ||
                 slotNew.Cbid().Cbno() != slotstCurrent.Cbid().Cbno() )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalCbidChange" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalCbidChange" ) );
     }
 
     //  a slot can only be unpinned by invalidate or by evict when the slot is superceded
@@ -2317,7 +2324,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
         }
         else
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalUnpin" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalUnpin" ) );
         }
     }
 
@@ -2333,7 +2340,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
         }
         else
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalPurge" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalPurge" ) );
         }
     }
 
@@ -2341,14 +2348,14 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
 
     if ( !( !slotstCurrent.FValid() && slotNew.FValid() ) && slotstCurrent.FEverDirty() && !slotNew.FEverDirty() )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalDirtyReset" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalDirtyReset" ) );
     }
 
     //  caching new data is the only time when a slot can have its ever update number reset
 
     if ( !( !slotstCurrent.FValid() && slotNew.FValid() ) && slotstCurrent.Updno() != updnoInvalid && slotNew.Updno() == updnoInvalid )
     {
-        BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalUpdnoReset" );
+        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalUpdnoReset" ) );
     }
 
     //  scenario validation
@@ -2360,7 +2367,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
     {
         if ( !( slotNew.Tono0() != tonoInvalid && slotNew.Tono1() == slotNew.Tono0() ) )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateCleanDataMustBeTouchedOnce" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateCleanDataMustBeTouchedOnce" ) );
         }
     }
 
@@ -2371,7 +2378,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
     {
         if ( slotNew.Tono0() == tonoInvalid )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateNewDataMustBeTouched" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateNewDataMustBeTouched" ) );
         }
     }
 
@@ -2382,11 +2389,11 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
     {
         if ( slotNew.Tono1() != slotstCurrent.Tono0() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateReadMustTouch" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateReadMustTouch" ) );
         }
         if ( slotNew.Tono0() < slotNew.Tono1() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalTonos" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalTonos" ) );
         }
     }
 
@@ -2408,12 +2415,12 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
                 slotNew.FPurged() != slotstCurrent.FPurged() ||
                 slotNew.Updno() != slotstCurrent.Updno() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalCleanStateTransition" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalCleanStateTransition" ) );
         }
 
         if ( slotstCurrent.FPinned() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalCleanOfPinned" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalCleanOfPinned" ) );
         }
     }
 
@@ -2435,17 +2442,17 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
                 slotNew.FPurged() != fFalse ||
                 slotNew.Updno() != slotstCurrent.Updno() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalEvictStateTransition" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalEvictStateTransition" ) );
         }
 
         if ( slotstCurrent.FPinned() && !slotstCurrent.FSuperceded() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalEvictOfPinned" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalEvictOfPinned" ) );
         }
 
         if ( slotstCurrent.FDirty() && !slotstCurrent.FSuperceded() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalEvictOfDirty" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalEvictOfDirty" ) );
         }
     }
 
@@ -2467,7 +2474,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlotUpdate(    _In_ const CCachedBlockS
                 slotNew.FPurged() != slotstCurrent.FDirty() && !slotstCurrent.FSuperceded() ||
                 slotNew.Updno() != slotstCurrent.Updno() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalInvalidateStateTransition" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalInvalidateStateTransition" ) );
         }
     }
 

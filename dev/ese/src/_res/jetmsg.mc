@@ -3038,7 +3038,7 @@ Unique id=%6%n
 MessageId=4001
 SymbolicName=BLOCK_CACHE_CACHING_FILE_OPEN_FAILURE_ID
 Language=English
-%1 (%2) %3The caching file at '%4' could not be opened due to error %5.  Caching cannot be performed for files backed by this cache.%n
+%1 (%2) %3The caching file at '%4' could not be opened via '%5' due to error %6.  The operation will complete with error %7.  Caching cannot be performed for files backed by this cache.%n
 .
 
 MessageId=4002
@@ -3061,6 +3061,12 @@ Language=English
 Volume id=%4%n
 File id=%5%n
 File serial=%6%n
+.
+
+MessageId=4004
+SymbolicName=BLOCK_CACHE_CACHING_UNEXPECTED_FAILURE_ID
+Language=English
+%1 (%2) %3The caching file at '%4' could not perform a caching operation '%5' due to an unexpected error %6.  The caching operation will fail with error %7.%n
 .
 
 ;///////////////////////////////////////////////////////////

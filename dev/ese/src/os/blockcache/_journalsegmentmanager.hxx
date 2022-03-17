@@ -93,6 +93,11 @@ class TJournalSegmentManager  //  jsm
                                 _In_    const SegmentPosition   sposDurable,
                                 _Out_   IJournalSegment** const ppjs );
 
+        ERR ErrBlockCacheInternalError( _In_ const char* const szTag )
+        {
+            return ::ErrBlockCacheInternalError( m_pff, szTag );
+        }
+
     private:
 
         class CSegmentInfo
@@ -429,7 +434,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
     {
         //  we failed to recover from journal full
 
-        BlockCacheInternalError( "JournalFullUnrecoverable" );
+        Error( ErrBlockCacheInternalError( "JournalFullUnrecoverable" ) );
     }
 
     //  find the unique id of the segment prior to the append segment
@@ -456,7 +461,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
 
     if ( m_sposFirst > pseginfoDurable->SposReplay() )
     {
-        BlockCacheInternalError( "JournalReplayPointerLTFirst" );
+        Error( ErrBlockCacheInternalError( "JournalReplayPointerLTFirst" ) );
     }
 
     m_sposFirst = pseginfoDurable->SposReplay();
@@ -835,7 +840,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrGetSegmentOffset(  _In_    const QWORD 
 
     if ( ib < (LONG64)m_ib || ib >= (LONG64)( m_ib + m_cb ) )
     {
-        BlockCacheInternalError( "JournalSegmentIllegalOffset" );
+        Error( ErrBlockCacheInternalError( "JournalSegmentIllegalOffset" ) );
     }
 
     *pib = ib;

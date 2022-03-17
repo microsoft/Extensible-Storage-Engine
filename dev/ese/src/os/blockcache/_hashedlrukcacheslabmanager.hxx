@@ -92,6 +92,11 @@ class TCachedBlockSlabManager  //  cbsm
         static ERR ErrInitSlabTable_( _In_ TCachedBlockSlabManager<I>* const pcbsm ) { return pcbsm->ErrInitSlabTable(); }
         void TermSlabTable();
 
+        ERR ErrBlockCacheInternalError( _In_ const char* const szTag )
+        {
+            return ::ErrBlockCacheInternalError( m_pff, szTag );
+        }
+
     private:
 
         static QWORD                                                                        s_rgrgqwTable1[ 4 ][ 256 ];
@@ -266,7 +271,7 @@ INLINE ERR TCachedBlockSlabManager<I>::ErrGetSlab(  _In_    const QWORD         
 
         if ( errSlab != pcbs->ErrStatus() )
         {
-            BlockCacheInternalError( "HashedLRUKCacheSlabManagerMismatchedErr" );
+            Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlabManagerMismatchedErr" ) );
         }
 
         //  keep the slab in the slab entry

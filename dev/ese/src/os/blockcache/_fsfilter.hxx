@@ -522,7 +522,10 @@ class TFileSystemFilter  //  fsf
         ERR ErrGetConfiguredCache(  _In_    CFileFilter* const  pff,
                                     _In_z_  const WCHAR* const  wszKeyPath,
                                     _Out_   ICache** const      ppc );
-        void ReportCacheOpenFailure( _In_ ICachedFileConfiguration* const pcfconfig, _In_ const ERR err );
+        ERR ErrCacheOpenFailure(    _In_ ICachedFileConfiguration* const    pcfconfig,
+                                    _In_ const char* const                  szFunction, 
+                                    _In_ const ERR                          errFromCall,
+                                    _In_ const ERR                          errToReturn );
         ERR ErrGetCache(    _In_    CFileFilter* const          pff,
                             _In_z_  const WCHAR* const          wszKeyPath,
                             _Out_   ICache** const              ppc,
@@ -643,13 +646,6 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
 
     while ( volumeidActual != volumeid || fileidActual != fileid )
     {
-        //  if we have retried too many times then fail
-
-        if ( ++cAttempt >= cAttemptMax )
-        {
-            BlockCacheInternalError( "FileOpenByIdRetryLimit" );
-        }
-
         //  if we have a file open from a previous attempt then close it
 
         delete *ppfapi;
@@ -660,6 +656,13 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
         //  NOTE:  if we cannot compute this path then the file is truly gone
 
         Call( m_pfident->ErrGetFilePathById( volumeid, fileid, wszAnyAbsPath, wszKeyPath ) );
+
+        //  if we have retried too many times then fail
+
+        if ( ++cAttempt >= cAttemptMax )
+        {
+            Error( ErrBlockCacheInternalError( wszAnyAbsPath, "FileOpenByIdRetryLimit" ) );
+        }
 
         //  open the file
         // 
@@ -1550,8 +1553,7 @@ ERR TFileSystemFilter<I>::ErrGetConfiguredCache(    _In_    CFileFilter* const  
         err = m_pcrep->ErrOpen( this, m_pfsconfig, &pcconfig, &pc );
         if ( err < JET_errSuccess )
         {
-            ReportCacheOpenFailure( pcfconfig, err );
-            err = JET_errSuccess;
+            Call( ErrCacheOpenFailure( pcfconfig, "Open", err, JET_errSuccess ) );
         }
     }
 
@@ -1575,26 +1577,38 @@ HandleError:
 }
 
 template<class I>
-void TFileSystemFilter<I>::ReportCacheOpenFailure( _In_ ICachedFileConfiguration* const pcfconfig, _In_ const ERR err )
+ERR TFileSystemFilter<I>::ErrCacheOpenFailure(  _In_ ICachedFileConfiguration* const    pcfconfig,
+                                                _In_ const char* const                  szFunction,
+                                                _In_ const ERR                          errFromCall,
+                                                _In_ const ERR                          errToReturn )
 {
-    const ULONG     cwsz                                = 2;
-    const WCHAR*    rgpwsz[ cwsz ]                      = { 0 };
-    DWORD           irgpwsz                             = 0;
     WCHAR           wszCachingFile[ OSFSAPI_MAX_PATH ]  = { 0 };
-    WCHAR           wszError[ 64 ]                      = { 0 };
+    WCHAR           wszFunction[ 256 ]                  = { 0 };
+    WCHAR           wszErrorFromCall[ 64 ]              = { 0 };
+    WCHAR           wszErrorToReturn[ 64 ]              = { 0 };
+    const WCHAR*    rgpwsz[]                            = { wszCachingFile, wszFunction, wszErrorFromCall, wszErrorToReturn };
 
     pcfconfig->CachingFilePath( wszCachingFile );
-    OSStrCbFormatW( wszError, sizeof( wszError ), L"%i (0x%08x)", err, err );
-
-    rgpwsz[ irgpwsz++ ] = wszCachingFile;
-    rgpwsz[ irgpwsz++ ] = wszError;
+    OSStrCbFormatW( wszFunction, sizeof( wszFunction ), L"%hs", szFunction );
+    OSStrCbFormatW( wszErrorFromCall, sizeof( wszErrorFromCall ), L"%i (0x%08x)", errFromCall, errFromCall );
+    OSStrCbFormatW( wszErrorToReturn, sizeof( wszErrorToReturn ), L"%i (0x%08x)", errToReturn, errToReturn );
 
     m_pfsconfig->EmitEvent( eventWarning,
                             BLOCK_CACHE_CATEGORY,
                             BLOCK_CACHE_CACHING_FILE_OPEN_FAILURE_ID,
-                            irgpwsz,
+                            _countof( rgpwsz ),
                             rgpwsz,
                             JET_EventLoggingLevelMin );
+
+    OSTraceSuspendGC();
+    BlockCacheNotableEvent( wszCachingFile, 
+                            OSFormat(   "CacheOpenFailure:%hs:%i:%i",
+                                        szFunction, 
+                                        errFromCall,
+                                        errToReturn ) );
+    OSTraceResumeGC();
+
+    return errToReturn;
 }
 
 template< class I >
@@ -1622,13 +1636,17 @@ ERR TFileSystemFilter<I>::ErrGetCache(  _In_    CFileFilter* const  pff,
     {
         Call( ErrGetConfiguration( &pbcconfig ) );
         Call( pbcconfig->ErrGetCachedFileConfiguration( wszKeyPath, &pcfconfig ) );
-        Call( m_pcrep->ErrOpenById( this,
+        err = m_pcrep->ErrOpenById( this,
                                     m_pfsconfig,
                                     pbcconfig,
                                     pcfh->VolumeidCache(),
                                     pcfh->FileidCache(),
                                     pcfh->RgbUniqueIdCache(),
-                                    &pc ) );
+                                    &pc );
+        if ( err < JET_errSuccess )
+        {
+            Call( ErrCacheOpenFailure( pcfconfig, "OpenById", err, ErrERRCheck( JET_errDiskIO ) ) );
+        }
 
         *ppc = pc;
         *pfAttached = fTrue;

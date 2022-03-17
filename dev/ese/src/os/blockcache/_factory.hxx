@@ -611,7 +611,7 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrCreateJournal(  _Inout_ IJournalSegmentM
 
     *ppj = NULL;
 
-    Call( CJournal::ErrMount( ppjsm, cbCache, &pj ) );
+    Call( CJournal::ErrMount( NULL, ppjsm, cbCache, &pj ) );
 
     *ppj = pj;
     pj = NULL;

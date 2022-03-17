@@ -25,14 +25,14 @@ class TJournalEntry  //  je
 
             if ( jb.Cb() < sizeof( TJournalEntry ) )
             {
-                BlockCacheInternalError( "JournalEntryTooSmall" );
+                Error( ErrBlockCacheInternalError( L"", "JournalEntryTooSmall" ) );
             }
 
             //  fail if this journal entry buffer is smaller than the declared size of the journal entry
 
             if ( jb.Cb() < pje->Cb() )
             {
-                BlockCacheInternalError( "JournalEntrySizeMismatch" );
+                Error( ErrBlockCacheInternalError( L"", "JournalEntrySizeMismatch" ) );
             }
 
         HandleError:
@@ -351,20 +351,20 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrExtract( _In_    cons
 
             if ( status < 0 )
             {
-                BlockCacheInternalError( "CompressedJournalEntryDecompressionFailure" );
+                Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryDecompressionFailure" ) );
             }
             if ( cbUncompressed != pcje->m_le_cbUncompressed )
             {
-                BlockCacheInternalError( "CompressedJournalEntrySizeMismatch" );
+                Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntrySizeMismatch" ) );
             }
             if ( Crc32Checksum( (const BYTE*)pv, pcje->m_le_cbUncompressed ) != pcje->m_le_crc32Uncompressed )
             {
-                BlockCacheInternalError( "CompressedJournalEntryChecksumMismatch" );
+                Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryChecksumMismatch" ) );
             }
             Call( ErrValidate( CJournalBuffer( pcje->m_le_cbUncompressed, (const BYTE*)pv ) ) );
             if ( ((const TJournalEntry<T>*)pv)->Jetyp() == JETYPCOMPRESSED )
             {
-                BlockCacheInternalError( "CompressedJournalEntryTypeMismatch" );
+                Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryTypeMismatch" ) );
             }
 
             //  get the journal entry
@@ -374,7 +374,7 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrExtract( _In_    cons
         }
         else
         {
-            BlockCacheInternalError( "CompressedJournalEntryUnknownAlgorithm" );
+            Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryUnknownAlgorithm" ) );
         }
     }
 

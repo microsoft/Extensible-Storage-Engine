@@ -38,11 +38,15 @@ class TFileFilter  //  ff
                             _Inout_opt_ CCachedFileHeader** const           ppcfh )
         {
             m_pcfconfig = *ppcfconfig;
-            m_pc = *ppc;
-            m_pcfh = ppcfh ? *ppcfh : NULL;
-
             *ppcfconfig = NULL;
-            *ppc = NULL;
+
+            if ( ppc && *ppc )
+            {
+                m_pc = &m_cWrapper;
+                m_cWrapper.SetCache( ppc );
+            }
+
+            m_pcfh = ppcfh ? *ppcfh : NULL;
             if ( ppcfh )
             {
                 *ppcfh = NULL;
@@ -476,6 +480,191 @@ class TFileFilter  //  ff
             return (ICacheTelemetry::BlockNumber)( ibOffset / CbBlockSize() );
         }
 
+        ERR ErrBlockCacheInternalError( _In_ const char* const szTag )
+        {
+            return ::ErrBlockCacheInternalError( this, szTag );
+        }
+
+    private:
+
+        class CCacheWrapper : public ICache
+        {
+            public:  //  specialized API
+
+                CCacheWrapper( _In_ TFileFilter<I>* const pff, _Inout_ ICache** const ppc )
+                    :   m_pff( pff ),
+                        m_pcInner( ppc ? *ppc : NULL )
+                {
+                    if ( ppc )
+                    {
+                        *ppc = NULL;
+                    }
+                }
+
+                virtual ~CCacheWrapper()
+                {
+                    delete m_pcInner;
+                }
+
+                void SetCache( _Inout_ ICache** const ppc )
+                {
+                    m_pcInner = *ppc;
+                    *ppc = NULL;
+                }
+
+            public:  //  ICache
+
+                ERR ErrCreate() override
+                {
+                    return ErrToErr( "Create", m_pcInner->ErrCreate() );
+                }
+
+                ERR ErrMount() override
+                {
+                    return ErrToErr( "Mount", m_pcInner->ErrMount() );
+                }
+
+                ERR ErrDump( _In_ CPRINTF* const pcprintf ) override
+                {
+                    return ErrToErr( "Dump", m_pcInner->ErrDump( pcprintf ) );
+                }
+
+                ERR ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType ) override
+                {
+                    return ErrToErr( "GetCacheType", m_pcInner->ErrGetCacheType( rgbCacheType ) );
+                }
+
+                ERR ErrGetPhysicalId(   _Out_                   VolumeId* const pvolumeid,
+                                        _Out_                   FileId* const   pfileid,
+                                        _Out_writes_( cbGuid )  BYTE* const     rgbUniqueId ) override
+                {
+                    return ErrToErr( "GetPhysicalId", m_pcInner->ErrGetPhysicalId( pvolumeid, pfileid, rgbUniqueId ) );
+                }
+                        
+                ERR ErrClose(   _In_ const VolumeId     volumeid,
+                                _In_ const FileId       fileid,
+                                _In_ const FileSerial   fileserial ) override
+                {
+                    return ErrToErr( "Close", m_pcInner->ErrClose( volumeid, fileid, fileserial ) );
+                }
+
+                ERR ErrFlush(   _In_ const VolumeId     volumeid,
+                                _In_ const FileId       fileid,
+                                _In_ const FileSerial   fileserial ) override
+                {
+                    return ErrToErr( "Flush", m_pcInner->ErrFlush( volumeid, fileid, fileserial ) );
+                }
+
+                ERR ErrInvalidate(  _In_ const VolumeId     volumeid,
+                                    _In_ const FileId       fileid,
+                                    _In_ const FileSerial   fileserial,
+                                    _In_ const QWORD        ibOffset,
+                                    _In_ const QWORD        cbData ) override
+                {
+                    return ErrToErr( "Invalidate", m_pcInner->ErrInvalidate( volumeid, fileid, fileserial, ibOffset, cbData ) );
+                }
+
+                ERR ErrRead(    _In_                    const TraceContext&         tc,
+                                _In_                    const VolumeId              volumeid,
+                                _In_                    const FileId                fileid,
+                                _In_                    const FileSerial            fileserial,
+                                _In_                    const QWORD                 ibOffset,
+                                _In_                    const DWORD                 cbData,
+                                _Out_writes_( cbData )  BYTE* const                 pbData,
+                                _In_                    const OSFILEQOS             grbitQOS,
+                                _In_                    const ICache::CachingPolicy cp,
+                                _In_opt_                const ICache::PfnComplete   pfnComplete,
+                                _In_opt_                const DWORD_PTR             keyComplete ) override
+                {
+                    return ErrToErr( "Read", m_pcInner->ErrRead( tc, volumeid, fileid, fileserial, ibOffset, cbData, pbData, grbitQOS, cp, pfnComplete, keyComplete ) );
+                }
+
+                ERR ErrWrite(   _In_                    const TraceContext&         tc,
+                                _In_                    const VolumeId              volumeid,
+                                _In_                    const FileId                fileid,
+                                _In_                    const FileSerial            fileserial,
+                                _In_                    const QWORD                 ibOffset,
+                                _In_                    const DWORD                 cbData,
+                                _In_reads_( cbData )    const BYTE* const           pbData,
+                                _In_                    const OSFILEQOS             grbitQOS,
+                                _In_                    const ICache::CachingPolicy cp,
+                                _In_opt_                const ICache::PfnComplete   pfnComplete,
+                                _In_opt_                const DWORD_PTR             keyComplete ) override
+                {
+                    return ErrToErr( "Write", m_pcInner->ErrWrite( tc, volumeid, fileid, fileserial, ibOffset, cbData, pbData, grbitQOS, cp, pfnComplete, keyComplete ) );
+                }
+        
+                ERR ErrIssue(   _In_ const VolumeId     volumeid,
+                                _In_ const FileId       fileid,
+                                _In_ const FileSerial   fileserial ) override
+                {
+                    return ErrToErr( "Issue", m_pcInner->ErrIssue( volumeid, fileid, fileserial ) );
+                }
+
+            private:
+
+                ERR ErrToErr( _In_ const char* const szFunction, _In_ const ERR err )
+                {
+                    if ( err >= JET_errSuccess )
+                    {
+                        return err;
+                    }
+
+                    if ( FVerificationError( err ) )
+                    {
+                        return err;
+                    }
+
+                    switch ( err )
+                    {
+                        case JET_errOutOfMemory:
+                        case JET_errFileIOBeyondEOF:
+                            return err;
+
+                        default:
+                            return ErrUnexpectedCacheFailure( szFunction, err, ErrERRCheck( JET_errDiskIO ) );
+                    }
+                }
+
+                ERR ErrUnexpectedCacheFailure(  _In_ const char* const  szFunction, 
+                                                _In_ const ERR          errFromCall,
+                                                _In_ const ERR          errToReturn )
+                {
+                    WCHAR           wszCachingFile[ OSFSAPI_MAX_PATH ]  = { 0 };
+                    WCHAR           wszFunction[ 256 ]                  = { 0 };
+                    WCHAR           wszErrorFromCall[ 64 ]              = { 0 };
+                    WCHAR           wszErrorToReturn[ 64 ]              = { 0 };
+                    const WCHAR*    rgpwsz[]                            = { wszCachingFile, wszFunction, wszErrorFromCall, wszErrorToReturn };
+
+                    m_pff->m_pcfconfig->CachingFilePath( wszCachingFile );
+                    OSStrCbFormatW( wszFunction, sizeof( wszFunction ), L"%hs", szFunction );
+                    OSStrCbFormatW( wszErrorFromCall, sizeof( wszErrorFromCall ), L"%i (0x%08x)", errFromCall, errFromCall );
+                    OSStrCbFormatW( wszErrorToReturn, sizeof( wszErrorToReturn ), L"%i (0x%08x)", errToReturn, errToReturn );
+
+                    m_pff->m_pfsconfig->EmitEvent(  eventWarning,
+                                                    BLOCK_CACHE_CATEGORY,
+                                                    BLOCK_CACHE_CACHING_UNEXPECTED_FAILURE_ID,
+                                                    _countof( rgpwsz ),
+                                                    rgpwsz,
+                                                    JET_EventLoggingLevelMin );
+
+                    OSTraceSuspendGC();
+                    BlockCacheNotableEvent( wszCachingFile,
+                                            OSFormat(   "UnexpectedCacheFailure:%hs:%i:%i", 
+                                                        szFunction, 
+                                                        errFromCall, 
+                                                        errToReturn ) );
+                    OSTraceResumeGC();
+
+                    return errToReturn;
+                }
+
+            private:
+
+                TFileFilter<I>* const   m_pff;
+                ICache*                 m_pcInner;
+        };
+
     private:
 
         typedef CInitOnce< ERR, decltype( &ErrAttach_ ), TFileFilter<I>* const, const COffsets& > CInitOnceAttach;
@@ -488,6 +677,7 @@ class TFileFilter  //  ff
         FileSerial                                                  m_fileserial;
         ICachedFileConfiguration*                                   m_pcfconfig;
         ICache*                                                     m_pc;
+        CCacheWrapper                                               m_cWrapper;
         CCachedFileHeader*                                          m_pcfh;
         ICacheTelemetry::FileNumber                                 m_filenumber;
         ULONG                                                       m_cbBlockSize;
@@ -637,7 +827,8 @@ TFileFilter<I>::TFileFilter(    _Inout_     IFileAPI** const                    
         m_fileid( fileid ),
         m_fileserial( fileserialInvalid ),
         m_pcfconfig( ppcfconfig ? *ppcfconfig : NULL ),
-        m_pc( ppc ? *ppc : NULL ),
+        m_pc( ppc && *ppc ? &m_cWrapper : NULL ),
+        m_cWrapper( this, ppc ),
         m_pcfh( ppcfh ? *ppcfh : NULL ),
         m_filenumber( filenumberInvalid ),
         m_cbBlockSize( 0 ),
@@ -662,10 +853,6 @@ TFileFilter<I>::TFileFilter(    _Inout_     IFileAPI** const                    
     {
         *ppcfconfig = NULL;
     }
-    if ( ppc )
-    {
-        *ppc = NULL;
-    }
     if ( ppcfh )
     {
         *ppcfh = NULL;
@@ -679,7 +866,6 @@ TFileFilter<I>::~TFileFilter()
 
     m_semRequestWriteBacks.Acquire();
     delete m_pcfh;
-    delete m_pc;
     delete m_pcfconfig;
 }
 
@@ -1200,14 +1386,14 @@ ERR TFileFilter<I>::ErrVerifyAccessIgnoringWriteBack( _In_ const COffsets& offse
 
     if ( !FAttached() )
     {
-        BlockCacheInternalError( "IllegalCachedFileAccess" );
+        Error( ErrBlockCacheInternalError( "IllegalCachedFileAccess" ) );
     }
 
     //  the cache is not allowed to access the cached file header
 
     if ( FAttached() && offsets.FOverlaps( m_offsetsCachedFileHeader ) )
     {
-        BlockCacheInternalError( "IllegalCachedFileHeaderAccess" );
+        Error( ErrBlockCacheInternalError( "IllegalCachedFileHeaderAccess" ) );
     }
 
 HandleError:
@@ -1229,7 +1415,7 @@ ERR TFileFilter<I>::ErrVerifyAccess( _In_ const COffsets& offsets )
     const CMeteredSection::Group group = m_msPendingWriteBacks.GroupActive();
     if ( !FAccessPermitted( offsets, group ) )
     {
-        BlockCacheInternalError( "CachedFileIORangeConflict" );
+        Error( ErrBlockCacheInternalError( "CachedFileIORangeConflict" ) );
     }
 
 HandleError:
