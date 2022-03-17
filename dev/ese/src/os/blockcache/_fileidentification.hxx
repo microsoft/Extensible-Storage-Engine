@@ -392,11 +392,11 @@ ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
 
     if ( *pvolumeid == volumeidInvalid )
     {
-        BlockCacheInternalError( "InvalidVolumeId" );
+        Error( ErrBlockCacheInternalError( wszPath, "InvalidVolumeId" ) );
     }
     if ( *pfileid == fileidInvalid )
     {
-        BlockCacheInternalError( "InvalidFileId" );
+        Error( ErrBlockCacheInternalError( wszPath, "InvalidFileId" ) );
     }
 
     //  defend against truncation of the file id because we cannot handle that
@@ -406,7 +406,7 @@ ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
     *((FileId*)fileId.Identifier) = *pfileid;
     if ( memcmp( fileIdInfo.FileId.Identifier, fileId.Identifier, sizeof( fileId.Identifier) ) )
     {
-        BlockCacheInternalError( "TruncatedFileId" );
+        Error( ErrBlockCacheInternalError( wszPath, "TruncatedFileId" ) );
     }
 
 

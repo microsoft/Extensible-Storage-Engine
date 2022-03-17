@@ -81,7 +81,7 @@ INLINE ERR CPassThroughCachedFileTableEntry::ErrOpenCachedFile( _In_ IFileSystem
 
         if ( ++cAttempt >= cAttemptMax )
         {
-            BlockCacheInternalError( "PassThroughCacheOpenDisplacedDataRetryLimit" );
+            Error( ErrBlockCacheInternalError( pffCaching, "PassThroughCacheOpenDisplacedDataRetryLimit" ) );
         }
 
         //  try to open the file

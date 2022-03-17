@@ -45,7 +45,9 @@ class TJournal  //  j
 
     protected:
 
-        TJournal( _Inout_ IJournalSegmentManager** const  ppjsm, _In_ const size_t cbCache );
+        TJournal(   _In_opt_    IFileFilter* const              pffCaching,
+                    _Inout_     IJournalSegmentManager** const  ppjsm,
+                    _In_        const size_t                    cbCache );
 
     private:
 
@@ -124,10 +126,12 @@ class TJournal  //  j
         {
             public:
 
-                CEntryVisitor(  _In_ IJournalSegmentManager* const  pjsm,
+                CEntryVisitor(  _In_ TJournal<I>* const             pj,
+                                _In_ IJournalSegmentManager* const  pjsm,
                                 _In_ const IJournal::PfnVisitEntry  pfnVisitEntry,
                                 _In_ const DWORD_PTR                keyVisitEntry )
-                    :   m_pjsm( pjsm ),
+                    :   m_pj( pj ),
+                        m_pjsm( pjsm ),
                         m_pfnVisitEntry( pfnVisitEntry ),
                         m_keyVisitEntry( keyVisitEntry ),
                         m_err( JET_errSuccess ),
@@ -182,7 +186,8 @@ class TJournal  //  j
 
 
             private:
-
+                
+                TJournal<I>* const              m_pj;
                 IJournalSegmentManager* const   m_pjsm;
                 const IJournal::PfnVisitEntry   m_pfnVisitEntry;
                 const DWORD_PTR                 m_keyVisitEntry;
@@ -260,8 +265,14 @@ class TJournal  //  j
 
         void ReleaseSegments( _In_ CInvasiveList<CSegment, CSegment::OffsetOfILE>* const pil );
 
+        ERR ErrBlockCacheInternalError( _In_ const char* const szTag )
+        {
+            return ::ErrBlockCacheInternalError( m_pffCaching, szTag);
+        }
+
     private:
 
+        IFileFilter* const                                      m_pffCaching;
         IJournalSegmentManager* const                           m_pjsm;
         const size_t                                            m_cbCache;
         const int                                               m_pctCacheAvailWriteBack;
@@ -462,7 +473,7 @@ INLINE ERR TJournal<I>::ErrVisitEntries(    _In_ const IJournal::PfnVisitEntry  
                                             _In_ const DWORD_PTR                keyVisitEntry )
 {
     ERR             err = JET_errSuccess;
-    CEntryVisitor   ev( m_pjsm, pfnVisitEntry, keyVisitEntry );
+    CEntryVisitor   ev( this, m_pjsm, pfnVisitEntry, keyVisitEntry );
 
     //  visit every segment in the journal
 
@@ -703,7 +714,7 @@ INLINE ERR TJournal<I>::ErrFlush()
     if ( m_sposDurable < spos )
     {
         Call( m_err );
-        BlockCacheInternalError( "JournalFlushFailure" );
+        Error( ErrBlockCacheInternalError( "JournalFlushFailure" ) );
     }
 
 HandleError:
@@ -754,30 +765,33 @@ HandleError:
 }
 
 template< class I  >
-INLINE TJournal<I>::TJournal( _Inout_ IJournalSegmentManager** const  ppjsm, _In_ const size_t cbCache )
-    :   m_pjsm( *ppjsm ),
-        m_cbCache( max( cbJournalSegment, cbCache ) ),
-        m_pctCacheAvailWriteBack( 50 ),
-        m_crit( CLockBasicInfo( CSyncBasicInfo( "TJournal<I>::m_crit" ), rankJournalAppend, 0 ) ),
-        m_err( JET_errSuccess ),
-        m_sposReplay( sposInvalid ),
-        m_sposDurableForWriteback( sposInvalid ),
-        m_sposDurable( sposInvalid ),
-        m_sposSealed( sposInvalid ),
-        m_sposAppend( sposInvalid ),
-        m_cb( 0 ),
-        m_fAppending( fFalse ),
-        m_fFull( fFalse ),
-        m_pwaiterSealer( NULL ),
-        m_sposSealPending( sposInvalid ),
-        m_pwaiterNextSealer( NULL ),
-        m_pwaiterAppender( NULL ),
-        m_pwaiterFlusher( NULL ),
-        m_sposDurablePending( sposInvalid ),
-        m_pwaiterNextFlusher( NULL )
-{
-    *ppjsm = NULL;
-}
+INLINE TJournal<I>::TJournal(   _In_opt_    IFileFilter* const              pffCaching,
+                                _Inout_     IJournalSegmentManager** const  ppjsm,
+                                _In_        const size_t                    cbCache )
+                :   m_pffCaching( pffCaching ),
+                    m_pjsm( *ppjsm ),
+                    m_cbCache( max( cbJournalSegment, cbCache ) ),
+                    m_pctCacheAvailWriteBack( 50 ),
+                    m_crit( CLockBasicInfo( CSyncBasicInfo( "TJournal<I>::m_crit" ), rankJournalAppend, 0 ) ),
+                    m_err( JET_errSuccess ),
+                    m_sposReplay( sposInvalid ),
+                    m_sposDurableForWriteback( sposInvalid ),
+                    m_sposDurable( sposInvalid ),
+                    m_sposSealed( sposInvalid ),
+                    m_sposAppend( sposInvalid ),
+                    m_cb( 0 ),
+                    m_fAppending( fFalse ),
+                    m_fFull( fFalse ),
+                    m_pwaiterSealer( NULL ),
+                    m_sposSealPending( sposInvalid ),
+                    m_pwaiterNextSealer( NULL ),
+                    m_pwaiterAppender( NULL ),
+                    m_pwaiterFlusher( NULL ),
+                    m_sposDurablePending( sposInvalid ),
+                    m_pwaiterNextFlusher( NULL )
+            {
+                *ppjsm = NULL;
+            }
 
 template< class I  >
 INLINE ERR TJournal<I>::CSegment::ErrAppendRegion(  _In_                const size_t            cjb,
@@ -906,7 +920,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
 
     if ( jb.Cb() < sizeof( *pef ) )
     {
-        BlockCacheInternalError( "JournalFragmentTooSmall" );
+        Error( m_pj->ErrBlockCacheInternalError( "JournalFragmentTooSmall" ) );
     }
 
     //  if this is the first fragment of a journal entry then remember its region position and size
@@ -930,7 +944,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
 
     if ( pef->CbEntryRemaining() != m_cbEntryRem )
     {
-        BlockCacheInternalError( "JournalFragmentInvalidSequence" );
+        Error( m_pj->ErrBlockCacheInternalError( "JournalFragmentInvalidSequence" ) );
     }
 
     //  compute the size of the fragment and ensure we have the right amount of payload
@@ -938,7 +952,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
     cbFragment = jb.Cb() - sizeof( *pef );
     if ( cbFragment > m_cbEntryRem )
     {
-        BlockCacheInternalError( "JournalFragmentInvalidSize" );
+        Error( m_pj->ErrBlockCacheInternalError( "JournalFragmentInvalidSize" ) );
     }
 
     //  ensure we have a buffer large enough to accumulate this entry
@@ -1739,28 +1753,32 @@ class CJournal  //  j
 {
     public:  //  specialized API
 
-        static ERR ErrMount(    _Inout_ IJournalSegmentManager** const  ppjsm,
-                                _In_    const size_t                    cbCache,
-                                _Out_   IJournal** const                ppj );
+        static ERR ErrMount(    _In_opt_    IFileFilter* const              pffCaching,
+                                _Inout_     IJournalSegmentManager** const  ppjsm,
+                                _In_        const size_t                    cbCache,
+                                _Out_       IJournal** const                ppj );
 
     private:
 
-        CJournal( _Inout_ IJournalSegmentManager** const  ppjsm, _In_ const size_t cbCache )
-            :   TJournal<IJournal>( ppjsm, cbCache )
+        CJournal(   _In_opt_    IFileFilter* const              pffCaching,
+                    _Inout_     IJournalSegmentManager** const  ppjsm,
+                    _In_        const size_t                    cbCache )
+            :   TJournal<IJournal>( pffCaching, ppjsm, cbCache )
         {
         }
 };
 
-INLINE ERR CJournal::ErrMount(  _Inout_ IJournalSegmentManager** const  ppjsm,
-                                _In_    const size_t                    cbCache,
-                                _Out_   IJournal** const                ppj )
+INLINE ERR CJournal::ErrMount(  _In_opt_    IFileFilter* const              pffCaching,
+                                _Inout_     IJournalSegmentManager** const  ppjsm,
+                                _In_        const size_t                    cbCache,
+                                _Out_       IJournal** const                ppj )
 {
     ERR         err = JET_errSuccess;
     CJournal*   pj  = NULL;
 
     *ppj = NULL;
 
-    Alloc( pj = new CJournal( ppjsm, cbCache ) );
+    Alloc( pj = new CJournal( pffCaching, ppjsm, cbCache ) );
 
     Call( pj->ErrInit() );
 

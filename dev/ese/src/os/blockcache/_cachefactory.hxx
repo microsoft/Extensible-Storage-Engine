@@ -58,8 +58,10 @@ class CCacheFactory
         static ERR ErrGetFactory(   _In_                    ICacheConfiguration* const          pcconfig,
                                     _Out_writes_( cbGuid )  BYTE* const                         rgbCacheType,
                                     _Out_                   CCacheFactory::PfnFactory* const    ppfnFactory );
-        static ERR ErrGetFactory(   _In_reads_( cbGuid )    const BYTE* const                   rgbCacheType,
+        static ERR ErrGetFactory(   _In_                    IFileFilter* const                  pffCaching,
+                                    _In_reads_( cbGuid )    const BYTE* const                   rgbCacheType,
                                     _Out_                   CCacheFactory::PfnFactory* const    ppfnFactory );
+        static CCacheFactory::PfnFactory PfnGetFactory( _In_reads_( cbGuid ) const BYTE* const rgbCacheType );
 };
 
 INLINE ERR CCacheFactory::ErrCreate(    _In_    IFileSystemFilter* const        pfsf,
@@ -90,7 +92,7 @@ INLINE ERR CCacheFactory::ErrCreate(    _In_    IFileSystemFilter* const        
     Call( (*ppffCaching)->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
     if ( cbSize != 0 )
     {
-        BlockCacheInternalError( "DestroyExistingCache" );
+        Error( ErrBlockCacheInternalError( *ppcconfig, "DestroyExistingCache" ) );
     }
 
     //  initialize the caching file header
@@ -162,7 +164,7 @@ INLINE ERR CCacheFactory::ErrMount( _In_    IFileSystemFilter* const        pfsf
 
     //  determine the type of cache to mount
 
-    Call( ErrGetFactory( pch->RgbCacheType(), &pfnFactory ) );
+    Call( ErrGetFactory( *ppffCaching, pch->RgbCacheType(), &pfnFactory ) );
 
     //  get the block cache configuration
 
@@ -217,7 +219,7 @@ INLINE ERR CCacheFactory::ErrDump(  _In_    IFileSystemFilter* const        pfsf
 
     //  determine the type of cache to mount
 
-    Call( ErrGetFactory( pch->RgbCacheType(), &pfnFactory ) );
+    Call( ErrGetFactory( *ppffCaching, pch->RgbCacheType(), &pfnFactory ) );
 
     //  get the block cache configuration
 
@@ -253,7 +255,10 @@ INLINE ERR CCacheFactory::ErrGetFactory(    _In_                    ICacheConfig
 
     //  find the factory method for this cache type id
 
-    Call( ErrGetFactory( rgbCacheType, ppfnFactory ) );
+    if ( !( *ppfnFactory = PfnGetFactory( rgbCacheType ) ) )
+    {
+        Error( ErrBlockCacheInternalError( pcconfig, "UnknownConfiguredCacheType" ) );
+    }
 
 HandleError:
     if ( err < JET_errSuccess )
@@ -264,29 +269,17 @@ HandleError:
     return err;
 }
 
-INLINE ERR CCacheFactory::ErrGetFactory(    _In_reads_( cbGuid )    const BYTE* const                   rgbCacheType,
+INLINE ERR CCacheFactory::ErrGetFactory(    _In_                    IFileFilter* const                  pffCaching,
+                                            _In_reads_( cbGuid )    const BYTE* const                   rgbCacheType,
                                             _Out_                   CCacheFactory::PfnFactory* const    ppfnFactory )
 {
     ERR err = JET_errSuccess;
 
     *ppfnFactory = NULL;
 
-    //  find the factory method for this cache type id
-
-    if ( memcmp( CPassThroughCache::RgbCacheType(), rgbCacheType, cbGuid ) == 0 )
+    if ( !( *ppfnFactory = PfnGetFactory( rgbCacheType ) ) )
     {
-        *ppfnFactory = CPassThroughCache::PcCreate;
-    }
-    else if ( memcmp( CHashedLRUKCache::RgbCacheType(), rgbCacheType, cbGuid ) == 0 )
-    {
-        *ppfnFactory = CHashedLRUKCache::PcCreate;
-    }
-
-    //  if we didn't find the factory method then fail
-
-    if ( *ppfnFactory == NULL )
-    {
-        BlockCacheInternalError( "UnknownCacheType" );
+        Error( ErrBlockCacheInternalError( pffCaching, "UnknownPersistentCacheType" ) );
     }
 
 HandleError:
@@ -295,4 +288,18 @@ HandleError:
         *ppfnFactory = NULL;
     }
     return err;
+}
+
+INLINE CCacheFactory::PfnFactory CCacheFactory::PfnGetFactory( _In_reads_( cbGuid ) const BYTE* const rgbCacheType )
+{
+    if ( memcmp( CPassThroughCache::RgbCacheType(), rgbCacheType, cbGuid ) == 0 )
+    {
+        return CPassThroughCache::PcCreate;
+    }
+    else if ( memcmp( CHashedLRUKCache::RgbCacheType(), rgbCacheType, cbGuid ) == 0 )
+    {
+        return CHashedLRUKCache::PcCreate;
+    }
+
+    return NULL;
 }

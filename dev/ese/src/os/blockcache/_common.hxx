@@ -81,13 +81,108 @@ class Buffer
 
 //  Error handling.
 
-#define BlockCacheInternalError( sz )               \
-{                                                   \
-    Error( ErrERRCheck( JET_errInternalError ) );   \
+INLINE void BlockCacheNotableEvent( _In_opt_    const WCHAR* const  wszCachingFilePath,
+                                    _In_        const char* const   szTag )
+{
+    WCHAR           wszSource[ 512 ]    = { 0 };
+    WCHAR           wszVersion[ 512 ]   = { 0 };
+    WCHAR           wszLocation[ 512 ]  = { 0 };
+    WCHAR           wszTag[ 512 ]       = { 0 };
+    const WCHAR*    rgpwsz[]            = { wszSource,
+                                            wszVersion,
+                                            L"",
+                                            wszLocation,
+                                            L"",
+                                            wszTag };
+
+    OSStrCbFormatW( wszSource,
+                    sizeof( wszSource ),
+                    L"%ws %ws",
+                    WszUtilProcessFriendlyName(),
+                    wszCachingFilePath ? wszCachingFilePath : L"" );
+    OSStrCbFormatW( wszVersion, 
+                    sizeof( wszVersion ),
+                    L",,,%u.%u.%u.%u",
+                    DwUtilImageVersionMajor(), 
+                    DwUtilImageVersionMinor(), 
+                    DwUtilImageBuildNumberMajor(),
+                    DwUtilImageBuildNumberMinor() );
+    OSStrCbFormatW( wszLocation,
+                    sizeof( wszLocation ), 
+                    L"%hs(%i)",
+                    strrchr( __FILE__, '\\' ) + 1,
+                    __LINE__ );
+    OSStrCbFormatW( wszTag, sizeof( wszTag ), L"ASSERTTRACKTAG:%hs", szTag );
+
+    OSEventReportEvent( WszUtilImageVersionName(),
+                        eventfacilityOsDiagTracking | eventfacilityRingBufferCache | eventfacilityOsEventTrace | eventfacilityOsTrace | eventfacilityReportOsEvent,
+                        eventWarning,
+                        GENERAL_CATEGORY,
+                        INTERNAL_TRACE_ID,
+                        _countof( rgpwsz ),
+                        rgpwsz );
 }
 
+INLINE void BlockCacheNotableEvent( _In_ IFileFilter* const pffCaching,
+                                    _In_ const char* const  szTag )
+{
+    WCHAR   wszCachingFilePath[ OSFSAPI_MAX_PATH ]  = { 0 };
 
-INLINE ERR ErrIgnoreVerificationErrors( _In_ const ERR err )
+    if ( pffCaching )
+    {
+        CallS( pffCaching->ErrPath( wszCachingFilePath ) );
+    }
+
+    BlockCacheNotableEvent( wszCachingFilePath, szTag );
+}
+
+INLINE ERR ErrBlockCacheInternalError(  _In_ const WCHAR* const wszCachingFilePath,
+                                        _In_ const char* const  szTag )
+{
+    BlockCacheNotableEvent( wszCachingFilePath, szTag );
+    return ErrERRCheck( JET_errInternalError );
+}
+
+INLINE ERR ErrBlockCacheInternalError(  _In_ ICacheConfiguration* const pcconfig,
+                                        _In_ const char* const          szTag )
+{
+    WCHAR   wszCachingFilePath[ OSFSAPI_MAX_PATH ]  = { 0 };
+
+    if ( pcconfig )
+    {
+        pcconfig->Path( wszCachingFilePath );
+    }
+
+    return ErrBlockCacheInternalError( wszCachingFilePath, szTag );
+}
+
+INLINE ERR ErrBlockCacheInternalError(  _In_ ICachedFileConfiguration* const    pcfconfig,
+                                        _In_ const char* const                  szTag )
+{
+    WCHAR   wszCachingFilePath[ OSFSAPI_MAX_PATH ]  = { 0 };
+
+    if ( pcfconfig )
+    {
+        pcfconfig->CachingFilePath( wszCachingFilePath );
+    }
+
+    return ErrBlockCacheInternalError( wszCachingFilePath, szTag );
+}
+
+INLINE ERR ErrBlockCacheInternalError(  _In_ IFileFilter* const pffCaching,
+                                        _In_ const char* const  szTag )
+{
+    WCHAR   wszCachingFilePath[ OSFSAPI_MAX_PATH ]  = { 0 };
+
+    if ( pffCaching )
+    {
+        CallS( pffCaching->ErrPath( wszCachingFilePath ) );
+    }
+
+    return ErrBlockCacheInternalError( wszCachingFilePath, szTag );
+}
+
+INLINE BOOL FVerificationError( _In_ const ERR err )
 {
     switch ( err )
     {
@@ -96,10 +191,16 @@ INLINE ERR ErrIgnoreVerificationErrors( _In_ const ERR err )
         case JET_errPageNotInitialized:
         case JET_errDiskReadVerificationFailure:
         case JET_errReadLostFlushVerifyFailure:
-            return JET_errSuccess;
+            return fTrue;
+
         default:
-            return err;
+            return fFalse;
     }
+}
+
+INLINE ERR ErrIgnoreVerificationErrors( _In_ const ERR err )
+{
+    return FVerificationError( err ) ? JET_errSuccess : err;
 }
 
 

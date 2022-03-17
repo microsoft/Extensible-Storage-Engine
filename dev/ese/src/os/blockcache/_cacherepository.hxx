@@ -159,10 +159,10 @@ class TCacheRepository  //  crep
                             _Inout_ IFileFilter** const             ppff,
                             _In_    const BOOL                      fCreate );
         
-        void ReportCachingFileNotFoundById( _In_                IFileSystemConfiguration* const pfsconfig,
-                                            _In_                const VolumeId                  volumeid,
-                                            _In_                const FileId                    fileid, 
-                                            _In_reads_(cbGuid)  const BYTE* const               rgbUniqueId );
+        ERR ErrCachingFileNotFoundById( _In_                IFileSystemConfiguration* const pfsconfig,
+                                        _In_                const VolumeId                  volumeid,
+                                        _In_                const FileId                    fileid, 
+                                        _In_reads_(cbGuid)  const BYTE* const               rgbUniqueId );
 
     private:
 
@@ -312,13 +312,6 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
 
     while ( volumeidActual != volumeid || fileidActual != fileid )
     {
-        //  if we have retried too many times then fail
-
-        if ( ++cAttempt >= cAttemptMax )
-        {
-            BlockCacheInternalError( "CacheOpenByIdRetryLimit" );
-        }
-
         //  if we have a cache open from a previous attempt then close it
 
         delete *ppc;
@@ -327,6 +320,13 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
         //  translate the file id to a file path and the unambiguous file key path
 
         Call( m_pfident->ErrGetFilePathById( volumeid, fileid, wszAnyAbsPath, wszKeyPath ) );
+
+        //  if we have retried too many times then fail
+
+        if ( ++cAttempt >= cAttemptMax )
+        {
+            Error( ErrBlockCacheInternalError( wszAnyAbsPath, "CacheOpenByIdRetryLimit" ) );
+        }
 
         //  wait to lock the entry for this cache
 
@@ -357,8 +357,7 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
 
     if ( memcmp( rgbUniqueIdActual, rgbUniqueId, cbGuid ) )
     {
-        ReportCachingFileNotFoundById( pfsconfig, volumeid, fileid, rgbUniqueId );
-        Error( ErrERRCheck( JET_errDiskIO ) );
+        Error( ErrCachingFileNotFoundById( pfsconfig, volumeid, fileid, rgbUniqueId ) );
     }
 
     //  return the opened cache
@@ -376,8 +375,7 @@ HandleError:
 
         if ( err == JET_errFileNotFound || err == JET_errInvalidPath )
         {
-            ReportCachingFileNotFoundById( pfsconfig, volumeid, fileid, rgbUniqueId );
-            err = ErrERRCheck( JET_errDiskIO );
+            err = ErrCachingFileNotFoundById( pfsconfig, volumeid, fileid, rgbUniqueId );
         }
     }
     return err;
@@ -620,7 +618,7 @@ ERR TCacheRepository<I>::ErrOpenCacheMiss(  _In_    IFileSystemFilter* const    
 
         if ( ++cAttempt >= cAttemptMax )
         {
-            BlockCacheInternalError( "CacheOpenRetryLimit" );
+            Error( ErrBlockCacheInternalError( wszAbsPath, "CacheOpenRetryLimit" ) );
         }
 
         //  try to open the file
@@ -752,10 +750,10 @@ HandleError:
 }
 
 template<class I>
-void TCacheRepository<I>::ReportCachingFileNotFoundById(    _In_                IFileSystemConfiguration* const pfsconfig,
-                                                            _In_                const VolumeId                  volumeid,
-                                                            _In_                const FileId                    fileid, 
-                                                            _In_reads_(cbGuid)  const BYTE* const               rgbUniqueId )
+ERR TCacheRepository<I>::ErrCachingFileNotFoundById(    _In_                IFileSystemConfiguration* const pfsconfig,
+                                                        _In_                const VolumeId                  volumeid,
+                                                        _In_                const FileId                    fileid, 
+                                                        _In_reads_(cbGuid)  const BYTE* const               rgbUniqueId )
 {
     const ULONG     cwsz                = 3;
     const WCHAR*    rgpwsz[ cwsz ]      = { 0 };
@@ -791,6 +789,8 @@ void TCacheRepository<I>::ReportCachingFileNotFoundById(    _In_                
                             irgpwsz,
                             rgpwsz,
                             JET_EventLoggingLevelMin );
+
+    return ErrERRCheck( JET_errDiskIO );
 }
 
 //  CCacheRepository:  concrete TCacheRepository<ICacheRepository>

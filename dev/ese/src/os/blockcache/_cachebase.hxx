@@ -106,6 +106,20 @@ class TCacheBase  //  c
                             _In_ const DWORD    cbData,
                             _In_ const BOOL     fReplacementPolicy );
 
+        //  Reports an internal error.
+
+        ERR ErrBlockCacheInternalError( _In_ const char* const szTag )
+        {
+            return ::ErrBlockCacheInternalError( PffCaching(), szTag );
+        }
+
+        //  Reports a notable event.
+
+        void BlockCacheNotableEvent( _In_ const char* const szTag )
+        {
+            ::BlockCacheNotableEvent( PffCaching(), szTag );
+        }
+
     private:
 
         BOOL FCachedFileTableIsInit() const { return m_initOnceCachedFileTable.FIsInit(); }
