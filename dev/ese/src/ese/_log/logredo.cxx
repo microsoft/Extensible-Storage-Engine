@@ -3025,6 +3025,14 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             data.SetPv( plrsetextheader->rgbData );
             data.SetCb( plrsetextheader->CbData() );
 
+            // Make sure that the ext-hdr being set is not too small to hold prefix for existing data
+            err = ErrNDValidateSetExternalHeader( csr.Cpage(), &data );
+            if ( err < JET_errSuccess )
+            {
+                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRecoveryRedoLogCorruption, L"630fa9f1-afcd-4998-bb82-db992a6eb22f" );
+                Call( err );
+            }
+
             err = ErrNDSetExternalHeader( pfucb, &csr, &data, dirflag | fDIRRedo, noderfWhole );
             CallS( err );
             Call( err );

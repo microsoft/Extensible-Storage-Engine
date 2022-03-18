@@ -155,6 +155,8 @@ ERR     ErrNDSetExternalHeader  ( _In_ FUCB* const pfucb, _In_ CSR* const pcsr, 
 VOID    NDSetPrefix             ( CSR *pcsr, const KEY& key );
 VOID    NDSetExternalHeader     ( _In_ FUCB* const pfucb, _In_ CSR* const pcsr, _In_range_( 0, noderfMax - 1 ) const NodeRootField noderf, _In_ const DATA * pdata );
 VOID    NDSetExternalHeader     ( _In_ const IFMP ifmp, _In_ CSR* const pcsr, _In_range_( 0, noderfMax - 1 ) const NodeRootField noderf, _In_ const DATA * pdata );
+ERR     ErrNDValidateSetExternalHeader( const CPAGE &cpage, _In_ const DATA * pdata );
+
 
 // page scrubbing
 const SCRUBOPER scrubOperNone               = 0x0;

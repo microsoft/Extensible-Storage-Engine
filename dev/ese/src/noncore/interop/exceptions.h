@@ -3072,6 +3072,30 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamLogOperationInconsistentWithDatabaseException : public IsamCorruptionException
+    {
+    public:
+        IsamLogOperationInconsistentWithDatabaseException() : IsamCorruptionException( "Log record in the log is inconsistent with the current state of the database and cannot be applied", JET_errLogOperationInconsistentWithDatabase)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamLogOperationInconsistentWithDatabaseException( String ^ description, Exception^ innerException ) :
+            IsamCorruptionException( description, innerException )
+        {
+        }
+
+        IsamLogOperationInconsistentWithDatabaseException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamCorruptionException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamBackupAbortByServerException : public IsamOperationException
     {
     public:
@@ -9175,6 +9199,8 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamEngineFormatVersionSpecifiedTooLowForDatabaseVersionException;
         case JET_errDbTimeBeyondMaxRequired:
             return gcnew IsamDbTimeBeyondMaxRequiredException;
+        case JET_errLogOperationInconsistentWithDatabase:
+            return gcnew IsamLogOperationInconsistentWithDatabaseException;
         case JET_errBackupAbortByServer:
             return gcnew IsamBackupAbortByServerException;
         case JET_errInvalidGrbit:
