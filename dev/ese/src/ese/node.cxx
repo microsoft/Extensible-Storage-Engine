@@ -2616,6 +2616,30 @@ VOID NDSetExternalHeader( _In_ const IFMP ifmp, _In_ CSR* const pcsr, _In_range_
 
 
 //  ================================================================
+ERR ErrNDValidateSetExternalHeader( const CPAGE &cpage, _In_ const DATA * pdata )
+//  ================================================================
+{
+    if ( cpage.FSpaceTree() || cpage.FRootPage() )
+    {
+        return JET_errSuccess;
+    }
+
+    const INT clines = cpage.Clines();
+    for ( INT iline = 0; iline < clines; iline++ )
+    {
+        KEYDATAFLAGS kdfNode;
+        NDIGetKeydataflags( cpage, iline, &kdfNode );
+        if ( kdfNode.key.prefix.Cb() > pdata->Cb() )
+        {
+            return ErrERRCheck( JET_errLogOperationInconsistentWithDatabase );
+        }
+    }
+
+    return JET_errSuccess;
+}
+
+
+///  ================================================================
 LOCAL VOID NDScrubOneUsedPage(
         _In_ CSR * const pcsr,
         __in_ecount(cscrubOper) const SCRUBOPER * const rgscrubOper,

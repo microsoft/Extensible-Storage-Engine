@@ -6219,6 +6219,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define errLogServiceStopped                -624  /* Logging has been stopped via JetStopServiceInstance2 JET_bitStopServiceStopAndEmitLog */
 // begin_PubEsent
 #define JET_errDbTimeBeyondMaxRequired      -625  /* dbtime on page greater than or equal to dbtimeAfter in record, but record is outside required range for the database */
+#define JET_errLogOperationInconsistentWithDatabase -626 /* Log record in the log is inconsistent with the current state of the database and cannot be applied */
 // end_PubEsent
 
 #define errBackupAbortByCaller              -800  /* INTERNAL ERROR: Backup was aborted by client or RPC connection with client failed */
