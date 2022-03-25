@@ -112,7 +112,7 @@ INLINE void BlockCacheNotableEvent( _In_opt_    const WCHAR* const  wszCachingFi
                     L"%hs(%i)",
                     strrchr( __FILE__, '\\' ) + 1,
                     __LINE__ );
-    OSStrCbFormatW( wszTag, sizeof( wszTag ), L"ASSERTTRACKTAG:%hs", szTag );
+    OSStrCbFormatW( wszTag, sizeof( wszTag ), L"ASSERTTRACKTAG:EBC_%hs", szTag );
 
     OSEventReportEvent( WszUtilImageVersionName(),
                         eventfacilityOsDiagTracking | eventfacilityRingBufferCache | eventfacilityOsEventTrace | eventfacilityOsTrace | eventfacilityReportOsEvent,
