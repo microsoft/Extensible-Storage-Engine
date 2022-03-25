@@ -3216,6 +3216,9 @@ class THashedLRUKCache
                                 _In_    const BOOL                  fIgnoreVerificationErrors,
                                 _In_    const BOOL                  fForSlabWriteBack,
                                 _Out_   ICachedBlockSlab** const    ppcbs );
+        ERR ErrUnexpectedMetadataReadFailure(   _In_ const char* const  szFunction,
+                                                _In_ const ERR          errFromCall,
+                                                _In_ const ERR          errToReturn );
         void ReleaseSlab( _In_ const ERR err, _Inout_ ICachedBlockSlab** const ppcbs );
         BOOL FAnyOpenSlab();
 
@@ -6936,7 +6939,11 @@ ERR THashedLRUKCache<I>::ErrGetSlab( _In_ const CCachedBlockId& cbid, _Out_ ICac
 
     //  get the slab
 
-    Call( m_pcbsmHash->ErrGetSlab( cbid, &pcbs ) );
+    err = m_pcbsmHash->ErrGetSlab( cbid, &pcbs );
+    if ( err < JET_errSuccess )
+    {
+        Call( ErrUnexpectedMetadataReadFailure( "GetSlabByCbid", err, ErrERRCheck( JET_errDiskIO ) ) );
+    }
 
     //  register our open slab
 
@@ -7009,7 +7016,12 @@ ERR THashedLRUKCache<I>::ErrGetSlabInternal(    _In_    const QWORD             
     //  get the slab
 
     errSlab = pcbsm->ErrGetSlab( ibSlab, fWait, fIgnoreVerificationErrors, &pcbs );
-    Call( fIgnoreVerificationErrors ? ErrIgnoreVerificationErrors( errSlab ) : errSlab );
+    err = fIgnoreVerificationErrors ? ErrIgnoreVerificationErrors( errSlab ) : errSlab;
+    if ( err < JET_errSuccess )
+    {
+        Call( ErrUnexpectedMetadataReadFailure( "GetSlabById", err, ErrERRCheck( JET_errDiskIO ) ) );
+    }
+
     fRelease = fRelease && !pcbs;
 
     //  unregister as a waiter for the slab
@@ -7050,6 +7062,21 @@ HandleError:
     }
     CHashedLRUKCacheThreadLocalStorage<I>::Release( &pctls );
     return err;
+}
+
+template<class I>
+ERR THashedLRUKCache<I>::ErrUnexpectedMetadataReadFailure(  _In_ const char* const  szFunction,
+                                                            _In_ const ERR          errFromCall,
+                                                            _In_ const ERR          errToReturn )
+{
+    OSTraceSuspendGC();
+    BlockCacheNotableEvent( OSFormat(   "UnexpectedMetadataReadFailure:%hs:%i:%i", 
+                                        szFunction, 
+                                        errFromCall, 
+                                        errToReturn ) );
+    OSTraceResumeGC();
+
+    return errToReturn;
 }
 
 template<class I>
