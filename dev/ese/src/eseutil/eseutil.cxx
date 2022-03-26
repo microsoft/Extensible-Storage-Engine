@@ -4723,7 +4723,7 @@ LOCAL_BROKEN JET_ERR ErrEDBUTLDumpTable(
     _In_ const JET_INSTANCE   instance,
     _In_ const JET_SESID      sesid,
     _In_ const JET_DBID       dbid,
-    _In_ const WCHAR * const  wszTable,
+    _In_z_ const WCHAR * const wszTable,
     _In_ const INT            crecordsMax )
 //  ================================================================
 {
@@ -4791,7 +4791,7 @@ HandleError:
 IOREASON g_iorThunk( (IOREASONPRIMARY) 1 );
 
 //  ================================================================
-LOCAL JET_ERR ErrEDBUTLDumpFTLHeader( _In_ const WCHAR * const wszFTLFile )
+LOCAL JET_ERR ErrEDBUTLDumpFTLHeader( _In_z_ const WCHAR * const wszFTLFile )
 //  ================================================================
 {
     JET_ERR         err         = JET_errSuccess;
