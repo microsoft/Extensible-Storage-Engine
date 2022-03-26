@@ -6923,20 +6923,14 @@ LOCAL ERR ErrIndexUnicodeState(
         QWORD qwVersionCurrent;
         Call( ErrNORMGetSortVersion( wszLocaleName, &qwVersionCurrent, &sortID ) );
 
-        if ( ( NULL != psortID ) && !FSortIDEquals( psortID, &sortID ) )
+        if( !FNORMNLSVersionEquals( qwVersionCreated, qwVersionCurrent ) ||
+            ( ( NULL != psortID ) && !FSortIDEquals( psortID, &sortID ) ) )
         {
-            WCHAR wszSortIDPerssted[PERSISTED_SORTID_MAX_LENGTH] = L"";
+            WCHAR wszSortIDPersisted[PERSISTED_SORTID_MAX_LENGTH] = L"";
             WCHAR wszSortIDCurrent[PERSISTED_SORTID_MAX_LENGTH] = L"";
-            WszCATFormatSortID( *psortID, wszSortIDPerssted, _countof( wszSortIDPerssted ) );
+            WszCATFormatSortID( *psortID, wszSortIDPersisted, _countof( wszSortIDPersisted ) );
             WszCATFormatSortID( sortID, wszSortIDCurrent, _countof( wszSortIDCurrent ) );
-            //  the actual sort ID has changed. this index must be deleted
-            OSTrace( JET_tracetagCatalog,
-                OSFormat( "Setting to INDEX_UNICODE_DELETE because sort ID for locale=%ws has changed from catalog=%ws to current=%ws.\n",
-                          wszLocaleName, wszSortIDPerssted, wszSortIDCurrent ) );
-            *pState = INDEX_UNICODE_DELETE;
-        }
-        else if( !FNORMNLSVersionEquals( qwVersionCreated, qwVersionCurrent ) )
-        {
+
             NORM_LOCALE_VER nlv;
             OSStrCbCopyW( nlv.m_wszLocaleName, sizeof( nlv.m_wszLocaleName ), wszLocaleName );
             nlv.m_sortidCustomSortVersion = *psortID;
@@ -6947,16 +6941,16 @@ LOCAL ERR ErrIndexUnicodeState(
             {
                 //  the actual sort order has changed, but this sort order is still valid. This index could either be deleted or used with out-of-date sort order.
                 OSTrace( JET_tracetagCatalog,
-                    OSFormat( "Setting to INDEX_UNICODE_OUTOFDATE because sort version for locale=%ws has changed from catalog=%#I64x to current=%#I64x.\n",
-                              wszLocaleName, qwVersionCreated, qwVersionCurrent ) );
+                    OSFormat( "Setting to INDEX_UNICODE_OUTOFDATE because sort version/SortID for locale=%ws has changed from catalog=%#I64x,%ws to current=%#I64x,%ws.\n",
+                              wszLocaleName, qwVersionCreated, wszSortIDPersisted, qwVersionCurrent, wszSortIDCurrent ) );
                 *pState = INDEX_UNICODE_OUTOFDATE;
             }
             else
             {
                 //  the actual sort order has changed. this index must be deleted
                 OSTrace( JET_tracetagCatalog,
-                    OSFormat( "Setting to INDEX_UNICODE_DELETE because sort version for locale=%ws has changed from catalog=%#I64x to current=%#I64x.\n",
-                              wszLocaleName, qwVersionCreated, qwVersionCurrent ) );
+                    OSFormat( "Setting to INDEX_UNICODE_DELETE because sort version/SortID for locale=%ws has changed from catalog=%#I64x,%ws to current=%#I64x,%ws.\n",
+                              wszLocaleName, qwVersionCreated, wszSortIDPersisted, qwVersionCurrent, wszSortIDCurrent ) );
                 *pState = INDEX_UNICODE_DELETE;
             }
         }
