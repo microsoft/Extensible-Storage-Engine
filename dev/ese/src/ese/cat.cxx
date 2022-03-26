@@ -9703,8 +9703,8 @@ HandleError:
 //  ================================================================
 LOCAL ERR ErrCATIDeleteOrUpdateLocalizedIndexesInTableByName(
     _In_ PIB          * const ppib,
-    _In_ const IFMP   ifmp,
-    _In_ const CHAR   * const szTableName,
+    _In_ const IFMP           ifmp,
+    _In_z_ const CHAR * const szTableName,
     _In_ CATCheckIndicesFlags catcifFlags,
     _Out_ BOOL        * const pfIndexesUpdated,
     _Out_ BOOL        * const pfIndexesDeleted )
