@@ -4668,13 +4668,16 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
 
         BFOB0::ERR      errOB0;
         BFOB0::CLock    lockOB0;
+        ULONG           cEntries, cEntriesBadPtr;
 
+        cEntries = cEntriesBadPtr = 0;
         pbffmp->bfob0.MoveBeforeFirst( &lockOB0 );
         while ( pbffmp->bfob0.ErrMoveNext( &lockOB0 ) != BFOB0::ERR::errNoCurrentEntry )
         {
             PBF pbf;
             errOB0 = pbffmp->bfob0.ErrRetrieveEntry( &lockOB0, &pbf );
             Assert( errOB0 == BFOB0::ERR::errSuccess );
+            cEntries++;
 
             //  while we can have clean buffers, we do not expect evicted (in available or quiesced)
             //  state buffers to still be in OB0.
@@ -4686,15 +4689,32 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
                 continue;
             }
 
-            //  if we're only flushing pages from a specific btree of this IFMP
-            //  or from a specific range, skip any that don't match
-            //
-            //  HACK:  we are touching the page without the latch!
+            BOOL fSkipEntry = fFalse;
+            TRY
+            {
+                //  if we're only flushing pages from a specific btree of this IFMP
+                //  or from a specific range, skip any that don't match
+                //
+                //  HACK:  we are touching the page without the latch!
 
-            if ( ( ( objidNil != objidFDP ) &&
-                   ( objidFDP != ( (CPAGE::PGHDR *)( pbf->pv ) )->objidFDP ) ) ||
-                 ( ( pgnoFirst != pgnoNull ) && ( pbf->pgno < pgnoFirst ) ) ||
-                 ( ( pgnoLast != pgnoNull ) && ( pbf->pgno > pgnoLast ) ) )
+                if ( ( ( pgnoFirst != pgnoNull ) && ( pbf->pgno < pgnoFirst ) ) ||
+                     ( ( pgnoLast != pgnoNull ) && ( pbf->pgno > pgnoLast ) ) ||
+                     ( ( objidNil != objidFDP ) &&
+                       ( objidFDP != ( (CPAGE::PGHDR *)( pbf->pv ) )->objidFDP ) ) )
+                {
+                    fSkipEntry = fTrue;
+                }
+            }
+            EXCEPT( efaExecuteHandler )
+            {
+                cEntriesBadPtr++;
+                fSkipEntry = fTrue;
+            }
+
+            // We should not be hitting this too often.
+            Assert( ( cEntries < 100 ) || ( cEntriesBadPtr < ( cEntries / 2 )  ) );
+
+            if ( fSkipEntry )
             {
                 continue;
             }
@@ -4703,26 +4723,45 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
         }
         pbffmp->bfob0.UnlockKeyPtr( &lockOB0 );
 
+        cEntries = cEntriesBadPtr = 0;
         pbffmp->critbfob0ol.Enter();
         PBF pbfNext;
         for ( PBF pbf = pbffmp->bfob0ol.PrevMost(); pbf != pbfNil; pbf = pbfNext )
         {
             pbfNext = pbffmp->bfob0ol.Next( pbf );
+            cEntries++;
 
             if ( err < JET_errSuccess || pbf->bfdf == bfdfClean )
             {
                 continue;
             }
 
-            //  if we're only flushing pages from a specific btree of this IFMP
-            //  or from a specific range, skip any that don't match
-            //
-            //  HACK:  we are touching the page without the latch!
+            BOOL fSkipEntry = fFalse;
+            TRY
+            {
+                //  if we're only flushing pages from a specific btree of this IFMP
+                //  or from a specific range, skip any that don't match
+                //
+                //  HACK:  we are touching the page without the latch!
 
-            if ( ( ( objidNil != objidFDP ) &&
-                   ( objidFDP != ( (CPAGE::PGHDR *)( pbf->pv ) )->objidFDP ) ) ||
-                 ( ( pgnoFirst != pgnoNull ) && ( pbf->pgno < pgnoFirst ) ) ||
-                 ( ( pgnoLast != pgnoNull ) && ( pbf->pgno > pgnoLast ) ) )
+                if ( ( ( pgnoFirst != pgnoNull ) && ( pbf->pgno < pgnoFirst ) ) ||
+                     ( ( pgnoLast != pgnoNull ) && ( pbf->pgno > pgnoLast ) ) ||
+                     ( ( objidNil != objidFDP ) &&
+                       ( objidFDP != ( (CPAGE::PGHDR *)( pbf->pv ) )->objidFDP ) ) )
+                {
+                    fSkipEntry = fTrue;
+                }
+            }
+            EXCEPT( efaExecuteHandler )
+            {
+                cEntriesBadPtr++;
+                fSkipEntry = fTrue;
+            }
+
+            // We should not be hitting this too often.
+            Assert( ( cEntries < 100 ) || ( cEntriesBadPtr < ( cEntries / 2 )  ) );
+
+            if ( fSkipEntry )
             {
                 continue;
             }
