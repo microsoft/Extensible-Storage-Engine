@@ -8286,10 +8286,43 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
         err = ErrRBSNonRevertableDeleteTooSoon( ppib, ifmp, pfucb, &verdeletetabledata.pgnoFDPLV, fRevertableTableDeleteIfTooSoon );
 
         // If non-revertable delete is failing due to JET_errRBSDeleteTableTooSoon and we are allowed to switch to revertable delete in such a case, do so.
-        if ( err == JET_errRBSDeleteTableTooSoon && fRevertableTableDeleteIfTooSoon )
+        if ( err == JET_errRBSDeleteTableTooSoon )
         {
-            fRevertableTableDelete  = fTrue;
-            err                     = JET_errSuccess;
+            FCB* pfcbTable = pfucb->u.pfcb;
+
+            if ( fRevertableTableDeleteIfTooSoon )
+            {
+                fRevertableTableDelete = fTrue;
+                err = JET_errSuccess;
+            }
+            else if ( pfcbTable != NULL && pfcbTable->FTypeTable() )
+            {
+                // Log an event indicating that we are failing delete operation for this table due to JET_errRBSDeleteTableTooSoon error.
+                WCHAR wszTableName[JET_cbNameMost+1] = L"";
+
+                if ( pfcbTable->Ptdb() != NULL && pfcbTable->Ptdb()->SzTableName() != NULL )
+                {
+                    OSStrCbFormatW( wszTableName, sizeof(wszTableName), L"%hs", pfcbTable->Ptdb()->SzTableName() );
+                }
+
+                const WCHAR* rgcwsz[] =
+                {
+                    wszTableName,
+                    OSFormatW( L"%I32u", pfcbTable->PgnoFDP() ),
+                    OSFormatW( L"%I32u", pfcbTable->ObjidFDP() ),
+                    OSFormatW( L"%d", err )
+                };
+
+                UtilReportEvent(
+                    eventInformation,
+                    GENERAL_CATEGORY,
+                    RBS_NON_REVERTABLE_DELETE_FAILED_ID,
+                    _countof( rgcwsz ),
+                    rgcwsz,
+                    0,
+                    NULL,
+                    PinstFromPfucb( pfucb ) );
+            }
         }
 
         Call( err );

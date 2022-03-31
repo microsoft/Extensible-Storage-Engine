@@ -2840,6 +2840,12 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                     break;
                 }
 
+                // If the extent freed LR is to capture the pages as empty, skip the preread.
+                if ( lrextentfreed.FEmptyPageFDPDeleted() )
+                {
+                    break;
+                }
+
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 

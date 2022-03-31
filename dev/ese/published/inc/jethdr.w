@@ -4066,6 +4066,7 @@ typedef enum
 #define JET_paramFlight_EnablePgnoFDPLastSetTime        115 //  whether we want to enable setting PgnoPFDSetTime in the system table for a table entry.
 #define JET_paramFlight_EnableScanCheck2Flags           116 //  whether we want to enable logging flags in ScanCheck2 log record.
 #define JET_paramFlight_EnableExtentFreed2              117 //  whether we want to enable logging ExtentFreed2 LR after the efv upgrade.
+#define JET_paramFlight_RBSLargeRevertableDeletePages   118 //  Large revertable delete size for a table (in pages) beyond which we will track the deletes.
 
 //                                              120 //  JET_paramDBAPageAvailMin
 //                                              121 //  JET_paramDBAPageAvailThreshold

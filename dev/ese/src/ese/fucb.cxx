@@ -376,17 +376,18 @@ VOID FUCBIllegalOperationFDPToBeDeleted(
     if ( !g_fRepair )
     {
         OSTraceSuspendGC();
-        WCHAR szTableName[JET_cbNameMost+1] = L"";
+        WCHAR wszTableName[JET_cbNameMost+1] = L"";
+        FCB* pfcbTable = pfucb->u.pfcb->FTypeTable() ? pfucb->u.pfcb : pfucb->u.pfcb->PfcbTable();
 
-        if ( pfucb->u.pfcb->PfcbTable() != NULL && pfucb->u.pfcb->PfcbTable()->Ptdb() != NULL && pfucb->u.pfcb->PfcbTable()->Ptdb()->SzTableName() != NULL )
+        if ( pfcbTable != NULL && pfcbTable->Ptdb() != NULL && pfcbTable->Ptdb()->SzTableName() != NULL )
         {
-            OSStrCbFormatW( szTableName, sizeof(szTableName), L"%hs", pfucb->u.pfcb->Ptdb()->SzTableName() );
+            OSStrCbFormatW( wszTableName, sizeof(wszTableName), L"%hs", pfucb->u.pfcb->Ptdb()->SzTableName() );
         }
 
         const WCHAR* rgwsz[] =
         {
             OSFormatW( L"%I32u", pfucb->u.pfcb->PgnoFDP() ),
-            szTableName,
+            wszTableName,
             OSFormatW( L"%I32u", objidFDP ),
             g_rgfmp[pfucb->u.pfcb->Ifmp()].WszDatabaseName(),
         };

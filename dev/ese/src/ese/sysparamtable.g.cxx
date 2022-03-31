@@ -131,7 +131,7 @@ JetParam g_rgparamRaw[] =
     NORMAL_PARAM(JET_paramFlight_EnablePgnoFDPLastSetTime, CJetParam::typeBoolean, 1,  0,  0, 1, 0, -1, fTrue),
     NORMAL_PARAM(JET_paramFlight_EnableScanCheck2Flags, CJetParam::typeBoolean, 1,  0,  0, 1, 0, -1, fTrue),
     NORMAL_PARAM(JET_paramFlight_EnableExtentFreed2, CJetParam::typeBoolean, 1,  0,  0, 1, 0, -1, fTrue),
-    ILLEGAL_PARAM(118),
+    NORMAL_PARAM(JET_paramFlight_RBSLargeRevertableDeletePages, CJetParam::typeInteger, 1,  0,  0, 0, 0, 2147483647, 0),
     ILLEGAL_PARAM(119),
     IGNORED_PARAM(JET_paramDBAPageAvailMin, CJetParam::typeInteger, 1,  1,  0, 0, 0, -1, 1280),
     CUSTOM_PARAM(JET_paramDBAPageAvailThreshold, CJetParam::typeUserDefined, 0,  1,  0, 0, CJetParam::IgnoreGet, CJetParam::IgnoreSet, CJetParam::CloneDefault),
@@ -361,7 +361,7 @@ static_assert( JET_paramFlight_ExtentPageCountCacheVerifyOnly == 114, "The order
 static_assert( JET_paramFlight_EnablePgnoFDPLastSetTime == 115, "The order of defintion for JET_paramFlight_EnablePgnoFDPLastSetTime in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_EnableScanCheck2Flags == 116, "The order of defintion for JET_paramFlight_EnableScanCheck2Flags in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_EnableExtentFreed2 == 117, "The order of defintion for JET_paramFlight_EnableExtentFreed2 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
-static_assert( 118 == 118, "The order of defintion for 118 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( JET_paramFlight_RBSLargeRevertableDeletePages == 118, "The order of defintion for JET_paramFlight_RBSLargeRevertableDeletePages in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( 119 == 119, "The order of defintion for 119 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramDBAPageAvailMin == 120, "The order of defintion for JET_paramDBAPageAvailMin in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramDBAPageAvailThreshold == 121, "The order of defintion for JET_paramDBAPageAvailThreshold in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
