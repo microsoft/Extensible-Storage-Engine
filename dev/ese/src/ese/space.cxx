@@ -10652,6 +10652,35 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB* pfucbParent, FCB* pfcb, const BOOL fP
     if ( fRevertableFDP )
     {
         PERFOpt( cSPDeletedTreeSnapshottedPages.Add( PinstFromPfucb( pfucbParent ), cpgOwned ) );
+
+        if ( pfcb->FTypeTable() && cpgOwned > UlParam( PinstFromPfucb( pfucbParent ), JET_paramFlight_RBSLargeRevertableDeletePages ) )
+        {
+            WCHAR wszTableName[JET_cbNameMost+1] = L"";
+
+            if ( pfcb->Ptdb() != NULL && pfcb->Ptdb()->SzTableName() != NULL )
+            {
+                OSStrCbFormatW( wszTableName, sizeof(wszTableName), L"%hs", pfcb->Ptdb()->SzTableName() );
+            }
+
+            const WCHAR* rgcwsz[] =
+            {
+                wszTableName,
+                OSFormatW( L"%I32u", pfcb->PgnoFDP() ),
+                OSFormatW( L"%I32u", pfcb->ObjidFDP() ),
+                OSFormatW( L"%I32u", cpgOwned ),
+                OSFormatW( L"%I32u", UlParam( PinstFromPfucb( pfucbParent ), JET_paramFlight_RBSLargeRevertableDeletePages ) ),
+            };
+
+            UtilReportEvent(
+                eventInformation,
+                GENERAL_CATEGORY,
+                RBS_LARGE_REVERTABLE_DELETE_ID,
+                _countof( rgcwsz ),
+                rgcwsz,
+                0,
+                NULL,
+                PinstFromPfucb( pfucbParent ) );
+        }
     }
 
     PERFOpt( cSPDeletedTreeFreedPages.Add( PinstFromPfucb( pfucbParent ), cpgOwned ) );

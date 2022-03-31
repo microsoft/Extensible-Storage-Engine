@@ -3127,6 +3127,18 @@ Language=English
 %1 (%2) %3The min RBS gen for given instance is %4 and max RBS gen is %5 and the oldest time we could revert to is %6. Total RBS disk space consumed is %7 and the free disk space is %8.
 .
 
+MessageId=5009
+SymbolicName=RBS_LARGE_REVERTABLE_DELETE_ID
+Language=English
+%1 (%2) %3The table %4 with root page at %5 and objid %6 which is being revertable deleted is of size %7 pages which is larger than the desired size %8 pages for revertable deletes.
+.
+
+MessageId=5010
+SymbolicName=RBS_NON_REVERTABLE_DELETE_FAILED_ID
+Language=English
+%1 (%2) %3The non-revertable table delete operation for %4 with root page at %5 and objid %6 failed due to error %7.
+.
+
 ;////////////////////////////////////////////////////////////////////////
 ;// DO NOT ADD HERE!  You're in the wrong Place. (well most likely)
 ;////////////////////////////////////////////////////////////////////////
