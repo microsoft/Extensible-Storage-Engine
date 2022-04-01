@@ -39,6 +39,9 @@ class IFileIdentification  //  fident
 {
     public:
 
+        static const size_t cwchKeyPathMax  = 49 + 256 + 1;  //  "\\?\Volume{00000000-0000-0000-0000-000000000000}\" + 256 char local path + "\0"
+        static const size_t cbKeyPathMax    = cwchKeyPathMax * sizeof( WCHAR );
+
         virtual ~IFileIdentification() {}
 
         //  Returns the unique volume id and file id of a file by path.
@@ -51,8 +54,8 @@ class IFileIdentification  //  fident
         //
         //  The unique path returned for the file is intended for use in a hash table not for file system access.
 
-        virtual ERR ErrGetFileKeyPath(  _In_z_                                  const WCHAR* const  wszPath,
-                                        _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )  WCHAR* const        wszKeyPath ) = 0;
+        virtual ERR ErrGetFileKeyPath(  _In_z_                                                  const WCHAR* const  wszPath,
+                                        _Out_bytecap_c_( IFileIdentification::cbKeyPathMax )    WCHAR* const        wszKeyPath ) = 0;
 
         //  Returns any absolute path and the unique path of a file by file id.
         //
@@ -60,10 +63,10 @@ class IFileIdentification  //  fident
         //
         //  The unique path returned for the file is intended for use in a hash table not for file system access.
 
-        virtual ERR ErrGetFilePathById( _In_                                    const VolumeId  volumeid,
-                                        _In_                                    const FileId    fileid,
-                                        _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )  WCHAR* const    wszAnyAbsPath,
-                                        _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )  WCHAR* const    wszKeyPath ) = 0;
+        virtual ERR ErrGetFilePathById( _In_                                                    const VolumeId  volumeid,
+                                        _In_                                                    const FileId    fileid,
+                                        _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )                  WCHAR* const    wszAnyAbsPath,
+                                        _Out_bytecap_c_( IFileIdentification::cbKeyPathMax )    WCHAR* const    wszKeyPath ) = 0;
 };
 
 //  File System Filter

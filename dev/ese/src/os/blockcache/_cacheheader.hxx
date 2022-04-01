@@ -149,7 +149,8 @@ INLINE ERR CCacheHeader::ErrDump(   _In_ IFileSystemConfiguration* const    pfsc
 {
     ERR             err                             = JET_errSuccess;
     CCacheHeader*   pch                             = NULL;
-    WCHAR           wszAbsPath[ OSFSAPI_MAX_PATH ]  = { 0 };
+    const DWORD     cwchAbsPathMax                  = IFileSystemAPI::cchPathMax;
+    WCHAR           wszAbsPath[ cwchAbsPathMax ]    = { 0 };
     VolumeId        volumeid                        = volumeidInvalid;
     FileId          fileid                          = fileidInvalid;
     FileSerial      fileserial                      = fileserialInvalid;

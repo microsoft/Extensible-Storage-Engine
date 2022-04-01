@@ -28,6 +28,11 @@ namespace Internal
                     /// <param name="id">The object's native id.</param>
                     /// <returns>The requested object's proxy.</returns>
                     Object^ Get( IntPtr id );
+
+                    /// <summary>
+                    /// Setup the resolve handler.
+                    /// </summary>
+                    void SetupResolveHandler();
                 };
             }
         }

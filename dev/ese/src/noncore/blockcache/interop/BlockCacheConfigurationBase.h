@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class BlockCacheConfigurationBase : public Base<TM, TN, TW>, IBlockCacheConfiguration
+                public ref class BlockCacheConfigurationBase : Base<TM, TN, TW>, IBlockCacheConfiguration
                 {
                     public:
 

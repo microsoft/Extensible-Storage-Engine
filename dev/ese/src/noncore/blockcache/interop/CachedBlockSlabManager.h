@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class CachedBlockSlabManager : public CachedBlockSlabManagerBase<ICachedBlockSlabManager, ::ICachedBlockSlabManager, CCachedBlockSlabManagerWrapper<ICachedBlockSlabManager, ::ICachedBlockSlabManager>>
+                public ref class CachedBlockSlabManager : CachedBlockSlabManagerBase<ICachedBlockSlabManager, ::ICachedBlockSlabManager, CCachedBlockSlabManagerWrapper<ICachedBlockSlabManager, ::ICachedBlockSlabManager>>
                 {
                     public:
 

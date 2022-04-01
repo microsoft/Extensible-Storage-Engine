@@ -18,7 +18,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class CachedBlockWriteCountsManager : public CachedBlockWriteCountsManagerBase<ICachedBlockWriteCountsManager, ::ICachedBlockWriteCountsManager, CCachedBlockWriteCountsManagerWrapper<ICachedBlockWriteCountsManager, ::ICachedBlockWriteCountsManager>>
+                public ref class CachedBlockWriteCountsManager : CachedBlockWriteCountsManagerBase<ICachedBlockWriteCountsManager, ::ICachedBlockWriteCountsManager, CCachedBlockWriteCountsManagerWrapper<ICachedBlockWriteCountsManager, ::ICachedBlockWriteCountsManager>>
                 {
                     public:
 

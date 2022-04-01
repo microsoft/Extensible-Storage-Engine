@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class Complete : MarshalByRefObject
+                ref class Complete : Remotable
                 {
                     public:
 

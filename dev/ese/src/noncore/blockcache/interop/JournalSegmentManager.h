@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class JournalSegmentManager : public JournalSegmentManagerBase<IJournalSegmentManager, ::IJournalSegmentManager, CJournalSegmentManagerWrapper<IJournalSegmentManager, ::IJournalSegmentManager>>
+                public ref class JournalSegmentManager : JournalSegmentManagerBase<IJournalSegmentManager, ::IJournalSegmentManager, CJournalSegmentManagerWrapper<IJournalSegmentManager, ::IJournalSegmentManager>>
                 {
                     public:
 

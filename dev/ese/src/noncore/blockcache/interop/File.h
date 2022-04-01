@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class File : public FileBase<IFile,IFileAPI,CFileWrapper<IFile,IFileAPI>>
+                public ref class File : FileBase<IFile,IFileAPI,CFileWrapper<IFile,IFileAPI>>
                 {
                     public:
 

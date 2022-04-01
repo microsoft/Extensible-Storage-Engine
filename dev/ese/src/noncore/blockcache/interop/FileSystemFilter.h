@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class FileSystemFilter : public FileSystemFilterBase<IFileSystemFilter,::IFileSystemFilter,CFileSystemFilterWrapper<IFileSystemFilter,::IFileSystemFilter>>
+                public ref class FileSystemFilter : FileSystemFilterBase<IFileSystemFilter,::IFileSystemFilter,CFileSystemFilterWrapper<IFileSystemFilter,::IFileSystemFilter>>
                 {
                     public:
 

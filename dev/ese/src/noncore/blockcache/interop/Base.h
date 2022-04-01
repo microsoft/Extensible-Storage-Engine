@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template<class TM, class TN, class TW>
-                public ref class Base : public MarshalByRefObject
+                public ref class Base : Remotable
                 {
                     public:
 

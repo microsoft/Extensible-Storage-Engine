@@ -479,9 +479,9 @@ class TFileSystemFilter  //  fsf
         ERR ErrLockFile(    _In_z_  const WCHAR* const          wszKeyPath,
                             _In_    CSemaphore* const           psem,
                             _Out_   CFilePathTableEntry** const ppfpte );
-        ERR ErrGetFilePath( _In_z_                                  const WCHAR* const  wszPath,
-                            _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )  WCHAR* const        wszAbsPath,
-                            _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )  WCHAR* const        wszKeyPath );
+        ERR ErrGetFilePath( _In_z_                                                  const WCHAR* const  wszPath,
+                            _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )                  WCHAR* const        wszAbsPath,
+                            _Out_bytecap_c_( IFileIdentification::cbKeyPathMax )    WCHAR* const        wszKeyPath );
 
         ERR ErrPrepareToDelete( _In_ CFilePathTableEntry* const pfpte );
 
@@ -614,9 +614,9 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
                                             _Out_   IFileAPI** const                ppfapi )
 {
     ERR                     err                                 = JET_errSuccess;
-    const DWORD             cwchAnyAbsPathMax                   = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAnyAbsPathMax                   = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAnyAbsPath[ cwchAnyAbsPathMax ]  = { 0 };
-    const DWORD             cwchKeyPathMax                      = OSFSAPI_MAX_PATH;
+    const DWORD             cwchKeyPathMax                      = IFileIdentification::cwchKeyPathMax;
     WCHAR                   wszKeyPath[ cwchKeyPathMax ]        = { 0 };
     CFileFilterReference*   pffr                                = NULL;
     VolumeId                volumeidActual                      = volumeidInvalid;
@@ -717,13 +717,13 @@ ERR TFileSystemFilter<I>::ErrFileRename(    _In_    IFileAPI* const    pfapi,
                                             _In_    const BOOL         fOverwriteExisting )
 {
     ERR                     err                                     = JET_errSuccess;
-    const DWORD             cwchPathSrcMax                          = OSFSAPI_MAX_PATH;
+    const DWORD             cwchPathSrcMax                          = IFileSystemAPI::cchPathMax;
     WCHAR                   wszPathSrc[ cwchPathSrcMax ]            = { 0 };
-    const DWORD             cwchAbsPathSrcMax                       = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathSrcMax                       = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPathSrc[ cwchAbsPathSrcMax ]      = { 0 };
     CSemaphore              sem( CSyncBasicInfo( "TFileSystemFilter<I>::ErrFileRename" ) );
     CFilePathTableEntry*    pfpteSrc                                = NULL;
-    const DWORD             cwchAbsPathDestMax                      = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathDestMax                      = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPathDest[ cwchAbsPathDestMax ]    = { 0 };
     CFilePathTableEntry*    pfpteDest                               = NULL;
 
@@ -761,7 +761,7 @@ template< class I >
 ERR TFileSystemFilter<I>::ErrFileDelete( const WCHAR* const wszPath )
 {
     ERR                     err                             = JET_errSuccess;
-    const DWORD             cwchAbsPathMax                  = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathMax                  = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPath[ cwchAbsPathMax ]    = { 0 };
     CSemaphore              sem( CSyncBasicInfo( "TFileSystemFilter<I>::ErrFileDelete" ) );
     CFilePathTableEntry*    pfpte                           = NULL;
@@ -793,11 +793,11 @@ ERR TFileSystemFilter<I>::ErrFileMove(  const WCHAR* const  wszPathSource,
                                         const BOOL          fOverwriteExisting )
 {
     ERR                     err                                     = JET_errSuccess;
-    const DWORD             cwchAbsPathSrcMax                       = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathSrcMax                       = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPathSrc[ cwchAbsPathSrcMax ]      = { 0 };
     CSemaphore              sem( CSyncBasicInfo( "TFileSystemFilter<I>::ErrFileMove" ) );
     CFilePathTableEntry*    pfpteSrc                                = NULL;
-    const DWORD             cwchAbsPathDestMax                      = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathDestMax                      = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPathDest[ cwchAbsPathDestMax ]    = { 0 };
     CFilePathTableEntry*    pfpteDest                               = NULL;
 
@@ -833,11 +833,11 @@ ERR TFileSystemFilter<I>::ErrFileCopy(  const WCHAR* const  wszPathSource,
                                         const BOOL          fOverwriteExisting )
 {
     ERR                     err                                     = JET_errSuccess;
-    const DWORD             cwchAbsPathSrcMax                       = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathSrcMax                       = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPathSrc[ cwchAbsPathSrcMax ]      = { 0 };
     CSemaphore              sem( CSyncBasicInfo( "TFileSystemFilter<I>::ErrFileCopy" ) );
     CFilePathTableEntry*    pfpteSrc                                = NULL;
-    const DWORD             cwchAbsPathDestMax                      = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathDestMax                      = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPathDest[ cwchAbsPathDestMax ]    = { 0 };
     CFilePathTableEntry*    pfpteDest                               = NULL;
 
@@ -870,7 +870,7 @@ ERR TFileSystemFilter<I>::ErrFileCreate(    _In_z_ const WCHAR* const           
 {
      
     ERR                     err                             = JET_errSuccess;
-    const DWORD             cwchAbsPathMax                  = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathMax                  = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPath[ cwchAbsPathMax ]    = { 0 };
     CSemaphore              sem( CSyncBasicInfo( "TFileSystemFilter<I>::ErrFileCreate" ) );
     CFilePathTableEntry*    pfpte                           = NULL;
@@ -930,9 +930,9 @@ ERR TFileSystemFilter<I>::ErrFileOpen(  _In_z_ const WCHAR* const               
                                         _Out_  IFileAPI** const                 ppfapi )
 {
     ERR                     err                             = JET_errSuccess;
-    const DWORD             cwchAbsPathMax                  = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathMax                  = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPath[ cwchAbsPathMax ]    = { 0 };
-    const DWORD             cwchKeyPathMax                  = OSFSAPI_MAX_PATH;
+    const DWORD             cwchKeyPathMax                  = IFileIdentification::cwchKeyPathMax;
     WCHAR                   wszKeyPath[ cwchKeyPathMax ]    = { 0 };
     CFileFilterReference*   pffr                            = NULL;
 
@@ -1056,7 +1056,7 @@ ERR TFileSystemFilter<I>::ErrLockFile(  _In_z_                                  
                                         _Out_                                   CFilePathTableEntry** const ppfpte )
 {
     ERR                     err                             = JET_errSuccess;
-    const DWORD             cwchKeyPathMax                  = OSFSAPI_MAX_PATH;
+    const DWORD             cwchKeyPathMax                  = IFileIdentification::cwchKeyPathMax;
     WCHAR                   wszKeyPath[ cwchKeyPathMax ]    = { 0 };
 
     *ppfpte = NULL;
@@ -1083,9 +1083,9 @@ ERR TFileSystemFilter<I>::ErrLockFiles( _In_z_                                  
                                         _Out_                                   CFilePathTableEntry** const ppfpteDest )
 {
     ERR                     err                                     = JET_errSuccess;
-    const DWORD             cwchKeyPathSrcMax                       = OSFSAPI_MAX_PATH;
+    const DWORD             cwchKeyPathSrcMax                       = IFileIdentification::cwchKeyPathMax;
     WCHAR                   wszKeyPathSrc[ cwchKeyPathSrcMax ]      = { 0 };
-    const DWORD             cwchKeyPathDestMax                      = OSFSAPI_MAX_PATH;
+    const DWORD             cwchKeyPathDestMax                      = IFileIdentification::cwchKeyPathMax;
     WCHAR                   wszKeyPathDest[ cwchKeyPathDestMax ]    = { 0 };
     WCHAR*                  pwszKeyPath1                            = wszKeyPathSrc;
     CFilePathTableEntry**   ppfpte1                                 = ppfpteSrc;
@@ -1193,9 +1193,9 @@ HandleError:
 }
 
 template< class I >
-ERR TFileSystemFilter<I>::ErrGetFilePath(   _In_z_                                  const WCHAR* const  wszPath,
-                                            _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )  WCHAR* const        wszAbsPath,
-                                            _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )  WCHAR* const        wszKeyPath )
+ERR TFileSystemFilter<I>::ErrGetFilePath(   _In_z_                                                  const WCHAR* const  wszPath,
+                                            _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )                  WCHAR* const        wszAbsPath,
+                                            _Out_bytecap_c_( IFileIdentification::cbKeyPathMax )    WCHAR* const        wszKeyPath )
 {
     ERR err = JET_errSuccess;
 
@@ -1523,9 +1523,9 @@ ERR TFileSystemFilter<I>::ErrGetConfiguredCache(    _In_    CFileFilter* const  
     ERR                             err                                                 = JET_errSuccess;
     IBlockCacheConfiguration*       pbcconfig                                           = NULL;
     ICachedFileConfiguration*       pcfconfig                                           = NULL;
-    const DWORD                     cwchAbsPathCachingFileMax                           = OSFSAPI_MAX_PATH;
+    const DWORD                     cwchAbsPathCachingFileMax                           = IFileSystemAPI::cchPathMax;
     WCHAR                           wszAbsPathCachingFile[ cwchAbsPathCachingFileMax ]  = { 0 };
-    const DWORD                     cwchKeyPathCachingFileMax                           = OSFSAPI_MAX_PATH;
+    const DWORD                     cwchKeyPathCachingFileMax                           = IFileIdentification::cwchKeyPathMax;
     WCHAR                           wszKeyPathCachingFile[ cwchKeyPathCachingFileMax ]  = { 0 };
     ICacheConfiguration*            pcconfig                                            = NULL;
     ICache*                         pc                                                  = NULL;
@@ -1582,11 +1582,11 @@ ERR TFileSystemFilter<I>::ErrCacheOpenFailure(  _In_ ICachedFileConfiguration* c
                                                 _In_ const ERR                          errFromCall,
                                                 _In_ const ERR                          errToReturn )
 {
-    WCHAR           wszCachingFile[ OSFSAPI_MAX_PATH ]  = { 0 };
-    WCHAR           wszFunction[ 256 ]                  = { 0 };
-    WCHAR           wszErrorFromCall[ 64 ]              = { 0 };
-    WCHAR           wszErrorToReturn[ 64 ]              = { 0 };
-    const WCHAR*    rgpwsz[]                            = { wszCachingFile, wszFunction, wszErrorFromCall, wszErrorToReturn };
+    WCHAR           wszCachingFile[ IFileSystemAPI::cchPathMax ]    = { 0 };
+    WCHAR           wszFunction[ 256 ]                              = { 0 };
+    WCHAR           wszErrorFromCall[ 64 ]                          = { 0 };
+    WCHAR           wszErrorToReturn[ 64 ]                          = { 0 };
+    const WCHAR*    rgpwsz[]                                        = { wszCachingFile, wszFunction, wszErrorFromCall, wszErrorToReturn };
 
     pcfconfig->CachingFilePath( wszCachingFile );
     OSStrCbFormatW( wszFunction, sizeof( wszFunction ), L"%hs", szFunction );

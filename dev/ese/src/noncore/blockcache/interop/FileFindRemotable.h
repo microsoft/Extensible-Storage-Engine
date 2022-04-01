@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class FileFindRemotable : MarshalByRefObject, IFileFind
+                ref class FileFindRemotable : Remotable, IFileFind
                 {
                     public:
 

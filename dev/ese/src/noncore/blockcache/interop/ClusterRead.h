@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class ClusterRead : MarshalByRefObject
+                ref class ClusterRead : Remotable
                 {
                     public:
 

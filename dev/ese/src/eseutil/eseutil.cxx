@@ -5667,6 +5667,8 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
     Call( ErrEDBUTLSetCacheSizeMax( &opts ) );
 
+    Call( JetSetSystemParameterW( &instance, 0, JET_paramEnableBlockCache, 1, NULL ) );
+
     // Lights, cameras, action...
     timer = TickOSTimeCurrent();
 

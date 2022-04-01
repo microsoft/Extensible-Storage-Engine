@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class VisitSlot : MarshalByRefObject
+                ref class VisitSlot : Remotable
                 {
                     public:
 

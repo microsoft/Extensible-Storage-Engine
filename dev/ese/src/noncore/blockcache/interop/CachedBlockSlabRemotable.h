@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class CachedBlockSlabRemotable : MarshalByRefObject, ICachedBlockSlab
+                ref class CachedBlockSlabRemotable : Remotable, ICachedBlockSlab
                 {
                     public:
 

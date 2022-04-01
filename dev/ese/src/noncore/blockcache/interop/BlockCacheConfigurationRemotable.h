@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class BlockCacheConfigurationBaseRemotable : MarshalByRefObject, IBlockCacheConfiguration
+                ref class BlockCacheConfigurationBaseRemotable : Remotable, IBlockCacheConfiguration
                 {
                     public:
 

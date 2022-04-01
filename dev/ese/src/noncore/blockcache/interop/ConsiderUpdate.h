@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class ConsiderUpdate : MarshalByRefObject
+                ref class ConsiderUpdate : Remotable
                 {
                     public:
 

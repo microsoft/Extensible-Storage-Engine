@@ -126,7 +126,7 @@ INLINE void BlockCacheNotableEvent( _In_opt_    const WCHAR* const  wszCachingFi
 INLINE void BlockCacheNotableEvent( _In_ IFileFilter* const pffCaching,
                                     _In_ const char* const  szTag )
 {
-    WCHAR   wszCachingFilePath[ OSFSAPI_MAX_PATH ]  = { 0 };
+    WCHAR   wszCachingFilePath[ IFileSystemAPI::cchPathMax ]    = { 0 };
 
     if ( pffCaching )
     {
@@ -146,7 +146,7 @@ INLINE ERR ErrBlockCacheInternalError(  _In_ const WCHAR* const wszCachingFilePa
 INLINE ERR ErrBlockCacheInternalError(  _In_ ICacheConfiguration* const pcconfig,
                                         _In_ const char* const          szTag )
 {
-    WCHAR   wszCachingFilePath[ OSFSAPI_MAX_PATH ]  = { 0 };
+    WCHAR   wszCachingFilePath[ IFileSystemAPI::cchPathMax ]    = { 0 };
 
     if ( pcconfig )
     {
@@ -159,7 +159,7 @@ INLINE ERR ErrBlockCacheInternalError(  _In_ ICacheConfiguration* const pcconfig
 INLINE ERR ErrBlockCacheInternalError(  _In_ ICachedFileConfiguration* const    pcfconfig,
                                         _In_ const char* const                  szTag )
 {
-    WCHAR   wszCachingFilePath[ OSFSAPI_MAX_PATH ]  = { 0 };
+    WCHAR   wszCachingFilePath[ IFileSystemAPI::cchPathMax ]    = { 0 };
 
     if ( pcfconfig )
     {
@@ -172,7 +172,7 @@ INLINE ERR ErrBlockCacheInternalError(  _In_ ICachedFileConfiguration* const    
 INLINE ERR ErrBlockCacheInternalError(  _In_ IFileFilter* const pffCaching,
                                         _In_ const char* const  szTag )
 {
-    WCHAR   wszCachingFilePath[ OSFSAPI_MAX_PATH ]  = { 0 };
+    WCHAR   wszCachingFilePath[ IFileSystemAPI::cchPathMax ]    = { 0 };
 
     if ( pffCaching )
     {
@@ -300,7 +300,7 @@ INLINE const char* OSFormatFileId( _In_ IFileFilter* const pff )
 
 INLINE const char* OSFormat( _In_ IFileFilter* const pff )
 {
-    WCHAR   wszAbsPath[ OSFSAPI_MAX_PATH ]  = { 0 };
+    WCHAR   wszAbsPath[ IFileSystemAPI::cchPathMax ]    = { 0 };
 
     CallS( pff->ErrPath( wszAbsPath ) );
 

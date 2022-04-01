@@ -240,8 +240,8 @@ void CCachedBlockSlot::Dump(    _In_ const CCachedBlockSlot&    slot,
 
     if ( slot.Cbid().Cbno() != cbnoInvalid )
     {
-        WCHAR   wszAnyAbsPath[ IFileSystemAPI::cchPathMax ] = { };
-        WCHAR   wszKeyPath[ IFileSystemAPI::cchPathMax ]    = { };
+        WCHAR   wszAnyAbsPath[ IFileSystemAPI::cchPathMax ]         = { };
+        WCHAR   wszKeyPath[ IFileIdentification::cwchKeyPathMax ]   = { };
 
         (void)pfident->ErrGetFilePathById(  slot.Cbid().Volumeid(),
                                             slot.Cbid().Fileid(),

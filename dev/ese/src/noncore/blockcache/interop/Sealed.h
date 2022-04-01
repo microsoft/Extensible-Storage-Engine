@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class Sealed : MarshalByRefObject
+                ref class Sealed : Remotable
                 {
                     public:
 

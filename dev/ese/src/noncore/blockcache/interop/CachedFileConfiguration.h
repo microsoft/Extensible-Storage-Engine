@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class CachedFileConfiguration : public CachedFileConfigurationBase<ICachedFileConfiguration, ::ICachedFileConfiguration, CCachedFileConfigurationWrapper<ICachedFileConfiguration, ::ICachedFileConfiguration>>
+                public ref class CachedFileConfiguration : CachedFileConfigurationBase<ICachedFileConfiguration, ::ICachedFileConfiguration, CCachedFileConfigurationWrapper<ICachedFileConfiguration, ::ICachedFileConfiguration>>
                 {
                     public:
 

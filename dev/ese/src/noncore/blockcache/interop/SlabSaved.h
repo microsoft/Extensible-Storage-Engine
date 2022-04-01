@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class SlabSaved : MarshalByRefObject
+                ref class SlabSaved : Remotable
                 {
                     public:
 

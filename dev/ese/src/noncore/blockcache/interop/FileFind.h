@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class FileFind : public FileFindBase<IFileFind,IFileFindAPI,CFileFindWrapper<IFileFind,IFileFindAPI>>
+                public ref class FileFind : FileFindBase<IFileFind,IFileFindAPI,CFileFindWrapper<IFileFind,IFileFindAPI>>
                 {
                     public:
 

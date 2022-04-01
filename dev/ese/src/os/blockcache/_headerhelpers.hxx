@@ -148,14 +148,14 @@ INLINE VOID CBlockCacheHeaderHelpers::ReportFileIdMismatch( _In_    IFileSystemC
                                                             _In_    const VolumeId                  volumeidActual,
                                                             _In_    const FileId                    fileidActual )
 {
-    const ULONG     cwsz                            = 5;
-    const WCHAR*    rgpwsz[ cwsz ]                  = { 0 };
-    DWORD           irgpwsz                         = 0;
-    WCHAR           wszAbsPath[ OSFSAPI_MAX_PATH ]  = { 0 };
-    WCHAR           wszVolumeIdExpected[ 64 ]       = { 0 };
-    WCHAR           wszFileIdExpected[ 64 ]         = { 0 };
-    WCHAR           wszVolumeIdActual[ 64 ]         = { 0 };
-    WCHAR           wszFileIdActual[ 64 ]           = { 0 };
+    const ULONG     cwsz                                        = 5;
+    const WCHAR*    rgpwsz[ cwsz ]                              = { 0 };
+    DWORD           irgpwsz                                     = 0;
+    WCHAR           wszAbsPath[ IFileSystemAPI::cchPathMax ]    = { 0 };
+    WCHAR           wszVolumeIdExpected[ 64 ]                   = { 0 };
+    WCHAR           wszFileIdExpected[ 64 ]                     = { 0 };
+    WCHAR           wszVolumeIdActual[ 64 ]                     = { 0 };
+    WCHAR           wszFileIdActual[ 64 ]                       = { 0 };
 
     CallS( pff->ErrPath( wszAbsPath ) );
     OSStrCbFormatW( wszVolumeIdExpected, sizeof( wszVolumeIdExpected ), L"0x%08x", volumeidExpected );

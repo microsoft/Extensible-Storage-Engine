@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class FileFindBase : public Base<TM,TN,TW>, IFileFind
+                public ref class FileFindBase : Base<TM,TN,TW>, IFileFind
                 {
                     public:
 

@@ -5,7 +5,7 @@
 
 
 #include <msclr\appdomain.h>
-#include <msclr\auto_gcroot.h>
+#include <msclr\gcroot.h>
 #include <vcclr.h>
 
 #define _CRT_RAND_S
@@ -33,6 +33,7 @@
 
 using namespace System;
 using namespace System::IO;
+using namespace System::Reflection;
 using namespace System::Runtime::InteropServices;
 
 #using <Microsoft.Isam.Esent.Interop.dll> as_friend

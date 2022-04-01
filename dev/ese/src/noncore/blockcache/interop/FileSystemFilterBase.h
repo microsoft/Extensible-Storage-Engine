@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class FileSystemFilterBase : public FileSystemBase<TM,TN,TW>, IFileSystemFilter
+                public ref class FileSystemFilterBase : FileSystemBase<TM,TN,TW>, IFileSystemFilter
                 {
                     public:
 
