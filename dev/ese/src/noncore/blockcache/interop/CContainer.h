@@ -22,28 +22,43 @@ namespace Internal
                                 m_idAppDomain( System::AppDomain::CurrentDomain->Id ),
                                 m_o( o )
                         {
+                            ObjectMarshaller::InitializeResolveHandler();
                         }
+
+                        void Release();
+
+                        Object^ O() const;
+
+                    private:
 
                         ~CContainer()
                         {
                             m_qwSignature = 0;
                         }
 
-                        Object^ O() const;
-
-                    private:
-
                         Object^ OFromOtherAppDomain() const;
                         AppDomain^ GetOtherAppDomain( Int32 appDomainId ) const;
 
                     private:
 
-                        static const QWORD                  s_qwSignature   = 0x4C796B6165757153;
+                        static const QWORD              s_qwSignature   = 0x4C796B6165757153;
 
-                        QWORD                               m_qwSignature; 
-                        int                                 m_idAppDomain;
-                        mutable msclr::auto_gcroot<Object^> m_o;
+                        QWORD                           m_qwSignature; 
+                        int                             m_idAppDomain;
+                        mutable msclr::gcroot<Object^>  m_o;
                 };
+
+                INLINE void CContainer::Release()
+                {
+                    if ( m_idAppDomain == System::AppDomain::CurrentDomain->Id )
+                    {
+                        this->~CContainer();
+                    }
+                    else
+                    {
+                        delete OFromOtherAppDomain();
+                    }
+                }
 
                 INLINE Object^ CContainer::O() const
                 {
@@ -59,7 +74,7 @@ namespace Internal
 
                     if ( m_idAppDomain == System::AppDomain::CurrentDomain->Id )
                     {
-                        return m_o.get();
+                        return m_o;
                     }
 
                     return OFromOtherAppDomain();
@@ -69,16 +84,22 @@ namespace Internal
                 {
                     AppDomain^          otherAppDomain          = nullptr;
                     IObjectMarshaller^  otherObjectMarshaller   = nullptr;
+                    Object^             o                       = nullptr;
 
                     try
                     {
                         otherAppDomain = GetOtherAppDomain( m_idAppDomain );
 
-                        otherObjectMarshaller = (IObjectMarshaller^)otherAppDomain->CreateInstanceAndUnwrap(
-                            ObjectMarshaller::typeid->Assembly->FullName,
-                            ObjectMarshaller::typeid->FullName );
+                        if ( otherAppDomain != nullptr )
+                        {
+                            otherObjectMarshaller = (IObjectMarshaller^)otherAppDomain->CreateInstanceAndUnwrap(
+                                ObjectMarshaller::typeid->Assembly->FullName,
+                                ObjectMarshaller::typeid->FullName );
 
-                        return otherObjectMarshaller->Get( (IntPtr)(void*)static_cast<const CContainer*>( this ) );
+                            o = otherObjectMarshaller->Get( (IntPtr)( void* )static_cast<const CContainer*>( this ) );
+                        }
+
+                        return o;
                     }
                     finally
                     {
@@ -107,20 +128,27 @@ namespace Internal
                                 msclr::_detail::FromGUID( __uuidof( CorRuntimeHost ) ),
                                 msclr::_detail::FromGUID( __uuidof( ICorRuntimeHost ) ) ).ToPointer() );
 
-                        phost->EnumDomains( &hEnum );
-
-                        while ( phost->NextDomain( hEnum, &pUnknown ) == S_OK )
+                        if ( phost != NULL )
                         {
-                            AppDomain^ appDomain = (AppDomain^)Marshal::GetObjectForIUnknown( (IntPtr)(void*)pUnknown );
-                            pUnknown->Release();
-                            pUnknown = NULL;
+                            phost->EnumDomains( &hEnum );
 
-                            if ( appDomain != nullptr && appDomain->Id == appDomainId )
+                            while ( phost->NextDomain( hEnum, &pUnknown ) == S_OK )
                             {
-                                return appDomain;
+                                AppDomain^ appDomain = (AppDomain^)Marshal::GetObjectForIUnknown( (IntPtr)(void*)pUnknown );
+                                pUnknown->Release();
+                                pUnknown = NULL;
+
+                                if ( appDomain != nullptr && appDomain->Id == appDomainId )
+                                {
+                                    return appDomain;
+                                }
                             }
                         }
 
+                        return nullptr;
+                    }
+                    catch ( PlatformNotSupportedException^ )
+                    {
                         return nullptr;
                     }
                     finally

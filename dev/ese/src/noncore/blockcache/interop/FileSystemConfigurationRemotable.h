@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class FileSystemConfigurationRemotable : MarshalByRefObject, IFileSystemConfiguration
+                ref class FileSystemConfigurationRemotable : Remotable, IFileSystemConfiguration
                 {
                     public:
 

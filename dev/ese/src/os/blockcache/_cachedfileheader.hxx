@@ -222,11 +222,12 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
 {
     ERR                 err                                 = JET_errSuccess;
     CCachedFileHeader*  pcfh                                = NULL;
-    const DWORD         cwchAnyAbsPathMax                   = OSFSAPI_MAX_PATH;
+    const DWORD         cwchAnyAbsPathMax                   = IFileSystemAPI::cchPathMax;
     WCHAR               wszAnyAbsPath[ cwchAnyAbsPathMax ]  = { 0 };
-    const DWORD         cwchKeyPathMax                      = OSFSAPI_MAX_PATH;
+    const DWORD         cwchKeyPathMax                      = IFileIdentification::cwchKeyPathMax;
     WCHAR               wszKeyPath[ cwchKeyPathMax ]        = { 0 };
-    WCHAR               wszAbsPath[ OSFSAPI_MAX_PATH ]      = { 0 };
+    const DWORD         cwchAbsPathMax                      = IFileSystemAPI::cchPathMax;
+    WCHAR               wszAbsPath[ cwchAbsPathMax ]        = { 0 };
     VolumeId            volumeid                            = volumeidInvalid;
     FileId              fileid                              = fileidInvalid;
     FileSerial          fileserial                          = fileserialInvalid;

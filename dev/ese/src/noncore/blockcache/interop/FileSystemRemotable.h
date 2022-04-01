@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class FileSystemRemotable : MarshalByRefObject, IFileSystem
+                ref class FileSystemRemotable : Remotable, IFileSystem
                 {
                     public:
 

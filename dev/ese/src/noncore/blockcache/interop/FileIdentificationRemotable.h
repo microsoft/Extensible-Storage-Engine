@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class FileIdentificationRemotable : MarshalByRefObject, IFileIdentification
+                ref class FileIdentificationRemotable : Remotable, IFileIdentification
                 {
                     public:
 

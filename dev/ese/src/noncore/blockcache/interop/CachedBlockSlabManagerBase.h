@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class CachedBlockSlabManagerBase : public Base<TM, TN, TW>, ICachedBlockSlabManager
+                public ref class CachedBlockSlabManagerBase : Base<TM, TN, TW>, ICachedBlockSlabManager
                 {
                     public:
 

@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class BlockCacheConfiguration : public BlockCacheConfigurationBase<IBlockCacheConfiguration, ::IBlockCacheConfiguration, CBlockCacheConfigurationWrapper<IBlockCacheConfiguration, ::IBlockCacheConfiguration>>
+                public ref class BlockCacheConfiguration : BlockCacheConfigurationBase<IBlockCacheConfiguration, ::IBlockCacheConfiguration, CBlockCacheConfigurationWrapper<IBlockCacheConfiguration, ::IBlockCacheConfiguration>>
                 {
                     public:
 

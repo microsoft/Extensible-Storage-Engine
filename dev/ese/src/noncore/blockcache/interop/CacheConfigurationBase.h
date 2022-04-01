@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class CacheConfigurationBase : public Base<TM, TN, TW>, ICacheConfiguration
+                public ref class CacheConfigurationBase : Base<TM, TN, TW>, ICacheConfiguration
                 {
                     public:
 
@@ -52,7 +52,7 @@ namespace Internal
 
                         virtual String^ Path()
                         {
-                            WCHAR   wszPath[ OSFSAPI_MAX_PATH ] = { 0 };
+                            WCHAR   wszPath[ IFileSystemAPI::cchPathMax ]   = { 0 };
 
                             Pi->Path( wszPath );
 

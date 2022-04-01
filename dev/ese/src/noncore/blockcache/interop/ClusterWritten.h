@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class ClusterWritten : MarshalByRefObject
+                ref class ClusterWritten : Remotable
                 {
                     public:
 

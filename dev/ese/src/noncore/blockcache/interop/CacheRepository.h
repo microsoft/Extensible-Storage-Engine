@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class CacheRepository : public CacheRepositoryBase<ICacheRepository, ::ICacheRepository, CCacheRepositoryWrapper<ICacheRepository, ::ICacheRepository>>
+                public ref class CacheRepository : CacheRepositoryBase<ICacheRepository, ::ICacheRepository, CCacheRepositoryWrapper<ICacheRepository, ::ICacheRepository>>
                 {
                     public:
 

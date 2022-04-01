@@ -4212,10 +4212,12 @@ typedef enum
 
 #define JET_paramPerfmonRefreshInterval         217 //  Interval, in units of msec, used by the Permormance Monitor to refresh values for collection.
 
+#define JET_paramEnableBlockCache               218 //  Indicates that the ESE Block Cache is enabled.  This is sufficient to access files previously attached to the ESE Block Cache but not to attach new files.
+
 #endif // JET_VERSION >= 0x0A01
 
 
-#define JET_paramMaxValueInvalid                218 //  This is not a valid parameter. It can change from release to release!
+#define JET_paramMaxValueInvalid                219 //  This is not a valid parameter. It can change from release to release!
 
 // end_PubEsent
 #if ( JET_VERSION >= 0x0A01 )

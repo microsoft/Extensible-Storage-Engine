@@ -3039,14 +3039,10 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         CInstanceFileSystemConfiguration( INST * const pinst )
             :   m_pinst( pinst ),
                 //m_cioOutstandingMax( dwMax ),
-                m_permillageSmoothIo( dwMax )
+                m_permillageSmoothIo( dwMax ),
+                m_fBlockCacheEnabledComputed( fFalse ),
+                m_fBlockCacheTestEnabled( fFalse )
         {
-            WCHAR wszBuf[ 16 ] = { 0 };
-            if (    FOSConfigGet( L"DEBUG", L"BlockCacheEnabled", wszBuf, sizeof( wszBuf ) ) &&
-                    wszBuf[ 0 ] )
-            {
-                m_fBlockCacheEnabled = !!_wtol( wszBuf );
-            }
         }
 
     public:
@@ -3142,21 +3138,41 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
         BOOL FBlockCacheEnabled() override
         {
-            if ( m_pinst == pinstNil || !PvParam( m_pinst, JET_paramBlockCacheConfiguration ) )
+            if ( !m_fBlockCacheEnabledComputed )
             {
-                return m_fBlockCacheEnabled;
+                if ( BoolParam( JET_paramEnableBlockCache ) )
+                {
+                    m_fBlockCacheEnabled = fTrue;
+                }
+
+                if ( m_pinst != pinstNil && PvParam( m_pinst, JET_paramBlockCacheConfiguration ) )
+                {
+                    m_fBlockCacheEnabled = fTrue;
+                }
+
+                WCHAR wszBuf[ 16 ] = { 0 };
+                if ( FOSConfigGet( L"DEBUG", L"BlockCacheEnabled", wszBuf, sizeof( wszBuf ) ) &&
+                    wszBuf[ 0 ] &&
+                    !!_wtol( wszBuf ) )
+                {
+                    m_fBlockCacheTestEnabled = fTrue;
+                }
+
+                m_fBlockCacheEnabled = m_fBlockCacheEnabled || m_fBlockCacheTestEnabled;
+
+                m_fBlockCacheEnabledComputed = fTrue;
             }
 
-            return fTrue;
+            return m_fBlockCacheEnabled;
         }
 
         ERR ErrGetBlockCacheConfiguration( _Out_ IBlockCacheConfiguration** const ppbcconfig ) override
         {
             ERR err = JET_errSuccess;
 
-            if ( m_pinst == pinstNil || !PvParam( m_pinst, JET_paramBlockCacheConfiguration ) )
+            if ( !FBlockCacheEnabled() || !PvParam( m_pinst, JET_paramBlockCacheConfiguration ) )
             {
-                Alloc( *ppbcconfig = new CInstanceBlockCacheConfiguration( m_pinst ) );
+                Alloc( *ppbcconfig = new CInstanceBlockCacheConfiguration( m_pinst, m_fBlockCacheTestEnabled ) );
             }
             else
             {
@@ -3174,8 +3190,9 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         {
             public:
 
-                CInstanceBlockCacheConfiguration( _In_ INST* const pinst )
-                    :   m_pinst( pinst )
+                CInstanceBlockCacheConfiguration( _In_ INST* const pinst, _In_ const BOOL fBlockCacheTestEnabled )
+                    :   m_pinst( pinst ),
+                        m_fBlockCacheTestEnabled( fBlockCacheTestEnabled )
                 {
                 }
 
@@ -3186,7 +3203,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
                 {
                     ERR err = JET_errSuccess;
 
-                    Alloc( *ppcfconfig = new CInstanceCachedFileConfiguration( m_pinst, wszKeyPathCachedFile ) );
+                    Alloc( *ppcfconfig = new CInstanceCachedFileConfiguration( m_pinst, wszKeyPathCachedFile, m_fBlockCacheTestEnabled ) );
 
                 HandleError:
                     return err;
@@ -3197,7 +3214,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
                 {
                     ERR err = JET_errSuccess;
 
-                    Alloc( *ppcconfig = new CInstanceCacheConfiguration( m_pinst ) );
+                    Alloc( *ppcconfig = new CInstanceCacheConfiguration( m_pinst, m_fBlockCacheTestEnabled ) );
 
                 HandleError:
                     return err;
@@ -3206,6 +3223,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
             private:
 
                 INST* const m_pinst;
+                const BOOL  m_fBlockCacheTestEnabled;
         };
 
         static void GetCachingFileFromInst( _In_                                INST* const     pinst,
@@ -3241,8 +3259,9 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         {
             public:
 
-                CInstanceCachedFileConfiguration(   _In_ INST* const            pinst,
-                                                    _In_z_  const WCHAR* const  wszKeyPathCachedFile )
+                CInstanceCachedFileConfiguration(   _In_    INST* const         pinst,
+                                                    _In_z_  const WCHAR* const  wszKeyPathCachedFile,
+                                                    _In_    const BOOL          fBlockCacheTestEnabled )
                 {
                     WCHAR rgwszExt[ OSFSAPI_MAX_PATH ] = { 0 };
 
@@ -3263,36 +3282,39 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
                         m_wszAbsPathCachingFile[ 0 ] = 0;
                     }
 
-                    m_fCachingEnabled = m_wszAbsPathCachingFile[ 0 ] != 0;
+                    m_fCachingEnabled = fBlockCacheTestEnabled && m_wszAbsPathCachingFile[ 0 ] != 0;
 
-                    if (    UtilCmpFileName(    rgwszExt,
-                                                ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ?
-                                                    wszOldLogExt : 
-                                                    wszNewLogExt ) == 0 ||
-                            UtilCmpFileName( rgwszExt, wszResLogExt ) == 0 ||
-                            UtilCmpFileName( rgwszExt, wszSecLogExt ) == 0 ||
-                            UtilCmpFileName( rgwszExt, wszRBSExt ) == 0 )
+                    if ( m_fCachingEnabled )
                     {
-                        m_cbBlockSize = cbLogFileHeader;
-                        m_ulPinnedHeaderSizeInBytes = 1 * m_cbBlockSize;
-                    }
-                    else if ( UtilCmpFileName(  rgwszExt,
-                                                ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ?
-                                                    wszOldChkExt : 
-                                                    wszNewChkExt ) == 0 )
-                    {
-                        m_cbBlockSize = cbCheckpoint;
-                        m_ulPinnedHeaderSizeInBytes = 2 * m_cbBlockSize;
-                    }
-                    else if ( UtilCmpFileName( rgwszExt, L".jfm" ) == 0 )  //  CFlushMap::s_wszFmFileExtension
-                    {
-                        m_cbBlockSize = 8192;  //  CFlushMap::s_cbFlushMapPageOnDisk
-                        m_ulPinnedHeaderSizeInBytes = 1 * m_cbBlockSize;
-                    }
-                    else
-                    {
-                        m_cbBlockSize = (ULONG)UlParam( JET_paramDatabasePageSize );
-                        m_ulPinnedHeaderSizeInBytes = 2 * m_cbBlockSize;
+                        if (    UtilCmpFileName(    rgwszExt,
+                                                    ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ?
+                                                        wszOldLogExt : 
+                                                        wszNewLogExt ) == 0 ||
+                                UtilCmpFileName( rgwszExt, wszResLogExt ) == 0 ||
+                                UtilCmpFileName( rgwszExt, wszSecLogExt ) == 0 ||
+                                UtilCmpFileName( rgwszExt, wszRBSExt ) == 0 )
+                        {
+                            m_cbBlockSize = cbLogFileHeader;
+                            m_ulPinnedHeaderSizeInBytes = 1 * m_cbBlockSize;
+                        }
+                        else if ( UtilCmpFileName(  rgwszExt,
+                                                    ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ?
+                                                        wszOldChkExt : 
+                                                        wszNewChkExt ) == 0 )
+                        {
+                            m_cbBlockSize = cbCheckpoint;
+                            m_ulPinnedHeaderSizeInBytes = 2 * m_cbBlockSize;
+                        }
+                        else if ( UtilCmpFileName( rgwszExt, L".jfm" ) == 0 )  //  CFlushMap::s_wszFmFileExtension
+                        {
+                            m_cbBlockSize = 8192;  //  CFlushMap::s_cbFlushMapPageOnDisk
+                            m_ulPinnedHeaderSizeInBytes = 1 * m_cbBlockSize;
+                        }
+                        else
+                        {
+                            m_cbBlockSize = (ULONG)UlParam( JET_paramDatabasePageSize );
+                            m_ulPinnedHeaderSizeInBytes = 2 * m_cbBlockSize;
+                        }
                     }
                 }
         };
@@ -3301,11 +3323,11 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         {
             public:
 
-                CInstanceCacheConfiguration( _In_ INST* const pinst )
+                CInstanceCacheConfiguration( _In_ INST* const pinst, _In_ const BOOL fBlockCacheTestEnabled )
                 {
                     GetCachingFileFromInst( pinst, m_wszAbsPathCachingFile );
 
-                    m_fCacheEnabled = m_wszAbsPathCachingFile[ 0 ] != 0;
+                    m_fCacheEnabled = fBlockCacheTestEnabled && m_wszAbsPathCachingFile[ 0 ] != 0;
 
                     m_cbCachedFilePerSlab = (ULONG)UlParam( JET_paramDatabasePageSize );
                 }
@@ -3399,6 +3421,8 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         INST* const m_pinst;
         //ULONG       m_cioOutstandingMax;
         ULONG       m_permillageSmoothIo;
+        BOOL        m_fBlockCacheEnabledComputed;
+        BOOL        m_fBlockCacheTestEnabled;
 };
 
 CInstanceFileSystemConfiguration g_fsconfigGlobal( pinstNil );

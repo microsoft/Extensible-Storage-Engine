@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class FileIdentification : public FileIdentificationBase<IFileIdentification, ::IFileIdentification, CFileIdentificationWrapper<IFileIdentification, ::IFileIdentification>>
+                public ref class FileIdentification : FileIdentificationBase<IFileIdentification, ::IFileIdentification, CFileIdentificationWrapper<IFileIdentification, ::IFileIdentification>>
                 {
                     public:
 

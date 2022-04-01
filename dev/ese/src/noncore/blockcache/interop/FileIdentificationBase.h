@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class FileIdentificationBase : public Base<TM, TN, TW>, IFileIdentification
+                public ref class FileIdentificationBase : Base<TM, TN, TW>, IFileIdentification
                 {
                     public:
 
@@ -66,8 +66,8 @@ namespace Internal
                 template< class TM, class TN, class TW >
                 inline String^ FileIdentificationBase<TM, TN, TW>::GetFileKeyPath( String^ path )
                 {
-                    ERR     err                                 = JET_errSuccess;
-                    WCHAR   wszKeyPath[ OSFSAPI_MAX_PATH ]      = { 0 };
+                    ERR     err                                                 = JET_errSuccess;
+                    WCHAR   wszKeyPath[ ::IFileIdentification::cwchKeyPathMax ] = { 0 };
 
                     pin_ptr<const Char> wszPath = PtrToStringChars( path );
                     Call( Pi->ErrGetFileKeyPath( wszPath, wszKeyPath ) );
@@ -85,9 +85,9 @@ namespace Internal
                     [Out] String^% anyAbsPath,
                     [Out] String^% keyPath )
                 {
-                    ERR     err                                 = JET_errSuccess;
-                    WCHAR   wszAnyAbsPath[ OSFSAPI_MAX_PATH ]   = { 0 };
-                    WCHAR   wszKeyPath[ OSFSAPI_MAX_PATH ]      = { 0 };
+                    ERR     err                                                 = JET_errSuccess;
+                    WCHAR   wszAnyAbsPath[ IFileSystemAPI::cchPathMax ]         = { 0 };
+                    WCHAR   wszKeyPath[ ::IFileIdentification::cwchKeyPathMax ] = { 0 };
 
                     anyAbsPath = nullptr;
                     keyPath = nullptr;

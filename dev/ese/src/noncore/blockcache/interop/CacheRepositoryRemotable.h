@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class CacheRepositoryRemotable : MarshalByRefObject, ICacheRepository
+                ref class CacheRepositoryRemotable : Remotable, ICacheRepository
                 {
                     public:
 

@@ -630,11 +630,11 @@ class TFileFilter  //  ff
                                                 _In_ const ERR          errFromCall,
                                                 _In_ const ERR          errToReturn )
                 {
-                    WCHAR           wszCachingFile[ OSFSAPI_MAX_PATH ]  = { 0 };
-                    WCHAR           wszFunction[ 256 ]                  = { 0 };
-                    WCHAR           wszErrorFromCall[ 64 ]              = { 0 };
-                    WCHAR           wszErrorToReturn[ 64 ]              = { 0 };
-                    const WCHAR*    rgpwsz[]                            = { wszCachingFile, wszFunction, wszErrorFromCall, wszErrorToReturn };
+                    WCHAR           wszCachingFile[ IFileSystemAPI::cchPathMax ]    = { 0 };
+                    WCHAR           wszFunction[ 256 ]                              = { 0 };
+                    WCHAR           wszErrorFromCall[ 64 ]                          = { 0 };
+                    WCHAR           wszErrorToReturn[ 64 ]                          = { 0 };
+                    const WCHAR*    rgpwsz[]                                        = { wszCachingFile, wszFunction, wszErrorFromCall, wszErrorToReturn };
 
                     m_pff->m_pcfconfig->CachingFilePath( wszCachingFile );
                     OSStrCbFormatW( wszFunction, sizeof( wszFunction ), L"%hs", szFunction );

@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class CachedBlockSlab : public CachedBlockSlabBase<ICachedBlockSlab, ::ICachedBlockSlab, CCachedBlockSlabWrapper<ICachedBlockSlab, ::ICachedBlockSlab>>
+                public ref class CachedBlockSlab : CachedBlockSlabBase<ICachedBlockSlab, ::ICachedBlockSlab, CCachedBlockSlabWrapper<ICachedBlockSlab, ::ICachedBlockSlab>>
                 {
                     public:
 

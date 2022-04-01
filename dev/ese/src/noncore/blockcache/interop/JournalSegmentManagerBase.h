@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class JournalSegmentManagerBase : public Base<TM, TN, TW>, IJournalSegmentManager
+                public ref class JournalSegmentManagerBase : Base<TM, TN, TW>, IJournalSegmentManager
                 {
                     public:
 

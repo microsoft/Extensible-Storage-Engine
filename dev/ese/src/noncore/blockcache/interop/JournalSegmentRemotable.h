@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class JournalSegmentRemotable : MarshalByRefObject, IJournalSegment
+                ref class JournalSegmentRemotable : Remotable, IJournalSegment
                 {
                     public:
 

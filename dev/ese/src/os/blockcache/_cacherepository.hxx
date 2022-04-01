@@ -209,9 +209,9 @@ ERR TCacheRepository<I>::ErrOpen(   _In_    IFileSystemFilter* const        pfsf
                                     _Out_   ICache** const                  ppc )
 {
     ERR                     err                             = JET_errSuccess;
-    const DWORD             cwchAbsPathMax                  = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAbsPathMax                  = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAbsPath[ cwchAbsPathMax ]    = { 0 };
-    const DWORD             cwchKeyPathMax                  = OSFSAPI_MAX_PATH;
+    const DWORD             cwchKeyPathMax                  = IFileIdentification::cwchKeyPathMax;
     WCHAR                   wszKeyPath[ cwchKeyPathMax ]    = { 0 };
     CSemaphore              sem( CSyncBasicInfo( "TCacheRepository<I>::ErrOpen" ) );
     CCachePathTableEntry*   pcpte                           = NULL;
@@ -278,9 +278,9 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
                                         _Out_                   ICache** const                  ppc )
 {
     ERR                     err                                 = JET_errSuccess;
-    const DWORD             cwchAnyAbsPathMax                   = OSFSAPI_MAX_PATH;
+    const DWORD             cwchAnyAbsPathMax                   = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAnyAbsPath[ cwchAnyAbsPathMax ]  = { 0 };
-    const DWORD             cwchKeyPathMax                      = OSFSAPI_MAX_PATH;
+    const DWORD             cwchKeyPathMax                      = IFileIdentification::cwchKeyPathMax;
     WCHAR                   wszKeyPath[ cwchKeyPathMax ]        = { 0 };
     VolumeId                volumeidActual                      = volumeidInvalid;
     FileId                  fileidActual                        = fileidInvalid;

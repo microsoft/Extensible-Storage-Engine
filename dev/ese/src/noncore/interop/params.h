@@ -235,7 +235,8 @@ MSINTERNAL enum class MJET_PARAM
     EnableRBS = 215, // Turns on revert snapshot. Not an ESE flight as we will let the variant be controlled outside ESE (like HA can enable this when lag is disabled)
     RBSFilePath = 216, // path to the revert snapshot directory
     PerfmonRefreshInterval = 217, // Interval, in units of msec, used by the Permormance Monitor to refresh values for collection.
-    MaxValueInvalid = 218, // This is not a valid parameter. It can change from release to release!
+    EnableBlockCache = 218, // Indicates that the ESE Block Cache is enabled.  This is sufficient to access files previously attached to the ESE Block Cache but not to attach new files.
+    MaxValueInvalid = 219, // This is not a valid parameter. It can change from release to release!
 };
 
 }

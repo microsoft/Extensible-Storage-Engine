@@ -54,19 +54,26 @@ namespace Internal
                     public:
 
                         CWrapper( [Out] TM^% tm )
-                            :   m_container( tm )
+                            :   m_pContainer( (CContainer*)m_rgbContainer )
                         {
+                            new( m_pContainer ) CContainer( tm );
                             tm = nullptr;
+                        }
+
+                        ~CWrapper()
+                        {
+                            m_pContainer->Release();
                         }
 
                         TM^ I() const
                         {
-                            return (TM^)m_container.O();
+                            return (TM^)m_pContainer->O();
                         }
 
                     private:
 
-                        const CContainer m_container;
+                        CContainer* const   m_pContainer;
+                        BYTE                m_rgbContainer[ sizeof( CContainer ) ];
                 };
             }
         }

@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class CachedBlockWriteCountsManagerBase : public Base<TM, TN, TW>, ICachedBlockWriteCountsManager
+                public ref class CachedBlockWriteCountsManagerBase : Base<TM, TN, TW>, ICachedBlockWriteCountsManager
                 {
                     public:
 

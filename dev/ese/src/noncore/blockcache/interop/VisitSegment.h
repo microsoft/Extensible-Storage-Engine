@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class VisitSegment : MarshalByRefObject
+                ref class VisitSegment : Remotable
                 {
                     public:
 

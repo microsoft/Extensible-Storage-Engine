@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class CachedFileConfigurationBase : public Base<TM, TN, TW>, ICachedFileConfiguration
+                public ref class CachedFileConfigurationBase : Base<TM, TN, TW>, ICachedFileConfiguration
                 {
                     public:
 
@@ -46,7 +46,7 @@ namespace Internal
                 template< class TM, class TN, class TW >
                 inline String^ CachedFileConfigurationBase<TM, TN, TW>::CachingFilePath()
                 {
-                    WCHAR   wszPath[ OSFSAPI_MAX_PATH ] = { 0 };
+                    WCHAR   wszPath[ IFileSystemAPI::cchPathMax ]   = { 0 };
 
                     Pi->CachingFilePath( wszPath );
 

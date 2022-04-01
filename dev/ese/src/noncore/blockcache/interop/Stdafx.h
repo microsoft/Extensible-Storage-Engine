@@ -6,6 +6,7 @@
 #include "Common.h"
 
 #include "IObjectMarshaller.h"
+#include "Remotable.h"
 #include "ObjectMarshaller.h"
 #include "CContainer.h"
 #include "CWrapper.h"

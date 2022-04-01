@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                public ref class FileSystemConfiguration : public FileSystemConfigurationBase<IFileSystemConfiguration,::IFileSystemConfiguration,CFileSystemConfigurationWrapper<IFileSystemConfiguration,::IFileSystemConfiguration>>
+                public ref class FileSystemConfiguration : FileSystemConfigurationBase<IFileSystemConfiguration,::IFileSystemConfiguration,CFileSystemConfigurationWrapper<IFileSystemConfiguration,::IFileSystemConfiguration>>
                 {
                     public:
 

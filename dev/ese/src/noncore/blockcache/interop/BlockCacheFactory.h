@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class BlockCacheFactory : public BlockCacheFactoryBase<IBlockCacheFactory, ::IBlockCacheFactory, CBlockCacheFactoryWrapper<IBlockCacheFactory, ::IBlockCacheFactory>>
+                ref class BlockCacheFactory : BlockCacheFactoryBase<IBlockCacheFactory, ::IBlockCacheFactory, CBlockCacheFactoryWrapper<IBlockCacheFactory, ::IBlockCacheFactory>>
                 {
                     public:
 

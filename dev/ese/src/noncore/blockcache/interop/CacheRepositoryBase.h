@@ -14,7 +14,7 @@ namespace Internal
             namespace Interop
             {
                 template< class TM, class TN, class TW >
-                public ref class CacheRepositoryBase : public Base<TM, TN, TW>, ICacheRepository
+                public ref class CacheRepositoryBase : Base<TM, TN, TW>, ICacheRepository
                 {
                     public:
 

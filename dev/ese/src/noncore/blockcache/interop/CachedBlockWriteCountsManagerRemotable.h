@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class CachedBlockWriteCountsManagerRemotable : MarshalByRefObject, ICachedBlockWriteCountsManager
+                ref class CachedBlockWriteCountsManagerRemotable : Remotable, ICachedBlockWriteCountsManager
                 {
                     public:
 
