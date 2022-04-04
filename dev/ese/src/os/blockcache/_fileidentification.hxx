@@ -449,7 +449,7 @@ ERR TFileIdentification<I>::ErrMakeKeyPath( _In_z_                              
     {
         Call( ErrGetLastError() );
     }
-    if ( cwchKeyPath >= IFileIdentification::cwchKeyPathMax )
+    if ( cwchKeyPath > IFileIdentification::cwchKeyPathMax )
     {
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
     }
