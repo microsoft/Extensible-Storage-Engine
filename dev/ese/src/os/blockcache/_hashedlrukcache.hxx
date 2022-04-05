@@ -3423,6 +3423,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
     QWORD                   cbJournal                   = 0;
     QWORD                   ibChunk                     = 0;
     QWORD                   cbChunk                     = 0;
+    QWORD                   ccbwcs                      = 0;
     QWORD                   ibWriteCounts               = 0;
     QWORD                   cbWriteCounts               = 0;
     QWORD                   ibClusters                  = 0;
@@ -3495,8 +3496,10 @@ ERR THashedLRUKCache<I>::ErrCreate()
 
     //  compute the offset range of the write counts protecting the CCachedBlockChunk array from lost writes
 
+    ccbwcs = roundup( cbChunk / sizeof( CCachedBlockChunk ), CCachedBlockWriteCounts::Ccbwc() ) / CCachedBlockWriteCounts::Ccbwc();
+
     ibWriteCounts = cbCachingFile;
-    cbWriteCounts = ( roundup( cbChunk / sizeof( CCachedBlockChunk ), CCachedBlockWriteCounts::Ccbwc() ) / CCachedBlockWriteCounts::Ccbwc() ) * sizeof( CCachedBlockWriteCounts );
+    cbWriteCounts = 2 * ccbwcs * sizeof( CCachedBlockWriteCounts );
 
     cbCachingFile = ibWriteCounts + cbWriteCounts;
     if ( cbCachingFile > cbCachingFileMax )
@@ -3569,6 +3572,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
                                                 cbChunkJournal,
                                                 ibWriteCounts,
                                                 cbWriteCounts,
+                                                ccbwcs,
                                                 ibClustersHash,
                                                 cbClustersHash, 
                                                 ibClustersJournal,
@@ -4451,6 +4455,7 @@ ERR THashedLRUKCache<I>::ErrInit()
     Call( CCachedBlockWriteCountsManager::ErrInit(  PffCaching(),
                                                     m_pch->IbWriteCounts(),
                                                     m_pch->CbWriteCounts(), 
+                                                    m_pch->Ccbwcs(),
                                                     &m_pcbwcm ) );
 
     //  initialize the slab managers

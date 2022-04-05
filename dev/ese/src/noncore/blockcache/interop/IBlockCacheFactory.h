@@ -96,7 +96,8 @@ namespace Internal
                     CachedBlockWriteCountsManager^ LoadCachedBlockWriteCountsManager(
                         FileFilter^ ff,
                         Int64 offsetInBytes,
-                        Int64 sizeInBytes );
+                        Int64 sizeInBytes,
+                        Int64 countCachedBlockWriteCounts );
 
                     CachedBlockSlab^ LoadCachedBlockSlab(
                         FileFilter^ ff,

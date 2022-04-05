@@ -150,6 +150,7 @@ namespace Internal
                         ERR ErrLoadCachedBlockWriteCountsManager(   _In_    ::IFileFilter* const                        pff,
                                                                     _In_    const QWORD                                 ib,
                                                                     _In_    const QWORD                                 cb,
+                                                                    _In_    const QWORD                                 ccbwcs,
                                                                     _Out_   ::ICachedBlockWriteCountsManager** const    ppcbwcm ) override
                         {
                             return ErrERRCheck( JET_wrnNyi );

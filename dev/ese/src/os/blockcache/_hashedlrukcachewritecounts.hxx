@@ -34,6 +34,9 @@ class CCachedBlockWriteCounts : CBlockCacheHeaderHelpers  // cbwcs
 
         static DWORD Ccbwc() { return _countof( m_rgcbwc ); }
 
+        CachedBlockWriteCount Cbwc() const { return m_le_cbwc; }
+        DWORD DwUniqueId() const { return m_le_dwUniqueId; }
+
         volatile CachedBlockWriteCount* Pcbwc( _In_ const DWORD icbwc )
         {
             return icbwc >= Ccbwc() ? NULL : &m_rgcbwc[ icbwc ];
@@ -41,7 +44,9 @@ class CCachedBlockWriteCounts : CBlockCacheHeaderHelpers  // cbwcs
 
         ERR ErrVerify( _In_ const QWORD ib );
 
-        ERR ErrFinalize();
+        ERR ErrFinalize(    _In_ const QWORD                    ib,
+                            _In_ const CachedBlockWriteCount    cbwc,
+                            _In_ const DWORD                    dwUniqueId );
 
         void operator delete( _In_opt_ void* const pv );
 
@@ -62,16 +67,20 @@ class CCachedBlockWriteCounts : CBlockCacheHeaderHelpers  // cbwcs
 
     private:
 
-        LittleEndian<ULONG>             m_le_ulChecksum;    //  offset 0:  checksum
-        BYTE                            m_rgbZero[ 4 ];     //  unused because it is not protected by the ECC
-        LittleEndian<ClusterNumber>     m_le_clno;          //  location of these states
+        LittleEndian<ULONG>                 m_le_ulChecksum;    //  offset 0:  checksum
+        BYTE                                m_rgbZero[ 4 ];     //  unused because it is not protected by the ECC
+        LittleEndian<ClusterNumber>         m_le_clno;          //  location of these states
+        LittleEndian<CachedBlockWriteCount> m_le_cbwc;          //  write set write count
+        LittleEndian<DWORD>                 m_le_dwUniqueId;    //  write set unique id
 
-        static const size_t             s_cbCachedBlockWriteCounts  =   cbStates
-                                                                        - sizeof( m_le_ulChecksum )
-                                                                        - sizeof( m_rgbZero )
-                                                                        - sizeof( m_le_clno );
+        static const size_t                 s_cbCachedBlockWriteCounts  =   cbStates
+                                                                            - sizeof( m_le_ulChecksum )
+                                                                            - sizeof( m_rgbZero )
+                                                                            - sizeof( m_le_clno )
+                                                                            - sizeof( m_le_cbwc )
+                                                                            - sizeof( m_le_dwUniqueId );
 
-        volatile CachedBlockWriteCount  m_rgcbwc[ s_cbCachedBlockWriteCounts / sizeof( CachedBlockWriteCount ) ];
+        volatile CachedBlockWriteCount      m_rgcbwc[ s_cbCachedBlockWriteCounts / sizeof( CachedBlockWriteCount ) ];
 };
 
 #include <poppack.h>
@@ -87,7 +96,7 @@ INLINE CCachedBlockWriteCounts::CCachedBlockWriteCounts()
 {
     C_ASSERT( 0 == offsetof( CCachedBlockWriteCounts, m_le_ulChecksum ) );
     C_ASSERT( cbStates == sizeof( CCachedBlockWriteCounts ) );
-    C_ASSERT( 1021 == _countof( m_rgcbwc ) );
+    C_ASSERT( 1019 == _countof( m_rgcbwc ) );
 }
 
 INLINE ERR CCachedBlockWriteCounts::ErrCreate( _Out_ CCachedBlockWriteCounts** const ppcbwcs )
@@ -173,11 +182,19 @@ HandleError:
     return err;
 }
 
-INLINE ERR CCachedBlockWriteCounts::ErrFinalize()
+INLINE ERR CCachedBlockWriteCounts::ErrFinalize(    _In_ const QWORD                    ib,
+                                                    _In_ const CachedBlockWriteCount    cbwc,
+                                                    _In_ const DWORD                    dwUniqueId )
 {
     //  ensure that the bytes that aren't used because they aren't covered by the ECC are set to zero
 
     memset( m_rgbZero, 0, _cbrg( m_rgbZero ) );
+
+    //  set our cluster number, write set count, and unique id
+
+    m_le_clno = ClusterNumber( ib / cbCachedBlock );
+    m_le_cbwc = cbwc;
+    m_le_dwUniqueId = dwUniqueId;
 
     //  compute our checksum
 
@@ -198,6 +215,8 @@ INLINE ERR CCachedBlockWriteCounts::ErrDump( _In_ CPRINTF* const pcprintf )
     (*pcprintf)(    "Fields:\n" );
     (*pcprintf)(    "                         ulChecksum:  0x%08lx\n", LONG( m_le_ulChecksum ) );
     (*pcprintf)(    "                               clno:  0x%08lx\n", LONG( ClusterNumber( m_le_clno ) ) );
+    (*pcprintf)(    "                               cbwc:  0x%08lx\n", LONG( CachedBlockWriteCount( m_le_cbwc ) ) );
+    (*pcprintf)(    "                         dwUniqueId:  0x%08lx\n", LONG( m_le_dwUniqueId ) );
     (*pcprintf)(    "    Cached Block Write Counts Count:  %d\n", LONG( Ccbwc() ) );
     (*pcprintf)(    "\n" );
 

@@ -203,6 +203,11 @@ INLINE ERR ErrIgnoreVerificationErrors( _In_ const ERR err )
     return FVerificationError( err ) ? JET_errSuccess : err;
 }
 
+INLINE ERR ErrAccumulateError( _In_ const ERR errExisting, _In_ const ERR errNew )
+{
+    return errExisting < JET_errSuccess ? errExisting : ( errNew < JET_errSuccess ? errNew : JET_errSuccess );
+}
+
 
 //  Error translation.
 
