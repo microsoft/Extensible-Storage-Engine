@@ -173,9 +173,10 @@ class TBlockCacheFactoryWrapper
         ERR ErrLoadCachedBlockWriteCountsManager(   _In_    IFileFilter* const                      pff,
                                                     _In_    const QWORD                             ib,
                                                     _In_    const QWORD                             cb,
+                                                    _In_    const QWORD                             ccbwcs,
                                                     _Out_   ICachedBlockWriteCountsManager** const  ppcbwcm ) override
         {
-            return m_piInner->ErrLoadCachedBlockWriteCountsManager( pff, ib, cb, ppcbwcm );
+            return m_piInner->ErrLoadCachedBlockWriteCountsManager( pff, ib, cb, ccbwcs, ppcbwcm );
         }
 
         ERR ErrLoadCachedBlockSlab( _In_    IFileFilter* const                      pff,

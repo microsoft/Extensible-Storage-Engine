@@ -401,9 +401,10 @@ namespace Internal
                         static CachedBlockWriteCountsManager^ LoadCachedBlockWriteCountsManager(
                             FileFilter^ ff,
                             Int64 offsetInBytes,
-                            Int64 sizeInBytes )
+                            Int64 sizeInBytes,
+                            Int64 countCachedBlockWriteCounts )
                         {
-                            return factory->LoadCachedBlockWriteCountsManager( ff, offsetInBytes, sizeInBytes );
+                            return factory->LoadCachedBlockWriteCountsManager( ff, offsetInBytes, sizeInBytes, countCachedBlockWriteCounts );
                         }
 
                         static CachedBlockSlab^ LoadCachedBlockSlab(

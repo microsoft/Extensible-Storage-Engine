@@ -98,7 +98,8 @@ class COSBlockCacheFactoryImpl : public IBlockCacheFactory
 
         ERR ErrLoadCachedBlockWriteCountsManager(   _In_    IFileFilter* const                      pff,
                                                     _In_    const QWORD                             ib,
-                                                    _In_    const QWORD                             cb,
+                                                    _In_    const QWORD                             cb, 
+                                                    _In_    const QWORD                             ccbwcs,
                                                     _Out_   ICachedBlockWriteCountsManager** const  ppcbwcm ) override;
 
         ERR ErrCreateCachedBlockSlabWrapper(    _Inout_ ICachedBlockSlab** const    ppcbsInner,
@@ -628,7 +629,8 @@ HandleError:
 
 INLINE ERR COSBlockCacheFactoryImpl::ErrLoadCachedBlockWriteCountsManager(  _In_    IFileFilter* const                      pff, 
                                                                             _In_    const QWORD                             ib, 
-                                                                            _In_    const QWORD                             cb,
+                                                                            _In_    const QWORD                             cb, 
+                                                                            _In_    const QWORD                             ccbwcs,
                                                                             _Out_   ICachedBlockWriteCountsManager** const  ppcbwcm )
 {
     ERR                             err     = JET_errSuccess;
@@ -636,7 +638,7 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrLoadCachedBlockWriteCountsManager(  _In_
 
     *ppcbwcm = NULL;
 
-    Call( CCachedBlockWriteCountsManager::ErrInit( pff, ib, cb, &pcbwcm ) );
+    Call( CCachedBlockWriteCountsManager::ErrInit( pff, ib, cb, ccbwcs, &pcbwcm ) );
 
     *ppcbwcm = pcbwcm;
     pcbwcm = NULL;

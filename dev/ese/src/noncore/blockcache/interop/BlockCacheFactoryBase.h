@@ -357,7 +357,8 @@ namespace Internal
                         virtual CachedBlockWriteCountsManager^ LoadCachedBlockWriteCountsManager(
                             FileFilter^ ff,
                             Int64 offsetInBytes,
-                            Int64 sizeInBytes )
+                            Int64 sizeInBytes,
+                            Int64 countCachedBlockWriteCounts)
                         {
                             ERR                                 err     = JET_errSuccess;
                             ::ICachedBlockWriteCountsManager*   pcbwcm  = NULL;
@@ -365,6 +366,7 @@ namespace Internal
                             Call( Pi->ErrLoadCachedBlockWriteCountsManager( ff->Pi,
                                                                             offsetInBytes,
                                                                             sizeInBytes,
+                                                                            countCachedBlockWriteCounts,
                                                                             &pcbwcm ) );
 
                             return gcnew CachedBlockWriteCountsManager( &pcbwcm );

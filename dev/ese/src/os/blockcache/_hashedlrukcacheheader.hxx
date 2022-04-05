@@ -26,6 +26,7 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
                                 _In_    const QWORD                     cbChunkJournal,
                                 _In_    const QWORD                     ibWriteCounts,
                                 _In_    const QWORD                     cbWriteCounts,
+                                _In_    const QWORD                     ccbwcs,
                                 _In_    const QWORD                     ibClustersHash,
                                 _In_    const QWORD                     cbClustersHash,
                                 _In_    const QWORD                     ibClustersJournal,
@@ -53,6 +54,7 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
         QWORD CbChunkJournal() const { return m_le_cbChunkJournal; }
         QWORD IbWriteCounts() const { return m_le_ibWriteCounts; }
         QWORD CbWriteCounts() const { return m_le_cbWriteCounts; }
+        QWORD Ccbwcs() const { return m_le_ccbwcs; }
         QWORD IbClustersHash() const { return m_le_ibClustersHash; }
         QWORD CbClustersHash() const { return m_le_cbClustersHash; }
         QWORD IbClustersJournal() const { return m_le_ibClustersJournal; }
@@ -89,6 +91,7 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
         LittleEndian<QWORD> m_le_ibChunkJournal;        //  Journal clusters CCachedBlockChunk array offset
         LittleEndian<QWORD> m_le_ibWriteCounts;         //  CCachedBlockWriteCounts array offset
         LittleEndian<QWORD> m_le_cbWriteCounts;         //  CCachedBlockWriteCounts array size
+        LittleEndian<QWORD> m_le_ccbwcs;                //  count of CCachedBlockWriteCounts per write set
         LittleEndian<QWORD> m_le_ibClustersHash;        //  Hash table Cluster array offset
         LittleEndian<QWORD> m_le_cbClustersHash;        //  Hash table Cluster array size
         LittleEndian<QWORD> m_le_ibClustersJournal;     //  Journal Cluster array offset
@@ -109,6 +112,7 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
                                             - sizeof( m_le_cbChunkJournal )
                                             - sizeof( m_le_ibWriteCounts )
                                             - sizeof( m_le_cbWriteCounts )
+                                            - sizeof( m_le_ccbwcs )
                                             - sizeof( m_le_ibClustersHash )
                                             - sizeof( m_le_cbClustersHash )
                                             - sizeof( m_le_ibClustersJournal )
@@ -135,6 +139,7 @@ INLINE ERR CHashedLRUKCacheHeader::ErrCreate(   _In_    const QWORD             
                                                 _In_    const QWORD                     cbChunkJournal,
                                                 _In_    const QWORD                     ibWriteCounts,
                                                 _In_    const QWORD                     cbWriteCounts,
+                                                _In_    const QWORD                     ccbwcs,
                                                 _In_    const QWORD                     ibClustersHash,
                                                 _In_    const QWORD                     cbClustersHash,
                                                 _In_    const QWORD                     ibClustersJournal,
@@ -162,6 +167,7 @@ INLINE ERR CHashedLRUKCacheHeader::ErrCreate(   _In_    const QWORD             
     pch->m_le_cbChunkJournal = cbChunkJournal;
     pch->m_le_ibWriteCounts = ibWriteCounts;
     pch->m_le_cbWriteCounts = cbWriteCounts;
+    pch->m_le_ccbwcs = ccbwcs;
     pch->m_le_ibClustersHash = ibClustersHash;
     pch->m_le_cbClustersHash = cbClustersHash;
     pch->m_le_ibClustersJournal = ibClustersJournal;
@@ -261,6 +267,7 @@ INLINE ERR CHashedLRUKCacheHeader::ErrDump( _In_ CPRINTF* const pcprintf )
     (*pcprintf)(    "      Journal Clusters Cached Block Chunk Array Size:  0x%016I64x\n", QWORD( m_le_cbChunkJournal ) );
     (*pcprintf)(    "              Cached Block Write Counts Array Offset:  0x%016I64x\n", QWORD( m_le_ibWriteCounts ) );
     (*pcprintf)(    "                Cached Block Write Counts Array Size:  0x%016I64x\n", QWORD( m_le_cbWriteCounts ) );
+    (*pcprintf)(    "             Cached Block Write Counts per Write Set:  0x%016I64x\n", QWORD( m_le_ccbwcs ) );
     (*pcprintf)(    "                     Hash Table Cluster Array Offset:  0x%016I64x\n", QWORD( m_le_ibClustersHash ) );
     (*pcprintf)(    "                       Hash Table Cluster Array Size:  0x%016I64x\n", QWORD( m_le_cbClustersHash ) );
     (*pcprintf)(    "                        Journal Cluster Array Offset:  0x%016I64x\n", QWORD( m_le_ibClustersJournal ) );
