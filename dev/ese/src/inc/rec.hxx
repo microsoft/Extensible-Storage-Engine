@@ -1949,6 +1949,10 @@ ERR ErrRECScrubLVChunk(
     const CHAR chScrub );
 
 ERR ErrRECInitAutoIncSpace( _In_ FUCB* const pfucb, QWORD qwAutoInc );
+ERR ErrRECRetrieveAndReserveAutoInc(
+    _In_ FUCB* const                    pfucb,
+    _Out_writes_bytes_( cbMax ) VOID*   pv,
+    _In_ const ULONG                    cbMax );
 
 ERR ErrRECCreateColumnReference(
     FUCB* const             pfucb,

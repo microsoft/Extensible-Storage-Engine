@@ -4909,7 +4909,7 @@ typedef struct
 #define JET_prepReplaceNoLock               4
 #define JET_prepInsertCopy                  5
 // end_PubEsent
-// #define JET_prepInsertCopyWithoutSLVColumns  6   //  same as InsertCopy, except that SLV columns are nullified instead of copied in the new record */
+// #define JET_prepInsertCopyWithoutSLVColumns  6   //  same as JET_prepInsertCopy, except that SLV columns are nullified instead of copied in the new record */
 // begin_PubEsent
 #if ( JET_VERSION >= 0x0501 )
 #define JET_prepInsertCopyDeleteOriginal    7   //  used for updating a record in the primary key; avoids the delete/insert process and updates autoinc */
@@ -4920,6 +4920,11 @@ typedef struct
 #if ( JET_VERSION >= 0x0603 )
 #define JET_prepInsertCopyReplaceOriginal   9   //  used for updating a record in the primary key; avoids the delete/insert process and keeps autoinc */
 #endif // JET_VERSION >= 0x0603
+// end_PubEsent
+#if ( JET_VERSION >= 0x0A01 )
+#define JET_prepInsertMustSetAutoIncrement  10  //  this option has the same behavior as JET_prepInsert, but the caller must set the auto-increment column explicitly */
+#endif // JET_VERSION >= 0x0A01
+// begin_PubEsent
 
 #if ( JET_VERSION >= 0x0603 )
 // Values for JET_paramEnableSqm
@@ -5527,6 +5532,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_TblInfoLVChunkMax         13U
 #define JET_TblInfoEncryptionKey      14U
 #define JET_TblInfoSplitBuffers       15U
+#define JET_TblInfoRetrieveAndReserveAutoIncrement 16U  // Retrieves the current table-wide auto-increment counter and increments its value. Only valid with JetGetTableInfo.
 #endif
 // begin_PubEsent
 
@@ -6548,6 +6554,8 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errUpdateMustVersion            -1621 /* No version updates only for uncommitted tables */
 #define JET_errDecryptionFailed             -1622 /* Data could not be decrypted */
 #define JET_errEncryptionBadItag            -1623 /* Cannot encrypt tagged columns with itag>1 */
+#define JET_errSetAutoIncrementTooHigh      -1624  /* The auto-increment value that the user tried to set explicitly is too high . */
+#define JET_errAutoIncrementNotSet          -1625  /* The user must have explicitly set the auto-increment column for this table. */
 
 /*  Sort Table errors
 /**/

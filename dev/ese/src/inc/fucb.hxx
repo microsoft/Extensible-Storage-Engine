@@ -28,6 +28,7 @@ const CBSTAT    fCBSTATLock                                 = 0x08;
 const CBSTAT    fCBSTATInsertCopyDeleteOriginal             = 0x10;
 const CBSTAT    fCBSTATUpdateForInsertCopyDeleteOriginal    = 0x20;
 const CBSTAT    fCBSTATInsertReadOnlyCopy                   = 0x40;
+const CBSTAT    fCBSTATMustSetAutoInc                       = 0x80;
 
 //  describes structure used to hold before-images of LVs
 //
@@ -1072,6 +1073,14 @@ INLINE VOID PrepareInsert( FUCB *pfucb )
     pfucb->levelPrep = pfucb->ppib->Level();
 }
 
+INLINE VOID SetPrepareMustSetAutoInc( FUCB *pfucb )
+{
+    Assert( pfucb->cbstat != fCBSTATNull );
+    Expected( pfucb->cbstat == fCBSTATInsert );
+    Assert( pfucb->levelPrep == pfucb->ppib->Level() );
+    pfucb->cbstat |= fCBSTATMustSetAutoInc;
+}
+
 INLINE VOID PrepareInsertCopy( FUCB *pfucb )
 {
     pfucb->updateid = AtomicExchangeAdd( &PinstFromPfucb( pfucb )->m_updateid, updateidIncrement );
@@ -1164,6 +1173,19 @@ INLINE BOOL FFUCBReplaceNoLockPrepared( const FUCB *pfucb )
 INLINE BOOL FFUCBInsertPrepared( const FUCB *pfucb )
 {
     return pfucb->cbstat & (fCBSTATInsert|fCBSTATInsertCopy);
+}
+
+INLINE BOOL FFUCBMustSetAutoIncPrepared( const FUCB *pfucb )
+{
+    const BOOL fMustSetAutoIncPrepared = pfucb->cbstat & fCBSTATMustSetAutoInc;
+
+    // For now, we only allow override of the auto-inc during inserts.
+    // If this changes in the future, please make sure codepaths that
+    // test for FFUCBMustSetAutoIncPrepared() handle operations other
+    // than inserts too.
+    Expected( !fMustSetAutoIncPrepared || ( pfucb->cbstat == ( fCBSTATInsert | fCBSTATMustSetAutoInc ) ) );
+
+    return fMustSetAutoIncPrepared;
 }
 
 INLINE BOOL FFUCBInsertCopyPrepared( const FUCB *pfucb )

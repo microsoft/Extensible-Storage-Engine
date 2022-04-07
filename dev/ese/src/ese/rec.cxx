@@ -4497,8 +4497,8 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
     Assert( !dataRec.FNull() );
 
     //  check fixed fields
-    if ( ptdb->FTableHasNonNullFixedColumn()
-        && ptdb->FidFixedLast() >= ptdb->FidFixedFirst() )
+    if ( ( ptdb->FTableHasNonNullFixedColumn() || ptdb->FidAutoincrement() != 0 )
+        && ( ptdb->FidFixedLast() >= ptdb->FidFixedFirst() ) )
     {
         const COLUMNID  columnidFixedLast   = ColumnidOfFid( ptdb->FidFixedLast(), fTemplateTable );
         for ( columnid = ColumnidOfFid( ptdb->FidFixedFirst(), fTemplateTable );
@@ -4528,14 +4528,22 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
                 Assert( JET_coltypNil != field.coltyp );
             }
 
-            if ( FFIELDNotNull( field.ffield ) && !FFIELDDefault( field.ffield ) )
+            if ( ( FFIELDNotNull( field.ffield ) && !FFIELDDefault( field.ffield ) ) || FFIELDAutoincrement( field.ffield ) )
             {
                 const ERR   errCheckNull    = ErrRECIFixedColumnInRecord( columnid, pfcb, dataRec );
 
                 if ( JET_wrnColumnNull == errCheckNull
                     || JET_errColumnNotFound == errCheckNull )  // if column not in record, it's null (since there's no default value)
                 {
-                    return ErrERRCheck( JET_errNullInvalid );
+                    if ( FFIELDAutoincrement( field.ffield ) )
+                    {
+                        Assert( FFUCBMustSetAutoIncPrepared( pfucb ) );
+                        return ErrERRCheck( JET_errAutoIncrementNotSet );
+                    }
+                    else
+                    {
+                        return ErrERRCheck( JET_errNullInvalid );
+                    }
                 }
 
                 CallS( errCheckNull );

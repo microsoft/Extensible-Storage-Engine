@@ -17609,7 +17609,7 @@ ERR ErrBTSetRootField( _In_ FUCB* const pfucb, _In_range_( 0, noderfMax - 1 ) co
 
     // One extra byte required for the new header field
     cbReq = dataRootField.Cb() > pfucb->kdfCurr.data.Cb() ?  ( dataRootField.Cb() - pfucb->kdfCurr.data.Cb() + 1 ) : 0;
-    if ( FBTISplit( pfucb, Pcsr( pfucb ), cbReq ) )
+    if ( FBTISplit( pfucb, Pcsr( pfucb ), cbReq ) || ( ErrFaultInjection( 47278 ) < JET_errSuccess ) )
     {
         // Undone: implement split for this.
         return ErrERRCheck( JET_errRecordTooBig );

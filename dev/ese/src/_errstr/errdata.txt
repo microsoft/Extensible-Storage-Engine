@@ -518,6 +518,8 @@
 	EXTERNAL_ERR( -1621,	Usage,		JET_errUpdateMustVersion	 )
 	EXTERNAL_ERR( -1622,	Corruption,	JET_errDecryptionFailed	 )
 	EXTERNAL_ERR( -1623,	Usage,		JET_errEncryptionBadItag )
+	EXTERNAL_ERR( -1624,	Usage,		JET_errSetAutoIncrementTooHigh )
+	EXTERNAL_ERR( -1625,	Usage,		JET_errAutoIncrementNotSet )
 	EXTERNAL_ERR( -1701,	Memory,		JET_errTooManySorts	 )	// Tag:Quota
 	OBSOLETE_ERR( -1702,	Unknown,	JET_errInvalidOnSort	 )
 	OBSOLETE_ERR( -1803,	Unknown,	JET_errTempFileOpenError	 )
