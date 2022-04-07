@@ -2133,6 +2133,17 @@ Err: %7%n
 .
 
 
+MessageId=657
+SymbolicName=AUTO_INCREMENT_FAILED_TO_INITIALIZE_PERSISTED_VALUE_ID
+Language=English
+%1 (%2) %3Failed to initilize persisted auto-increment value.%n
+Database: %4%n
+Objid: %5%n
+PgnoFDP: %6%n
+Error: %7%n
+.
+
+
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 
 

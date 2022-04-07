@@ -7536,6 +7536,54 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamSetAutoIncrementTooHighException : public IsamUsageException
+    {
+    public:
+        IsamSetAutoIncrementTooHighException() : IsamUsageException( "The auto-increment value that the user tried to set explicitly is too high .", JET_errSetAutoIncrementTooHigh)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamSetAutoIncrementTooHighException( String ^ description, Exception^ innerException ) :
+            IsamUsageException( description, innerException )
+        {
+        }
+
+        IsamSetAutoIncrementTooHighException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamUsageException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
+    public ref class IsamAutoIncrementNotSetException : public IsamUsageException
+    {
+    public:
+        IsamAutoIncrementNotSetException() : IsamUsageException( "The user must have explicitly set the auto-increment column for this table.", JET_errAutoIncrementNotSet)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamAutoIncrementNotSetException( String ^ description, Exception^ innerException ) :
+            IsamUsageException( description, innerException )
+        {
+        }
+
+        IsamAutoIncrementNotSetException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamUsageException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamTooManySortsException : public IsamMemoryException
     {
     public:
@@ -9571,6 +9619,10 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamDecryptionFailedException;
         case JET_errEncryptionBadItag:
             return gcnew IsamEncryptionBadItagException;
+        case JET_errSetAutoIncrementTooHigh:
+            return gcnew IsamSetAutoIncrementTooHighException;
+        case JET_errAutoIncrementNotSet:
+            return gcnew IsamAutoIncrementNotSetException;
         case JET_errTooManySorts:
             return gcnew IsamTooManySortsException;
         case JET_errTooManyAttachedDatabases:

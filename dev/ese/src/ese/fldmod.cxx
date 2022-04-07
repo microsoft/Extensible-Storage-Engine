@@ -89,6 +89,27 @@ HandleError:
         CallS( ErrDIRRollback( pfucb->ppib ) );
     }
     DIRReleaseLatch( pfucb );
+
+    if ( err < JET_errSuccess )
+    {
+        OSTraceSuspendGC();
+        const WCHAR * rgwsz[] = {
+            PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(),
+            OSFormatW( L"%d", ObjidFDP( pfucb ) ),
+            OSFormatW( L"%d", PgnoFDP( pfucb ) ),
+            OSFormatW( L"%d", err )
+        };
+        UtilReportEvent(
+            eventWarning,
+            SPACE_MANAGER_CATEGORY,
+            AUTO_INCREMENT_FAILED_TO_INITIALIZE_PERSISTED_VALUE_ID,
+            _countof( rgwsz ),
+            rgwsz,
+            0,
+            PinstFromPfucb( pfucb ) );
+        OSTraceResumeGC();
+    }
+
     return err;
 }
 
@@ -220,7 +241,7 @@ HandleError:
     return err;
 }
 
-LOCAL ERR ErrRECIGetAndIncrAutoincrement( _In_ FUCB* const pfucb, _In_ QWORD* const pqwAutoInc )
+LOCAL ERR ErrRECIGetAndIncrAutoincrement( _In_ FUCB* const pfucb, _Out_ QWORD* const pqwAutoInc )
 {
     ERR         err     = JET_errSuccess;
     FCB* const  pfcb    = pfucb->u.pfcb;
@@ -506,6 +527,59 @@ HandleError:
     return err;
 }
 
+ERR ErrRECRetrieveAndReserveAutoInc(
+    _In_ FUCB* const                    pfucb,
+    _Out_writes_bytes_( cbMax ) VOID*   pv,
+    _In_ const ULONG                    cbMax )
+{
+    ERR     err     = JET_errSuccess;
+    TDB*    ptdb    = ptdbNil;
+    FID     fid     = 0;
+    FIELD*  pfield  = pfieldNil;
+
+    if ( pv == NULL )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    if ( ( ( ptdb = pfucb->u.pfcb->Ptdb() ) == ptdbNil ) ||
+         ( ( fid = ptdb->FidAutoincrement() ) == 0 ) ||
+         ( ( pfield = ptdb->PfieldFixed( ColumnidOfFid( fid, ptdb->FFixedTemplateColumn( fid ) ) ) ) == pfieldNil ) )
+    {
+        Error( ErrERRCheck( JET_errInvalidOperation ) );
+    }
+
+    if ( cbMax != pfield->cbMaxLen )
+    {
+        Error( ErrERRCheck( JET_errInvalidBufferSize ) );
+    }
+
+    Call( ptdb->ErrInitAutoInc( pfucb, 0 ) );
+
+    if ( ptdb->FAutoIncOldFormat() )
+    {
+        Error( ErrERRCheck( JET_errFeatureNotAvailable ) );
+    }
+
+    QWORD qw;
+    Call( ErrRECIGetAndIncrAutoincrement( pfucb, &qw ) );
+
+    if ( ptdb->F8BytesAutoInc() )
+    {
+        Assert( pfield->cbMaxLen == sizeof( QWORD ) );
+        *( (QWORD*)pv ) = qw;
+    }
+    else
+    {
+        Assert( pfield->cbMaxLen == sizeof( DWORD ) );
+        Assert( qw < (QWORD)ulMax );
+        *( (DWORD*)pv ) = (DWORD)qw;
+    }
+
+HandleError:
+    return err;
+}
+
 ERR TDB::ErrInitAutoInc( FUCB * const pfucb, QWORD qwAutoInc )
 {
     ERR err = m_AutoIncInitOnce.Init( ErrRECIInitAutoIncrement, pfucb, qwAutoInc );
@@ -724,16 +798,35 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
             break;
 
         case JET_prepInsert:
+        case JET_prepInsertMustSetAutoIncrement:
+        {
+            const FID fidAutoInc = pfucb->u.pfcb->Ptdb()->FidAutoincrement();
+            const BOOL fContainsAutoInc = ( fidAutoInc != 0 );
+            const BOOL fMustSetAutoInc = ( grbit == JET_prepInsertMustSetAutoIncrement );
+
             //  ensure that table is updatable
             //
             CallR( ErrFUCBCheckUpdatable( pfucb ) );
-            if ( !FFMPIsTempDB(pfucb->ifmp) )
+            if ( !FFMPIsTempDB( pfucb->ifmp ) )
             {
                 CallR( ErrPIBCheckUpdatable( ppib ) );
             }
             if ( FFUCBUpdatePrepared( pfucb ) )
+            {
                 return ErrERRCheck( JET_errAlreadyPrepared );
+            }
+
             Assert( !FFUCBUpdatePrepared( pfucb ) );
+
+            if ( fMustSetAutoInc )
+            {
+                if ( !fContainsAutoInc )
+                {
+                    return ErrERRCheck( JET_errIllegalOperation );
+                }
+
+                CallR( pfucb->u.pfcb->Ptdb()->ErrInitAutoInc( pfucb, 0 ) );
+            }
 
             RECIAllocCopyBuffer( pfucb );
             fFreeCopyBufOnErr = fTrue;
@@ -964,22 +1057,37 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
 
             FUCBResetColumnSet( pfucb );
 
-            //  if table has an autoincrement column, then set column
-            //  value now so that it can be retrieved from copy buffer.
-            //
-            if ( pfucb->u.pfcb->Ptdb()->FidAutoincrement() != 0 )
+            if ( !fMustSetAutoInc )
             {
-                Call( ErrRECISetAutoincrement( pfucb ) );
+                if ( fContainsAutoInc )
+                {
+                    //  if table has an autoincrement column, then set column
+                    //  value now so that it can be retrieved from copy buffer,
+                    //  unless we want to set it explicitly.
+                    //
+                    Assert( !FFUCBColumnSet( pfucb, fidAutoInc ) );
+                    Call( ErrRECISetAutoincrement( pfucb ) );
+                    Assert( FFUCBColumnSet( pfucb, fidAutoInc ) );
+                }
+                PrepareInsert( pfucb );
             }
+            else
+            {
+                Assert( fContainsAutoInc );
+                PrepareInsert( pfucb );
+                SetPrepareMustSetAutoInc( pfucb );
+                Assert( !FFUCBColumnSet( pfucb, fidAutoInc ) );
+            }
+
             err = JET_errSuccess;
-            PrepareInsert( pfucb );
             break;
+        }
 
         case JET_prepReplace:
             //  ensure that table is updatable
             //
             CallR( ErrFUCBCheckUpdatable( pfucb ) );
-            if ( !FFMPIsTempDB(pfucb->ifmp) )
+            if ( !FFMPIsTempDB( pfucb->ifmp ) )
             {
                 CallR( ErrPIBCheckUpdatable( ppib ) );
             }
@@ -1040,7 +1148,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
             //  ensure that table is updatable
             //
             CallR( ErrFUCBCheckUpdatable( pfucb ) );
-            if ( !FFMPIsTempDB(pfucb->ifmp) )
+            if ( !FFMPIsTempDB( pfucb->ifmp ) )
             {
                 CallR( ErrPIBCheckUpdatable( ppib ) );
             }
@@ -1089,7 +1197,7 @@ ReplaceNoLock:
             //  ensure that table is updatable
             //
             CallR( ErrFUCBCheckUpdatable( pfucb ) );
-            if ( !FFMPIsTempDB(pfucb->ifmp) )
+            if ( !FFMPIsTempDB( pfucb->ifmp ) )
             {
                 CallR( ErrPIBCheckUpdatable( ppib ) );
             }
@@ -1588,8 +1696,10 @@ LOCAL ERR ErrFLDSetOneColumn(
         {
             Assert( FFIELDAutoincrement( ffield ) );
 
-            // Can never set an AutoInc field.
-            return ErrERRCheck( JET_errInvalidColumnType );
+            if ( !FFUCBMustSetAutoIncPrepared( pfucb ) )
+            {
+                return ErrERRCheck( JET_errInvalidColumnType );
+            }
         }
     }
 
@@ -1807,7 +1917,7 @@ ERR VTAPI ErrIsamSetColumn(
     // check for updatable table
     //
     CallR( ErrFUCBCheckUpdatable( pfucb ) );
-    if ( !FFMPIsTempDB(pfucb->ifmp) )
+    if ( !FFMPIsTempDB( pfucb->ifmp ) )
     {
         CallR( ErrPIBCheckUpdatable( ppib ) );
     }
@@ -1993,7 +2103,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
     const COLUMNID  columnid,
     DATA            *pdataField )
 {
-    const FID       fid         = FidOfColumnid( columnid );
+    const FID fid = FidOfColumnid( columnid );
 
     Assert( fid.FFixed() );
 
@@ -2042,10 +2152,17 @@ LOCAL ERR ErrRECISetIFixedColumn(
     //  for fixed columns, we interpret setting to zero-length as
     //  the same thing as setting to NULL
     //
-    else if ( ( NULL == pdataField || pdataField->FNull() )
-        && FFIELDNotNull( pfield->ffield ) )
+    if ( NULL == pdataField || pdataField->FNull() )
     {
-        return ErrERRCheck( JET_errNullInvalid );
+        if ( FFIELDNotNull( pfield->ffield ) )
+        {
+            return ErrERRCheck( JET_errNullInvalid );
+        }
+        else if ( FFIELDAutoincrement( pfield->ffield ) )
+        {
+            Assert( FFUCBMustSetAutoIncPrepared( pfucb ) );
+            return ErrERRCheck( JET_errAutoIncrementNotSet );
+        }
     }
 
     if ( pfucb != pfucbNil )
@@ -2260,7 +2377,8 @@ LOCAL ERR ErrRECISetIFixedColumn(
     //
     if ( NULL == pdataField || pdataField->FNull() )
     {
-        Assert( !FFIELDNotNull( pfield->ffield ) );     //  already verified above
+        Assert( !FFIELDNotNull( pfield->ffield ) ); //  already verified above
+        Assert( !FFIELDAutoincrement( pfield->ffield ) );  //  already verified above
         SetFixedNullBit( prgbitNullity, ifid );
     }
     else
@@ -2314,6 +2432,96 @@ LOCAL ERR ErrRECISetIFixedColumn(
                     }
                     cbCopy = pdataField->Cb();
                     break;
+            }
+        }
+
+        //  check for validity of data provided if we are explicitly setting an auto-inc column
+        //
+        if ( FFIELDAutoincrement( pfield->ffield ) )
+        {
+            //  ErrFILEIUpdateAutoInc() resets ptdb->FidAutoincrement() when creating
+            //  a new auto-inc column on a table which already contains rows.
+            //
+            const BOOL fNewColumn = ( ptdb->FidAutoincrement() == 0 );
+
+            //  This function might be called with the template's TDB in a derived table.
+            //  ptdb should be used for schema-related checks, while ptdbTable should be used
+            //  for persisted and runtime data state like, for example, QwAutoincrement(). However,
+            //  note that we expect all the schema-related properties to match anyways (see asserts below).
+            //
+            TDB* const ptdbTable = pfucb->u.pfcb->Ptdb();
+
+#ifdef DEBUG
+            Assert( ptdbTable != ptdbNil );
+            Assert( ptdb != ptdbNil );
+
+            // A template column is a column of a template table OR a column of a derived table that was
+            // inherited from the template.
+            const BOOL fTemplateColumn = !fNewColumn && ptdb->FFixedTemplateColumn( ptdb->FidAutoincrement() );
+
+            // A derived column is a column of a derived table that was inherited from the template.
+            const BOOL fDerivedColumn = ( ptdbTable != ptdb );
+
+            if ( fDerivedColumn )
+            {
+                Assert( fTemplateColumn );
+                Assert( !fNewColumn );
+
+                // Schema should match.
+                Assert( ptdb->FidAutoincrement() != 0 );
+                Assert( ptdbTable->FidAutoincrement() != 0 );
+                Assert( ptdb->FidAutoincrement() == ptdbTable->FidAutoincrement() );
+                Assert( !!ptdb->F8BytesAutoInc() == !!ptdbTable->F8BytesAutoInc() );
+            }
+
+            if ( fNewColumn )
+            {
+                Assert( !fTemplateColumn );
+                Assert( !fDerivedColumn );
+
+                // Uninitialized state.
+                Assert( ptdb->FidAutoincrement() == 0 );
+                Assert( !ptdb->FAutoIncOldFormat() );
+                Assert( ptdb->QwAutoincrement() == 0 );
+                Assert( ptdb->QwGetAllocatedAutoIncMax() == 0 );
+                Assert( ptdb->DwGetAutoIncBatchSize() == 1 );
+            }
+            else
+            {
+                // Schema.
+                Assert( ptdb->FidAutoincrement() != 0 );
+                Assert( ptdbTable->FidAutoincrement() != 0 );
+
+                // State must be initialized and valid.
+                // Unfortunately, nothing can be asserted w.r.t. the column in the template
+                // table (ptdb) because data may or may not be added to the template itself, which means
+                // the data state may or may not be initialized at this point.
+                Assert( ptdbTable->QwAutoincrement() > 0 );
+                Assert( ( !ptdbTable->FAutoIncOldFormat() && ptdbTable->QwGetAllocatedAutoIncMax() > 1 ) ||
+                        ( ptdbTable->FAutoIncOldFormat() && ptdbTable->QwGetAllocatedAutoIncMax() == 0 ) );
+                Assert( ptdbTable->DwGetAutoIncBatchSize() >= 1 );
+            }
+#endif  // DEBUG
+
+            const QWORD qwDataValue = ptdb->F8BytesAutoInc() ?
+                                        *(UnalignedLittleEndian< QWORD > *)pdataField->Pv() :
+                                        (QWORD)( *(UnalignedLittleEndian< ULONG > *)pdataField->Pv() );
+
+            //  0 is never a valid auto-inc because we start at 1 and
+            //  we must have sourced it from our internally maintained auto-inc
+            //
+            if ( qwDataValue == 0 )
+            {
+                Assert( FFUCBMustSetAutoIncPrepared( pfucb ) );
+                return ErrERRCheck( JET_errInvalidParameter );
+            }
+            else if ( !fNewColumn )
+            {
+                if ( qwDataValue >= ptdbTable->QwAutoincrement() )
+                {
+                    Assert( FFUCBMustSetAutoIncPrepared( pfucb ) );
+                    return ErrERRCheck( JET_errSetAutoIncrementTooHigh );
+                }
             }
         }
 
