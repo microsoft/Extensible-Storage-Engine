@@ -2132,7 +2132,6 @@ PgnoFDP: %6%n
 Err: %7%n
 .
 
-
 MessageId=657
 SymbolicName=AUTO_INCREMENT_FAILED_TO_INITIALIZE_PERSISTED_VALUE_ID
 Language=English
@@ -2143,6 +2142,11 @@ PgnoFDP: %6%n
 Error: %7%n
 .
 
+MessageId=658
+SymbolicName=TASK_CAT_CHANGE_PGNOFDPLASTSETTIME_FAILED_ID
+Language=English
+%1 (%2) %3The task to update the time root page was last moved for table with objid %4 and type %5 failed due to error %6.%n
+.
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 

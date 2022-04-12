@@ -4062,11 +4062,12 @@ typedef enum
 
 // end_PubEsent
 
-#define JET_paramFlight_ExtentPageCountCacheVerifyOnly  114 //  Verify values read from the Extent Page Count Cache rather than just returning them.
-#define JET_paramFlight_EnablePgnoFDPLastSetTime        115 //  whether we want to enable setting PgnoPFDSetTime in the system table for a table entry.
-#define JET_paramFlight_EnableScanCheck2Flags           116 //  whether we want to enable logging flags in ScanCheck2 log record.
-#define JET_paramFlight_EnableExtentFreed2              117 //  whether we want to enable logging ExtentFreed2 LR after the efv upgrade.
-#define JET_paramFlight_RBSLargeRevertableDeletePages   118 //  Large revertable delete size for a table (in pages) beyond which we will track the deletes.
+#define JET_paramFlight_ExtentPageCountCacheVerifyOnly          114 //  Verify values read from the Extent Page Count Cache rather than just returning them.
+#define JET_paramFlight_EnablePgnoFDPLastSetTime                115 //  whether we want to enable setting PgnoPFDSetTime in the system table for a table entry.
+#define JET_paramFlight_EnableScanCheck2Flags                   116 //  whether we want to enable logging flags in ScanCheck2 log record.
+#define JET_paramFlight_EnableExtentFreed2                      117 //  whether we want to enable logging ExtentFreed2 LR after the efv upgrade.
+#define JET_paramFlight_RBSLargeRevertableDeletePages           118 //  Large revertable delete size for a table (in pages) beyond which we will track the deletes.
+#define JET_paramFlight_RBSRevertableDeleteIfTooSoonTimeNull    119 //  If set, we will do a revertable table delete even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon due to time not being set. Note: If JET_bitRevertableTableDeleteIfTooSoon is set, this variant is ignored.
 
 //                                              120 //  JET_paramDBAPageAvailMin
 //                                              121 //  JET_paramDBAPageAvailThreshold
@@ -5489,7 +5490,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 
     /* Delete table grbit */
 #define JET_bitNonRevertableTableDelete         0x00000001  // If set, doesn't capture page preimages to allow for reverting the table to a state where it still existed using RBS.
-#define JET_bitRevertableTableDeleteIfTooSoon   0x00000002  // If set, we will do a revertable table even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon.
+#define JET_bitRevertableTableDeleteIfTooSoon   0x00000002  // If set, we will do a revertable table delete even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon.
 
 #endif // JET_VERSION >= 0x0A01
 
@@ -6619,6 +6620,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errRBSDeleteTableTooSoon        -1942  /* The table was created or the root page of table being deleted was moved in the last few days and hence a non-revertable delete cannot be attempted right now. */
 #define JET_errRBSFDPToBeDeleted            -1943  /* The FDP is about to be deleted. The table was originally deleted using non-revertable flag and the database was then reverted to a previous state using RBS causing the table's pages to not be reverted but table root page and space tree pages were reverted to assist in catalog cleanup. */
 #define JET_errRBSRevertableDeleteNotPossible -1944  /* The table being deleted with revertable delete flag is not possible as this table was previously deleted with non-revertable flag and partially reverted by RBS. */
+#define errRBSDeleteTableTooSoonTimeNull     -1945  /* The time the table was created or the time since the root page of table was last moved is not set and hence a non-revertable delete cannot be attempted right now. */
 // begin_PubEsent
 
 #define JET_wrnDefragAlreadyRunning          2000 /* Online defrag already running on specified database */

@@ -389,7 +389,7 @@ MSINTERNAL enum class MJET_GRBIT
     ShadowLogEmitLogComplete = 0x00000010, // callback emits signal that the current log file is completed
     DeleteAllExistingLogs = 0x00000001, // Delete all the existing log files at the end of revert.
     NonRevertableTableDelete = 0x00000001, // If set, doesn't capture page preimages to allow for reverting the table to a state where it still existed using RBS.
-    RevertableTableDeleteIfTooSoon = 0x00000002, // If set, we will do a revertable table even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon.
+    RevertableTableDeleteIfTooSoon = 0x00000002, // If set, we will do a revertable table delete even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon.
     PageInfoNoStructureChecksum = 0x00000001, // Do not compute structure checksum
     TestUninitShrunkPageImage = 0x00000001,
     PatchingCorruptPage = 0x00000002,
