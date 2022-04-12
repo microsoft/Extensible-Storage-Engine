@@ -10655,6 +10655,7 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB* pfucbParent, FCB* pfcb, const BOOL fP
 
         if ( pfcb->FTypeTable() && cpgOwned > UlParam( PinstFromPfucb( pfucbParent ), JET_paramFlight_RBSLargeRevertableDeletePages ) )
         {
+            OSTraceSuspendGC();
             WCHAR wszTableName[JET_cbNameMost+1] = L"";
 
             if ( pfcb->Ptdb() != NULL && pfcb->Ptdb()->SzTableName() != NULL )
@@ -10680,6 +10681,8 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB* pfucbParent, FCB* pfcb, const BOOL fP
                 0,
                 NULL,
                 PinstFromPfucb( pfucbParent ) );
+
+            OSTraceResumeGC();
         }
     }
 

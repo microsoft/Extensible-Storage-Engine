@@ -183,6 +183,7 @@ MSINTERNAL enum class MJET_PARAM
     Flight_EnableScanCheck2Flags = 116, // whether we want to enable logging flags in ScanCheck2 log record.
     Flight_EnableExtentFreed2 = 117, // whether we want to enable logging ExtentFreed2 LR after the efv upgrade.
     Flight_RBSLargeRevertableDeletePages = 118, // Large revertable delete size for a table (in pages) beyond which we will track the deletes.
+    Flight_RBSRevertableDeleteIfTooSoonTimeNull = 119, // If set, we will do a revertable table delete even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon due to time not being set. Note: If JET_bitRevertableTableDeleteIfTooSoon is set, this variant is ignored.
     IndexTupleIncrement = 132, // for tuple indexes, offset increment for each succesive tuple
     IndexTupleStart = 133, // for tuple indexes, offset to start tuple indexing
     KeyMost = 134, // read only maximum settable key length before key trunctation occurs

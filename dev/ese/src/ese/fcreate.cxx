@@ -8128,7 +8128,12 @@ LOCAL ERR ErrRBSNonRevertableDeleteTooSoon( __int64 ftPgnoFDPLastSet, INT cSecRe
 {
     // If it has been less than cSecReqSinceLastTouch since PgnoFDPLastSetTime we will block table delete.
     // We might skip setting pgnoFDPLastSet if skipping the error was requested.
-    if ( ftPgnoFDPLastSet == 0 || UtilConvertFileTimeToSeconds( UtilGetCurrentFileTime() - ftPgnoFDPLastSet ) < cSecReqSinceLastTouch )
+    if ( ftPgnoFDPLastSet == 0 )
+    {
+        return ErrERRCheck( errRBSDeleteTableTooSoonTimeNull );
+    }
+
+    if ( UtilConvertFileTimeToSeconds( UtilGetCurrentFileTime() - ftPgnoFDPLastSet ) < cSecReqSinceLastTouch )
     {
         return ErrERRCheck( JET_errRBSDeleteTableTooSoon );
     }
@@ -8223,8 +8228,9 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
     VER     *pver;
 
     // If either JET_bitNonRevertableTableDelete is not set or if db efv doesn't support non-revertable table deletes yet, we will do a revertable table delete.
-    BOOL    fRevertableTableDelete          = !( grbit & JET_bitNonRevertableTableDelete ) || ( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSNonRevertableTableDeletes ) < JET_errSuccess );
-    BOOL    fRevertableTableDeleteIfTooSoon = !!( grbit & JET_bitRevertableTableDeleteIfTooSoon );
+    BOOL    fRevertableTableDelete                  = !( grbit & JET_bitNonRevertableTableDelete ) || ( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSNonRevertableTableDeletes ) < JET_errSuccess );
+    BOOL    fRevertableTableDeleteIfTooSoon         = !!( grbit & JET_bitRevertableTableDeleteIfTooSoon );
+    BOOL    fRBSRevertableDeleteIfTooSoonTimeNull   = BoolParam( PinstFromPpib( ppib ), JET_paramFlight_RBSRevertableDeleteIfTooSoonTimeNull );
 
     VERDELETETABLEDATA  verdeletetabledata;
 
@@ -8267,7 +8273,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
     {
         grbitOpen |= JET_bitTableAllowSensitiveOperation;
     }
-    if ( !fRevertableTableDelete && !fRevertableTableDeleteIfTooSoon )
+    if ( !fRevertableTableDelete && !fRevertableTableDeleteIfTooSoon && !fRBSRevertableDeleteIfTooSoonTimeNull )
     {
         grbitOpen |= JET_bitAllowPgnoFDPLastSetTime;
     }
@@ -8283,10 +8289,10 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
     if ( !fRevertableTableDelete )
     {
         // We need root pgno of LV tree (if exists) before it gets removed from the catalog so that RBS can capture preimage of the LV root page.
-        err = ErrRBSNonRevertableDeleteTooSoon( ppib, ifmp, pfucb, &verdeletetabledata.pgnoFDPLV, fRevertableTableDeleteIfTooSoon );
+        err = ErrRBSNonRevertableDeleteTooSoon( ppib, ifmp, pfucb, &verdeletetabledata.pgnoFDPLV, fRevertableTableDeleteIfTooSoon || fRBSRevertableDeleteIfTooSoonTimeNull );
 
         // If non-revertable delete is failing due to JET_errRBSDeleteTableTooSoon and we are allowed to switch to revertable delete in such a case, do so.
-        if ( err == JET_errRBSDeleteTableTooSoon )
+        if ( err == JET_errRBSDeleteTableTooSoon || err == errRBSDeleteTableTooSoonTimeNull )
         {
             FCB* pfcbTable = pfucb->u.pfcb;
 
@@ -8295,8 +8301,15 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
                 fRevertableTableDelete = fTrue;
                 err = JET_errSuccess;
             }
+            else if ( fRBSRevertableDeleteIfTooSoonTimeNull && err == errRBSDeleteTableTooSoonTimeNull )
+            {
+                fRevertableTableDelete = fTrue;
+                err = JET_errSuccess;
+            }
             else if ( pfcbTable != NULL && pfcbTable->FTypeTable() )
             {
+                OSTraceSuspendGC();
+
                 // Log an event indicating that we are failing delete operation for this table due to JET_errRBSDeleteTableTooSoon error.
                 WCHAR wszTableName[JET_cbNameMost+1] = L"";
 
@@ -8322,7 +8335,14 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
                     0,
                     NULL,
                     PinstFromPfucb( pfucb ) );
+
+                OSTraceResumeGC();
             }
+        }
+
+        if ( err == errRBSDeleteTableTooSoonTimeNull )
+        {
+            err = ErrERRCheck( JET_errRBSDeleteTableTooSoon );
         }
 
         Call( err );

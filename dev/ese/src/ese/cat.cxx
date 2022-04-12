@@ -4208,6 +4208,28 @@ HandleError:
         ppib->grbitCommitDefault = grbitCommitBefore;
     }
 
+    if ( err < JET_errSuccess )
+    {
+        OSTraceSuspendGC();
+        const WCHAR* rgcwsz[] =
+        {
+            OSFormatW( L"%I32u", objid ),
+            OSFormatW( L"%hu", sysobj ),
+            OSFormatW( L"%d", err )
+        };
+
+        UtilReportEvent(
+            eventInformation,
+            GENERAL_CATEGORY,
+            TASK_CAT_CHANGE_PGNOFDPLASTSETTIME_FAILED_ID,
+            _countof( rgcwsz ),
+            rgcwsz,
+            0,
+            NULL,
+            PinstFromPpib( ppib ) );
+        OSTraceResumeGC();
+    }
+
     return err;
 }
 

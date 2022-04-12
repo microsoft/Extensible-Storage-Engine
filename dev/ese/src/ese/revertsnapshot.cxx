@@ -2665,6 +2665,7 @@ VOID CRevertSnapshotForAttachedDbs::RBSCheckSpaceUsage()
         OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRBSRollRequired, L"13aa7a33-59d7-4f1e-bea5-1020fd5a9819" );
     }
 
+    OSTraceSuspendGC();
     const WCHAR* rgcwsz[] =
     {
         m_wszRBSCurrentFile,
@@ -2683,6 +2684,8 @@ VOID CRevertSnapshotForAttachedDbs::RBSCheckSpaceUsage()
         0,
         NULL,
         m_pinst );
+
+    OSTraceResumeGC();
 }
 
 ERR CRevertSnapshotForAttachedDbs::ErrRBSRecordDbAttach( _In_ FMP* const pfmp )
@@ -3756,6 +3759,7 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
 HandleError:  
     if ( BoolParam( m_pinst, JET_paramEnableRBS ) )
     {
+        OSTraceSuspendGC();
         WCHAR wszTimeRevertPossible[ 32 ], wszDateRevertPossible[ 32 ];
         size_t  cchRequired;
 
@@ -3781,6 +3785,7 @@ HandleError:
             0,
             NULL,
             m_pinst );
+        OSTraceResumeGC();
     }
     else if ( err == JET_errFileNotFound )
     {
@@ -5936,6 +5941,7 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
     Call( ErrRevertCheckpointCleanup() );    
 
 HandleError:
+    OSTraceSuspendGC();
     __int64 fileTimeRevertFrom  = ConvertLogTimeToFileTime( &m_prbsrchk->rbsrchkfilehdr.tmExecuteRevertBegin );
     __int64 fileTimeRevertTo    = ConvertLogTimeToFileTime( &m_ltRevertTo );
 
@@ -5995,6 +6001,8 @@ HandleError:
             wszDateTo,
             m_prbsrchk->rbsrchkfilehdr.le_cPagesReverted + le_cPagesRevertedCurRBSGen );
     }
+
+    OSTraceResumeGC();
 
     return err;
 }
