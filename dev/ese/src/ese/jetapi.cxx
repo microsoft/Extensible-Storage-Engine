@@ -3039,9 +3039,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         CInstanceFileSystemConfiguration( INST * const pinst )
             :   m_pinst( pinst ),
                 //m_cioOutstandingMax( dwMax ),
-                m_permillageSmoothIo( dwMax ),
-                m_fBlockCacheEnabledComputed( fFalse ),
-                m_fBlockCacheTestEnabled( fFalse )
+                m_permillageSmoothIo( dwMax )
         {
         }
 
@@ -3138,41 +3136,24 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
         BOOL FBlockCacheEnabled() override
         {
-            if ( !m_fBlockCacheEnabledComputed )
-            {
-                if ( BoolParam( JET_paramEnableBlockCache ) )
-                {
-                    m_fBlockCacheEnabled = fTrue;
-                }
+            BOOL fBlockCacheEnabled = fFalse;
 
-                if ( m_pinst != pinstNil && PvParam( m_pinst, JET_paramBlockCacheConfiguration ) )
-                {
-                    m_fBlockCacheEnabled = fTrue;
-                }
+            fBlockCacheEnabled = fBlockCacheEnabled || BoolParam( JET_paramEnableBlockCache );
 
-                WCHAR wszBuf[ 16 ] = { 0 };
-                if ( FOSConfigGet( L"DEBUG", L"BlockCacheEnabled", wszBuf, sizeof( wszBuf ) ) &&
-                    wszBuf[ 0 ] &&
-                    !!_wtol( wszBuf ) )
-                {
-                    m_fBlockCacheTestEnabled = fTrue;
-                }
+            fBlockCacheEnabled = fBlockCacheEnabled || m_pinst != pinstNil && PvParam( m_pinst, JET_paramBlockCacheConfiguration );
 
-                m_fBlockCacheEnabled = m_fBlockCacheEnabled || m_fBlockCacheTestEnabled;
+            fBlockCacheEnabled = fBlockCacheEnabled || FBlockCacheTestEnabled();
 
-                m_fBlockCacheEnabledComputed = fTrue;
-            }
-
-            return m_fBlockCacheEnabled;
+            return fBlockCacheEnabled;
         }
 
         ERR ErrGetBlockCacheConfiguration( _Out_ IBlockCacheConfiguration** const ppbcconfig ) override
         {
             ERR err = JET_errSuccess;
 
-            if ( !FBlockCacheEnabled() || !PvParam( m_pinst, JET_paramBlockCacheConfiguration ) )
+            if ( !FBlockCacheEnabled() || m_pinst == pinstNil || !PvParam( m_pinst, JET_paramBlockCacheConfiguration ) )
             {
-                Alloc( *ppbcconfig = new CInstanceBlockCacheConfiguration( m_pinst, m_fBlockCacheTestEnabled ) );
+                Alloc( *ppbcconfig = new CInstanceBlockCacheConfiguration( m_pinst, FBlockCacheTestEnabled() ) );
             }
             else
             {
@@ -3185,6 +3166,14 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         }
 
     private:
+
+        static BOOL FBlockCacheTestEnabled()
+        {
+            WCHAR wszBuf[16] = { 0 };
+            return  FOSConfigGet( L"DEBUG", L"BlockCacheEnabled", wszBuf, sizeof( wszBuf ) ) &&
+                    wszBuf[0] &&
+                    !!_wtol( wszBuf );
+        }
 
         class CInstanceBlockCacheConfiguration : public IBlockCacheConfiguration
         {
@@ -3421,8 +3410,6 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         INST* const m_pinst;
         //ULONG       m_cioOutstandingMax;
         ULONG       m_permillageSmoothIo;
-        BOOL        m_fBlockCacheEnabledComputed;
-        BOOL        m_fBlockCacheTestEnabled;
 };
 
 CInstanceFileSystemConfiguration g_fsconfigGlobal( pinstNil );
@@ -13115,6 +13102,10 @@ LOCAL JET_ERR JetGetDatabaseFileInfoEx(
             switch ( InfoLevel )
             {
                 case JET_DbInfoMisc:
+                    if ( pdbfilehdr->le_filetype != JET_filetypeDatabase )
+                    {
+                        Error( ErrERRCheck( JET_errFileInvalidType ) );
+                    }
                     UtilLoadDbinfomiscFromPdbfilehdr( ( JET_DBINFOMISC7* )pvResult, cbMax, ( DBFILEHDR_FIX* )pdbfilehdr );
                     break;
                 case JET_DbInfoPageSize:
