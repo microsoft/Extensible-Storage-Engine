@@ -5,7 +5,7 @@
 
 //  Block Cache Lock Ranks
 
-const INT rankFilePathHash = 0;
+const INT rankFileFilterReferences = 0;
 const INT rankCachedFileHash = 0;
 const INT rankCacheThreadLocalStorage = 0;
 const INT rankClusterReferenceHash = 0;
@@ -21,6 +21,7 @@ const INT rankIOCompleteHash = 0;
 const INT rankJournalSegment = 0;
 const INT rankIORangeLock = 0;
 const INT rankCachedFileSparseMap = 0;
+const INT rankFilePathHash = 1;
 const INT rankSuspendedThreads = 1;
 const INT rankSlabsToWriteBack = 1;
 const INT rankIssued = 1;

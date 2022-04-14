@@ -25,8 +25,8 @@ class CFilePathTableEntry  //  fpte
         COpenFile* Pof() const { return m_pof;  }
         UINT UiHash() const { return CFilePathTableEntry::UiHash( m_wszKeyPath ); }
 
-        void AddRef( _In_ int dref = 1 ) { m_cref += dref; }
-        BOOL FRelease( _In_ int dref = 1 ) { m_cref -= dref;  return m_cref == 0; }
+        void AddRef( _In_ int dref = 1 ) { AtomicExchangeAdd( (LONG*)&m_cref, dref ); }
+        BOOL FRelease( _In_ int dref = 1 ) { return AtomicExchangeAdd( (LONG*)&m_cref, -dref ) == dref; }
 
         ERR ErrAddAsOwnerOrWaiter( _In_ CSemaphore* const psem );
         void AddNextOwner();
@@ -35,7 +35,6 @@ class CFilePathTableEntry  //  fpte
         static UINT UiHash( _In_z_ const WCHAR* const wszKeyPath );
 
         ERR ErrOpenFile( _Inout_ CFileFilter** const ppff, _In_ ICache* const pc, _Out_ COpenFile** const ppof );
-        void RemoveFile( _In_ COpenFile* const pof );
         void DisconnectFile( _In_ COpenFile* const pof );
         void TransferFiles( _In_ CFilePathTableEntry* const pfpteDest );
 
@@ -57,7 +56,8 @@ class CFilePathTableEntry  //  fpte
                             _In_    ICache* const               pc )
                     :   m_pfpte( pfpte ),
                         m_pff( *ppff ),
-                        m_pc( pc )
+                        m_pc( pc ),
+                        m_critReferences( CLockBasicInfo( CSyncBasicInfo( "CFilePathTableEntry::COpenFile::m_critReferences" ), rankFileFilterReferences, 0 ) )
                 {
                     *ppff = NULL;
                 }
@@ -74,13 +74,16 @@ class CFilePathTableEntry  //  fpte
 
                 void AddReference( _In_ CFileFilterReference* const pffr )
                 {
+                    m_critReferences.Enter();
                     m_ilReferences.InsertAsNextMost( pffr );
+                    m_critReferences.Leave();
                 }
 
-                BOOL FRemoveReference( _In_ CFileFilterReference* const pffr )
+                void RemoveReference( _In_ CFileFilterReference* const pffr )
                 {
+                    m_critReferences.Enter();
                     m_ilReferences.Remove( pffr );
-                    return m_ilReferences.FEmpty();
+                    m_critReferences.Leave();
                 }
 
                 void SetPfpte( _In_ CFilePathTableEntry* const pfpte )
@@ -101,6 +104,7 @@ class CFilePathTableEntry  //  fpte
                 CFilePathTableEntry*                                                        m_pfpte;
                 CFileFilter*                                                                m_pff;
                 ICache*                                                                     m_pc;
+                CCriticalSection                                                            m_critReferences;
                 CCountedInvasiveList<CFileFilterReference, CFileFilterReferenceOffsetOfILE> m_ilReferences;
         };
 
@@ -130,7 +134,7 @@ class CFilePathTableEntry  //  fpte
     private:
 
         const WCHAR* const                                  m_wszKeyPath;
-        int                                                 m_cref;
+        volatile int                                        m_cref;
         CSemaphore*                                         m_psemOwner;
         CInvasiveList<CWaiter, CWaiter::OffsetOfILE>        m_ilWaiters;
         CInvasiveList<COpenFile, COpenFile::OffsetOfILE>    m_ilOpenFiles;
@@ -149,6 +153,12 @@ INLINE CFilePathTableEntry::CFilePathTableEntry( _Inout_z_ const WCHAR** const p
 INLINE CFilePathTableEntry::~CFilePathTableEntry()
 {
     delete[] m_wszKeyPath;
+    while ( m_ilOpenFiles.PrevMost() )
+    {
+        COpenFile* pof = m_ilOpenFiles.PrevMost();
+        m_ilOpenFiles.Remove( pof );
+        delete pof;
+    }
 }
 
 INLINE ERR CFilePathTableEntry::ErrAddAsOwnerOrWaiter( _In_ CSemaphore* const psem )
@@ -240,18 +250,6 @@ HandleError:
         *ppof = NULL;
     }
     return err;
-}
-
-INLINE void CFilePathTableEntry::RemoveFile( _In_ COpenFile* const pof )
-{
-    if ( !pof )
-    {
-        return;
-    }
-
-    DisconnectFile( pof );
-
-    m_ilOpenFiles.Remove( pof );
 }
 
 INLINE void CFilePathTableEntry::DisconnectFile( _In_ COpenFile* const pof )
@@ -1004,7 +1002,6 @@ void TFileSystemFilter<I>::ReleaseFile( _In_opt_    CFilePathTableEntry* const  
                                         _In_opt_    CFileFilterReference* const             pffr )
 {
     BOOL    fDeleteFilePathTableEntry   = fFalse;
-    BOOL    fDeleteOpenFile             = fFalse;
 
     Assert( !pof && !pffr || pof && pffr );
 
@@ -1019,10 +1016,7 @@ void TFileSystemFilter<I>::ReleaseFile( _In_opt_    CFilePathTableEntry* const  
 
     if ( pof )
     {
-        if ( fDeleteOpenFile = pof->FRemoveReference( pffr ) )
-        {
-            pfpte->RemoveFile( pof );
-        }
+        pof->RemoveReference( pffr );
     }
 
     pfpte->RemoveAsOwnerOrWaiter( psem );
@@ -1039,10 +1033,6 @@ void TFileSystemFilter<I>::ReleaseFile( _In_opt_    CFilePathTableEntry* const  
 
     m_filePathHash.WriteUnlockKey( &lock );
 
-    if ( fDeleteOpenFile )
-    {
-        delete pof;
-    }
     if ( fDeleteFilePathTableEntry )
     {
         delete pfpte;
@@ -1828,7 +1818,11 @@ INLINE ERR CFilePathTableEntry::COpenFile::ErrAccessCheck(  _In_ const IFileAPI:
                                                             _In_ const BOOL                     fCreate,
                                                             _In_ const BOOL                     fCacheOpen )
 {
-    ERR err = JET_errSuccess;
+    ERR     err     = JET_errSuccess;
+    BOOL    fLeave  = fFalse;
+
+    m_critReferences.Enter();
+    fLeave = fTrue;
 
     //  perform the access check against all currently open file handles for this file
 
@@ -1887,12 +1881,20 @@ INLINE ERR CFilePathTableEntry::COpenFile::ErrAccessCheck(  _In_ const IFileAPI:
         }
     }
 
+    if ( fLeave )
+    {
+        m_critReferences.Leave();
+    }
     return err;
 }
 
 INLINE ERR CFilePathTableEntry::COpenFile::ErrDeleteCheck()
 {
-    ERR err = JET_errSuccess;
+    ERR     err     = JET_errSuccess;
+    BOOL    fLeave  = fFalse;
+
+    m_critReferences.Enter();
+    fLeave = fTrue;
 
     //  perform the delete check against all currently open file handles for this file
 
@@ -1912,5 +1914,9 @@ INLINE ERR CFilePathTableEntry::COpenFile::ErrDeleteCheck()
         }
     }
 
+    if ( fLeave )
+    {
+        m_critReferences.Leave();
+    }
     return err;
 }
