@@ -148,46 +148,68 @@ template< class I >
 ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                                                  const WCHAR* const  wszPath,
                                                 _Out_bytecap_c_( IFileIdentification::cbKeyPathMax )    WCHAR* const        wszKeyPath )
 {
-    ERR                         err                                 = JET_errSuccess;
-    const DWORD                 cwchDirPathMax                      = IFileSystemAPI::cchPathMax;
-    WCHAR                       wszDirPath[ cwchDirPathMax ]        = { 0 };
-    DWORD                       cwchDirPath                         = 0;
-    WCHAR*                      wszFileName                         = NULL;
-    WCHAR                       wchFileNameSave                     = 0;
-    HANDLE                      hDirectory                          = NULL;
-    VolumeId                    volumeid                            = volumeidInvalid;
-    FileId                      fileid                              = fileidInvalid;
-    CVolumeHandleCacheEntry*    pvhce                               = NULL;
-    const DWORD                 cwchFinalPathMax                    = IFileSystemAPI::cchPathMax;
-    WCHAR                       wszFinalPath[ cwchFinalPathMax ]    = { 0 };
-    DWORD                       cwchFinalPath                       = 0;
-    const DWORD                 cwchVolumePathMax                   = IFileIdentification::cwchKeyPathMax;
-    const DWORD                 cbVolumePathMax                     = cwchVolumePathMax * sizeof( WCHAR );
-    WCHAR                       wszVolumePath[ cwchVolumePathMax ]  = { 0 };
+    ERR                         err                                         = JET_errSuccess;
+    const DWORD                 cwchContainerPathMax                        = IFileSystemAPI::cchPathMax;
+    WCHAR                       wszContainerPath[ cwchContainerPathMax ]    = { 0 };
+    DWORD                       cwchContainerPath                           = 0;
+    WCHAR*                      wszFileName                                 = NULL;
+    WCHAR*                      wszTarget                                   = NULL;
+    WCHAR                       wchTargetSave                               = 0;
+    HANDLE                      hContainer                                  = NULL;
+    VolumeId                    volumeid                                    = volumeidInvalid;
+    FileId                      fileid                                      = fileidInvalid;
+    CVolumeHandleCacheEntry*    pvhce                                       = NULL;
+    const DWORD                 cwchFinalPathMax                            = IFileSystemAPI::cchPathMax;
+    WCHAR                       wszFinalPath[ cwchFinalPathMax ]            = { 0 };
+    DWORD                       cwchFinalPath                               = 0;
+    const DWORD                 cwchVolumePathMax                           = IFileIdentification::cwchKeyPathMax;
+    const DWORD                 cbVolumePathMax                             = cwchVolumePathMax * sizeof( WCHAR );
+    WCHAR                       wszVolumePath[ cwchVolumePathMax ]          = { 0 };
 
     wszKeyPath[ 0 ] = 0;
 
-    //  compute the absolute path and split it into directory and file name, if present
+    //  compute the absolute path and split it into container and target, if present
 
-    cwchDirPath = GetFullPathNameW( wszPath, cwchDirPathMax, wszDirPath, &wszFileName );
-    if ( cwchDirPath == 0 )
+    cwchContainerPath = GetFullPathNameW( wszPath, cwchContainerPathMax, wszContainerPath, &wszFileName );
+    if ( cwchContainerPath == 0 )
     {
         Call( ErrGetLastError() );
     }
-    if ( cwchDirPath >= cwchDirPathMax )
+    if ( cwchContainerPath >= cwchContainerPathMax )
     {
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
     }
 
     if ( wszFileName )
     {
-        wchFileNameSave = wszFileName[ 0 ];
-        wszFileName[ 0 ] = 0;
+        wszTarget = wszFileName;
+        wchTargetSave = wszTarget[0];
+        wszTarget[0] = 0;
+    }
+    else if ( GetFileAttributesW( wszContainerPath ) == INVALID_FILE_ATTRIBUTES )
+    {
+        for (   wszTarget = wszContainerPath + cwchContainerPath - 1;
+                &wszTarget[ -1 ] >= wszContainerPath && wszTarget[ -1 ] != L'\\';
+                wszTarget-- )
+        {
+        }
+
+        wchTargetSave = wszTarget[0];
+        wszTarget[0] = 0;
     }
 
-    //  get the volume id of the directory which must exist.  the file if any doesn't need to exist
+    //  if this is a raw device path then use it as the key path
 
-    err = ErrGetFileId( wszDirPath, &hDirectory, &volumeid, &fileid );
+    if ( wcscmp( wszContainerPath, L"\\\\.\\" ) == 0 )
+    {
+        wszTarget[0] = wchTargetSave;
+        Call( ErrMakeKeyPath( wszContainerPath, wszKeyPath ) );
+        Error( JET_errSuccess );
+    }
+
+    //  get the volume id of the container which must exist.  the target if any doesn't need to exist
+
+    err = ErrGetFileId( wszContainerPath, &hContainer, &volumeid, &fileid );
     err = err == JET_errFileNotFound ? ErrERRCheck( JET_errInvalidPath ) : err;
     Call( err );
 
@@ -195,10 +217,10 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
 
     Call( ErrOpenVolumeById( volumeid, &pvhce ) );
 
-    //  generate an absolute path to the file using the volume guid root path to remove ambiguity
+    //  generate an absolute path to the target using the volume guid root path to remove ambiguity
     //  created by possible multiple paths to the same volume
 
-    cwchFinalPath = GetFinalPathNameByHandleW( hDirectory, wszFinalPath, cwchFinalPathMax, VOLUME_NAME_NONE );
+    cwchFinalPath = GetFinalPathNameByHandleW( hContainer, wszFinalPath, cwchFinalPathMax, VOLUME_NAME_NONE );
     if ( cwchFinalPath == 0 )
     {
         Call( ErrGetLastError() );
@@ -211,10 +233,10 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
     Call( ErrOSStrCbCopyW( wszVolumePath, cbVolumePathMax, pvhce->WszPath() ) );
     Call( ErrOSStrCbAppendW( wszVolumePath, cbVolumePathMax, wszFinalPath ) );
     Call( ErrOSStrCbAppendW( wszVolumePath, cbVolumePathMax, L"\\" ) );
-    if ( wszFileName )
+    if ( wszTarget )
     {
-        wszFileName[ 0 ] = wchFileNameSave;
-        Call( ErrOSStrCbAppendW( wszVolumePath, cbVolumePathMax, wszFileName ) );
+        wszTarget[0] = wchTargetSave;
+        Call( ErrOSStrCbAppendW( wszVolumePath, cbVolumePathMax, wszTarget ) );
     }
 
     //  generate an unambiguous file key path
@@ -222,9 +244,9 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
     Call( ErrMakeKeyPath( wszVolumePath, wszKeyPath ) );
 
 HandleError:
-    if ( hDirectory && hDirectory != INVALID_HANDLE_VALUE )
+    if ( hContainer && hContainer != INVALID_HANDLE_VALUE )
     {
-        CloseHandle( hDirectory );
+        CloseHandle( hContainer );
     }
     if ( err < JET_errSuccess )
     {
