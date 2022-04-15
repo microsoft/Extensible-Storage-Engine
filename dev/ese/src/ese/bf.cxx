@@ -6427,6 +6427,16 @@ INLINE void BFITraceDirtyPage(
     const CPAGE::PGHDR * ppghdr = (const CPAGE::PGHDR *)pbf->pv;
     GetCurrUserTraceContext getutc;
 
+    // Iorp() is reserved for the loweset level action that caused an IO, just above the IO layer (e.g. BF's reason for initiating an IO).
+    // Dirtying a page isn't going to cause an IO directly, so iorp should be none. But it doesn't hurt telemetry if we do emit an iorp here.
+    // These are some of the culprits who push an iorp because they call the IO layer directly, which expects an iorp.
+    // But they also end up leaking iorp into the BF Api.
+    // FUTURE-2022-04-14-SOMEONE - If we ever save tc on the BF, consider fixing the iorp leak.
+    Expected( tc.iorReason.Iorp() == iorpNone || 
+              tc.iorReason.Iorp() == iorpDatabaseShrink ||
+              tc.iorReason.Iorp() == iorpDatabaseTrim ||
+              tc.iorReason.Iorp() == iorpPatchFix );
+
     if ( pbf->bfdf < bfdfDirty /* first "proper" dirty */ )
     {
         //  There is no point in logging itagMicFree, cbfree, dbtime because they would be the
