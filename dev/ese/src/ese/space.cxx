@@ -11474,7 +11474,6 @@ HandleError:
 
 
 LOCAL ERR ErrSPINewSize(
-    const TraceContext& tc,
     const IFMP  ifmp,
     const PGNO  pgnoLastCurr,
     const CPG   cpgReq, // cpgReq can be negative, which implies a shrink request.
@@ -11483,6 +11482,7 @@ LOCAL ERR ErrSPINewSize(
     ERR err = JET_errSuccess;
     BOOL fUpdateLgposResizeHdr = fFalse;
     LGPOS lgposResize = lgposMin;
+    TraceContextScope tcScope;
 
     OnDebug( g_rgfmp[ ifmp ].AssertSafeToChangeOwnedSize() );
     Assert( ( cpgReq <= 0 ) || !g_rgfmp[ ifmp ].FBeyondPgnoShrinkTarget( pgnoLastCurr + 1, cpgReq ) );
@@ -11493,7 +11493,7 @@ LOCAL ERR ErrSPINewSize(
 
     if ( cpgReq < 0 )
     {
-        Call( ErrBFPreparePageRangeForExternalZeroing( ifmp, pgnoLastCurr + cpgReq + 1, -1 * cpgReq, tc ) );
+        Call( ErrBFPreparePageRangeForExternalZeroing( ifmp, pgnoLastCurr + cpgReq + 1, -1 * cpgReq, *tcScope ) );
     }
 
     //  Log the operation to indicate that resizing the database file is about to be attempted.
@@ -11528,7 +11528,7 @@ LOCAL ERR ErrSPINewSize(
 
     Call( ErrIONewSize(
             ifmp,
-            tc,
+            *tcScope,
             pgnoLastCurr + cpgReq,
             cpgAsyncExtension,
             ( cpgReq >= 0 ) ? JET_bitResizeDatabaseOnlyGrow : JET_bitResizeDatabaseOnlyShrink ) );
@@ -11959,11 +11959,11 @@ LOCAL ERR ErrSPIExtendDB(
     }
 
     // Resize the database. Try smaller extensions if extending by the preferred size fails.
-    err = ErrSPINewSize( TcCurr(), pfucbRoot->ifmp, pgnoSELast, cpgSEReqAdj, cpgAsyncExtension );
+    err = ErrSPINewSize( pfucbRoot->ifmp, pgnoSELast, cpgSEReqAdj, cpgAsyncExtension );
 
     if ( err < JET_errSuccess )
     {
-        err = ErrSPINewSize( TcCurr(), pfucbRoot->ifmp, pgnoSELast, cpgSEMinAdj, 0 );
+        err = ErrSPINewSize( pfucbRoot->ifmp, pgnoSELast, cpgSEMinAdj, 0 );
         if ( err < JET_errSuccess )
         {
             //  we have failed to do a "big" allocation
@@ -11975,7 +11975,7 @@ LOCAL ERR ErrSPIExtendDB(
             do
             {
                 cpgT += cpgExtend;
-                Call( ErrSPINewSize( TcCurr(), pfucbRoot->ifmp, pgnoSELast, cpgT, 0 ) );
+                Call( ErrSPINewSize( pfucbRoot->ifmp, pgnoSELast, cpgT, 0 ) );
             }
             while ( cpgT < cpgSEMinAdj );
         }
@@ -12578,7 +12578,7 @@ ERR ErrSPShrinkTruncateLastExtent(
 
     Call( ErrFaultInjection( 40200 ) );
 
-    Call( ErrSPINewSize( *tcScopeT, ifmp, pgnoLastFileSystem, -1 * cpgShrunk, 0 ) );
+    Call( ErrSPINewSize( ifmp, pgnoLastFileSystem, -1 * cpgShrunk, 0 ) );
     }
 
     pfmp->ResetPgnoMaxTracking( speiLastAfterOE.PgnoLast() );
@@ -14394,7 +14394,7 @@ LOCAL ERR ErrSPITrimRegion(
         }
         else
         {
-            TraceContextScope tcScope( iorpDatabaseTrim );
+            PIBTraceContextScope tcScope( ppib );
             if ( tcScope->nParentObjectClass == pocNone )
             {
                 tcScope->nParentObjectClass = tceNone;
