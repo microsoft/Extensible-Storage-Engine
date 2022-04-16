@@ -129,9 +129,7 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
     BYTE*                   pbRead                      = NULL;
     ULONG                   cOffsetOfPbRead             = 0;
     ULONG                   cbPageCandidate             = 0;
-    const ULONG             cbPageDownlevelMin          = 2048; // we supported 2 KB page sizes through Win 8.1, and removed in Threshold / Win X.
     const ULONG             fNoAutoDetectPageSize       = pdbHdrReader->fNoAutoDetectPageSize;
-    const ULONG             cbPageCandidateMin          = fNoAutoDetectPageSize ? cbHeader : cbPageDownlevelMin;
     const ULONG             cbPageCandidateMax          = fNoAutoDetectPageSize ? cbHeader : g_cbPageMax;
     const LONG              ibPageSize                  = pdbHdrReader->ibPageSize;
     ERR                     errRead                     = JET_errSuccess;
@@ -165,6 +163,11 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
     {
         pfapiRead = pdbHdrReader->pfapi;
     }
+
+    ULONG                   cbPageMin;
+    Call( pfapiRead->ErrSectorSize( &cbPageMin ) );
+    cbPageMin = max( cbPageMin, 2048 ); // we supported 2 KB page sizes through Win 8.1, and removed in Threshold / Win X.
+    const ULONG             cbPageCandidateMin          = fNoAutoDetectPageSize ? cbHeader : cbPageMin;
 
     //  get the current size of the file to be read and its I/O size
     //
