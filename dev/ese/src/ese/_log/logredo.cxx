@@ -11329,7 +11329,11 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed )
     Assert( !( fTableRootPage && fEmptyPageFDPDeleted ) );
 
     // If RBS isn't enabled, clear redo map and return success.
-    if ( dbid == dbidTemp || !pfmp->FRBSOn() )
+    //
+    // Skip redo of ExtFreedLR if the database is ahead of the current log being replayed. Capturing RBS record here might cause us to revert the page to dbtimeRevert.
+    // But if there is a NewPage LR for that page immediately after, it might be skipped due to log being lower than min required.
+    // This will cause the page to be skipped from being initialized and cause recovery failure/wrong dbtime.
+    if ( dbid == dbidTemp || !pfmp->FRBSOn() || !FLGRICheckRedoConditionForDb( dbid, m_lgposRedo ) )
     {
         goto ClearLogRedoMapDbtimeRevert;
     }
