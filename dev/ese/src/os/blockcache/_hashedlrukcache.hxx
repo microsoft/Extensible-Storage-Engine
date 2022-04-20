@@ -1769,8 +1769,14 @@ class THashedLRUKCache
 
                             //  verify the read
 
-                            m_errVerify = m_pcbs->ErrVerifyCluster( m_slot, m_offsets.Cb(), m_rgbData );
-                            Call( m_errVerify );
+                            err = m_pcbs->ErrVerifyCluster( m_slot, m_offsets.Cb(), m_rgbData );
+                            if ( err < JET_errSuccess )
+                            {
+                                m_errVerify = m_pc->ErrUnexpectedDataReadFailure(   "CCleanSlabVisitor::CWriteBack::ErrRead",
+                                                                                    err, 
+                                                                                    ErrERRCheck( JET_errDiskIO ) );
+                                Error( m_errVerify );
+                            }
 
                             //  write the data to the cached file
                             //
@@ -3168,6 +3174,9 @@ class THashedLRUKCache
                             _Inout_ ICachedBlockSlab** const    ppcbs );
         void RequestFinalizeRead(   _In_    CRequest* const             prequestIO,
                                     _Inout_ ICachedBlockSlab** const    ppcbs );
+        ERR ErrUnexpectedDataReadFailure(   _In_ const char* const  szFunction,
+                                            _In_ const ERR          errFromCall,
+                                            _In_ const ERR          errToReturn );
         void RequestWrite(  _In_    CRequest* const             prequest,
                             _In_    const BOOL                  fCachedFile, 
                             _In_    const BOOL                  fCachingFile,
@@ -6457,9 +6466,10 @@ void THashedLRUKCache<I>::RequestRead(  _In_    CRequest* const             preq
                                         _In_    const BOOL                  fCachingFile,
                                         _Inout_ ICachedBlockSlab** const    ppcbs )
 {
-    ERR     err                     = JET_errSuccess;
-    QWORD   ibCachedFileDeferred    = 0;
-    size_t  cbCachedFileDeferred    = 0;
+    ERR                 err                     = JET_errSuccess;
+    ICachedBlockSlab*&  pcbs                    = *ppcbs;
+    QWORD               ibCachedFileDeferred    = 0;
+    size_t              cbCachedFileDeferred    = 0;
     
     //  determine if we should cache this request
 
@@ -6488,11 +6498,11 @@ void THashedLRUKCache<I>::RequestRead(  _In_    CRequest* const             preq
         //  NOTE:  this may experience sync reads from the caching file
         //  NOTE:  this may wait for another request to finish accessing the slab
 
-        Call( ErrChangeSlabs( cbid, ppcbs ) );
+        Call( ErrChangeSlabs( cbid, &pcbs ) );
 
         //  determine if the block is already cached
 
-        Call( (*ppcbs)->ErrGetSlotForRead( cbid, &slot ) );
+        Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
         fCached = slot.FValid();
 
         //  emit telemetry
@@ -6519,7 +6529,7 @@ void THashedLRUKCache<I>::RequestRead(  _In_    CRequest* const             preq
             {
                 //  read the cluster into the output buffer
 
-                Call( prequest->ErrReadCluster( *ppcbs, slot, cbCachedBlock, pbCachedBlock ) );
+                Call( prequest->ErrReadCluster( pcbs, slot, cbCachedBlock, pbCachedBlock ) );
 
                 //  we verify the cluster contents in RequestFinalizeRead
 
@@ -6577,7 +6587,8 @@ template<class I>
 void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const             prequest,
                                                 _Inout_ ICachedBlockSlab** const    ppcbs )
 {
-    ERR     err             = JET_errSuccess;
+    ERR                 err     = JET_errSuccess;
+    ICachedBlockSlab*&  pcbs    = *ppcbs;
 
     //  determine if we should cache this request
 
@@ -6603,11 +6614,11 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
 
         //  get the slab for this cluster
 
-        Call( ErrChangeSlabs( cbid, ppcbs ) );
+        Call( ErrChangeSlabs( cbid, &pcbs ) );
 
         //  determine if the block is already cached
 
-        Call( (*ppcbs)->ErrGetSlotForRead( cbid, &slot ) );
+        Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
         fCached = slot.FValid();
 
         //  if the block is already cached then verify the read
@@ -6616,13 +6627,21 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
         {
             //  verify the data we read
 
-            Call( (*ppcbs)->ErrVerifyCluster( slot, cbCachedBlock, pbCachedBlock ) );
+            err = pcbs->ErrVerifyCluster( slot, cbCachedBlock, pbCachedBlock );
+            if ( err < JET_errSuccess )
+            {
+                Error( ErrUnexpectedDataReadFailure(    "RequestFinalizeRead",
+                                                        err,
+                                                        FVerificationError( err ) ?
+                                                            err :
+                                                            ErrERRCheck( JET_errDiskIO ) ) );
+            }
 
             //  if we want to touch this cluster due to the read then update the slot
 
             if ( fCacheIfPossible )
             {
-                Call( (*ppcbs)->ErrUpdateSlot( slot ) );
+                Call( pcbs->ErrUpdateSlot( slot ) );
             }
         }
 
@@ -6634,20 +6653,20 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
             //
             //  NOTE:  this can wait on cached file IO if the async clean process has fallen behind
 
-            Call( ErrCleanSlab( prequest, *ppcbs, fTrue, ibCachedBlock ) );
+            Call( ErrCleanSlab( prequest, pcbs, fTrue, ibCachedBlock ) );
 
             //  try to get a slot to cache this cluster
 
-            Call( (*ppcbs)->ErrGetSlotForCache( cbid, cbCachedBlock, pbCachedBlock, &slot ) );
+            Call( pcbs->ErrGetSlotForCache( cbid, cbCachedBlock, pbCachedBlock, &slot ) );
             if ( slot.FValid() )
             {
                 //  update the slot corresponding to this cluster
 
-                Call( (*ppcbs)->ErrUpdateSlot( slot ) );
+                Call( pcbs->ErrUpdateSlot( slot ) );
 
                 //  write the data we are caching to the cluster
 
-                Call( prequest->ErrWriteCluster( *ppcbs, slot, cbCachedBlock, pbCachedBlock ) );
+                Call( prequest->ErrWriteCluster( pcbs, slot, cbCachedBlock, pbCachedBlock ) );
             }
         }
     }
@@ -6662,14 +6681,31 @@ HandleError:
 }
 
 template<class I>
+ERR THashedLRUKCache<I>::ErrUnexpectedDataReadFailure(  _In_ const char* const  szFunction,
+                                                        _In_ const ERR          errFromCall,
+                                                        _In_ const ERR          errToReturn )
+{
+    OSTraceSuspendGC();
+    BlockCacheNotableEvent( OSFormat(   "UnexpectedDataReadFailure:%hs:%i:%i", 
+                                        szFunction, 
+                                        errFromCall, 
+                                        errToReturn ) );
+    OSTraceResumeGC();
+
+    return errToReturn;
+}
+
+template<class I>
 void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             prequest,
                                         _In_    const BOOL                  fCachedFile, 
                                         _In_    const BOOL                  fCachingFile,
                                         _Inout_ ICachedBlockSlab** const    ppcbs )
 {
-    ERR     err                     = JET_errSuccess;
-    QWORD   ibCachedFileDeferred    = 0;
-    size_t  cbCachedFileDeferred    = 0;
+    ERR                 err                     = JET_errSuccess;
+    ICachedBlockSlab*&  pcbs                    = *ppcbs;
+    ICachedBlockSlab*   pcbsCachedBlock         = NULL;
+    QWORD               ibCachedFileDeferred    = 0;
+    size_t              cbCachedFileDeferred    = 0;
 
     //  loop through the write by cached block potentially crossing many cached file blocks
 
@@ -6704,11 +6740,20 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
         //  NOTE:  this may experience sync reads from the caching file
         //  NOTE:  this may wait for another request to finish accessing the slab
 
-        Call( ErrChangeSlabs( cbid, ppcbs ) );
+        Call( ErrChangeSlabs( cbid, &pcbs ) );
+
+        if ( ibCachedBlock % min( m_pch->CbCachedFilePerSlab(), prequest->Pcfte()->CbBlockSize() ) == 0 )
+        {
+            pcbsCachedBlock = pcbs;
+        }
+        else if ( pcbsCachedBlock != pcbs )
+        {
+            BlockCacheNotableEvent( "TornWriteOpportunity" );
+        }
 
         //  determine if the block is already cached
 
-        Call( (*ppcbs)->ErrGetSlotForRead( cbid, &slot ) );
+        Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
         fCached = slot.FValid();
 
         //  emit telemetry
@@ -6744,11 +6789,20 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
                 //
                 //  NOTE:  this can wait on cached file IO if the async clean process has fallen behind
 
-                Call( ErrCleanSlab( prequest, *ppcbs, fFalse, ibCachedBlock ) );
+                const BOOL fUpdatedBeforeClean = pcbs->FUpdated();
+
+                Call( ErrCleanSlab( prequest, pcbs, fFalse, ibCachedBlock ) );
+
+                if (    fUpdatedBeforeClean &&
+                        !pcbs->FUpdated() &&
+                        ibCachedBlock % min( m_pch->CbCachedFilePerSlab(), prequest->Pcfte()->CbBlockSize() ) != 0 )
+                {
+                    BlockCacheNotableEvent( "TornWriteOpportunity2" );
+                }
 
                 //  try to get a slot to write this cluster
 
-                Call( (*ppcbs)->ErrGetSlotForWrite( cbid, cbCachedBlock, pbCachedBlock, &slot ) );
+                Call( pcbs->ErrGetSlotForWrite( cbid, cbCachedBlock, pbCachedBlock, &slot ) );
                 if ( !slot.FValid() )
                 {
                     Error( ErrBlockCacheInternalError( "HashedLRUKCacheRequestWriteNoSlotAvailable" ) );
@@ -6764,11 +6818,11 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
 
                 //  update the slot corresponding to this cluster
 
-                Call( (*ppcbs)->ErrUpdateSlot( slot ) );
+                Call( pcbs->ErrUpdateSlot( slot ) );
 
                 //  write the data we are caching to the cluster
 
-                Call( prequest->ErrWriteCluster( *ppcbs, slot, cbCachedBlock, pbCachedBlock ) );
+                Call( prequest->ErrWriteCluster( pcbs, slot, cbCachedBlock, pbCachedBlock ) );
             }
         }
 
