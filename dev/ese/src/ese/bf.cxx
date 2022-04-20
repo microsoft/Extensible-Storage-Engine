@@ -6435,7 +6435,8 @@ INLINE void BFITraceDirtyPage(
     Expected( tc.iorReason.Iorp() == iorpNone || 
               tc.iorReason.Iorp() == iorpDatabaseShrink ||
               tc.iorReason.Iorp() == iorpDatabaseTrim ||
-              tc.iorReason.Iorp() == iorpPatchFix );
+              tc.iorReason.Iorp() == iorpPatchFix ||
+              tc.iorReason.Iorp() == iorpSPDatabaseInlineZero );
 
     if ( pbf->bfdf < bfdfDirty /* first "proper" dirty */ )
     {
