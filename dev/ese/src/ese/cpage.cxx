@@ -892,11 +892,12 @@ void CPageValidationLogEvent::LostFlush(
 {
     if ( m_logflags & LOG_LOST_FLUSH )
     {
-        BOOL fInCache           = fFalse;
-        ERR errBF               = JET_errSuccess;
-        BFDirtyFlags bfdf       = bfdfMin;
+        BOOL                fInCache        = fFalse;
+        BOOL                fInRangeLock    = fFalse;
+        ERR                 errBF           = JET_errSuccess;
+        BFDirtyFlags        bfdf            = bfdfMin;
 
-        BFCacheStatus( m_ifmp, pgno, &fInCache, &errBF, &bfdf );
+        BFCacheStatus( m_ifmp, pgno, &fInCache, &errBF, &bfdf, &fInRangeLock );
 
         WCHAR wszLostFlushContext[64];
         if ( fInCache )
@@ -904,10 +905,11 @@ void CPageValidationLogEvent::LostFlush(
             OSStrCbFormatW(
                 wszLostFlushContext,
                 sizeof( wszLostFlushContext ),
-                L"InCache:%I32u:%d:%d",
+                L"InCache:%I32u:%d:%d:%d",
                 m_category,
                 errBF,
-                (INT)bfdf );
+                (INT)bfdf,
+                (INT)fInRangeLock );
         }
         else
         {

@@ -1952,8 +1952,8 @@ VOID FMP::AssertRangeLockEmpty() const
 ERR FMP::ErrIAddRangeLock( const PGNO pgnoStart, const PGNO pgnoEnd )
 {
     ERR err = JET_errSuccess;
+    RANGE range( pgnoStart, pgnoEnd );
 
-    Assert( pgnoStart <= pgnoEnd );
     Assert( m_semRangeLock.CAvail() == 0 );
 
     //  get the pointers to the pointers to the current and new range locks so
@@ -1990,14 +1990,12 @@ ERR FMP::ErrIAddRangeLock( const PGNO pgnoStart, const PGNO pgnoEnd )
     SIZE_T irange;
     for ( irange = 0; irange < (*pprangelockCur)->crange; irange++ )
     {
-        (*pprangelockNew)->rgrange[ irange ].pgnoStart  = (*pprangelockCur)->rgrange[ irange ].pgnoStart;
-        (*pprangelockNew)->rgrange[ irange ].pgnoEnd    = (*pprangelockCur)->rgrange[ irange ].pgnoEnd;
+        (*pprangelockNew)->rgrange[ irange ] = (*pprangelockCur)->rgrange[ irange ];
     }
 
     //  append the new range to the new range lock
 
-    (*pprangelockNew)->rgrange[ irange ].pgnoStart  = pgnoStart;
-    (*pprangelockNew)->rgrange[ irange ].pgnoEnd    = pgnoEnd;
+    (*pprangelockNew)->rgrange[ irange ] = range;
 
     //  set the number of ranges in the new range lock
 
@@ -2015,6 +2013,8 @@ HandleError:
 
 VOID FMP::IRemoveRangeLock( const PGNO pgnoStart, const PGNO pgnoEnd )
 {
+    RANGE range( pgnoStart, pgnoEnd );
+
     Assert( m_semRangeLock.CAvail() == 0 );
 
     //  get the pointers to the pointers to the current and new range locks so
@@ -2038,12 +2038,9 @@ VOID FMP::IRemoveRangeLock( const PGNO pgnoStart, const PGNO pgnoEnd )
     for ( irangeSrc = 0, irangeDest = 0; irangeSrc < (*pprangelockCur)->crange; irangeSrc++ )
     {
         if (    fRemovedRange ||
-                (*pprangelockCur)->rgrange[ irangeSrc ].pgnoStart != pgnoStart ||
-                (*pprangelockCur)->rgrange[ irangeSrc ].pgnoEnd != pgnoEnd )
+                !(*pprangelockCur)->rgrange[ irangeSrc ].FMatches( range ) )
         {
-            (*pprangelockNew)->rgrange[ irangeDest ].pgnoStart  = (*pprangelockCur)->rgrange[ irangeSrc ].pgnoStart;
-            (*pprangelockNew)->rgrange[ irangeDest ].pgnoEnd    = (*pprangelockCur)->rgrange[ irangeSrc ].pgnoEnd;
-
+            (*pprangelockNew)->rgrange[ irangeDest ] = (*pprangelockCur)->rgrange[ irangeSrc ];
             irangeDest++;
         }
         else
@@ -2096,8 +2093,6 @@ HandleError:
 
 VOID FMP::RangeUnlock( const PGNO pgnoStart, const PGNO pgnoEnd )
 {
-    Assert( pgnoStart <= pgnoEnd );
-
     //  prevent others from modifying the range lock while we are modifying the
     //  range lock
 
@@ -2149,8 +2144,7 @@ BOOL FMP::FEnterRangeLock( const PGNO pgno, CMeteredSection::Group* const pirang
     {
         //  the current range contains this pgno
 
-        if (    prangelock->rgrange[ irange ].pgnoStart <= pgno &&
-                prangelock->rgrange[ irange ].pgnoEnd >= pgno )
+        if ( prangelock->rgrange[ irange ].FContains( pgno ) )
         {
             //  this pgno is range locked
 
@@ -2165,13 +2159,6 @@ BOOL FMP::FEnterRangeLock( const PGNO pgno, CMeteredSection::Group* const pirang
     return fTrue;
 }
 
-//  leaves the specified range lock
-
-VOID FMP::LeaveRangeLock( const INT irangelock )
-{
-    m_msRangeLock.Leave( irangelock );
-}
-
 //  leaves the specified range lock, assert that pgno is allowed in the group
 
 VOID FMP::LeaveRangeLock( const PGNO pgnoDebugOnly, const INT irangelock )
@@ -2183,12 +2170,11 @@ VOID FMP::LeaveRangeLock( const PGNO pgnoDebugOnly, const INT irangelock )
 
     for ( SIZE_T irange = 0; irange < prangelock->crange; irange++ )
     {
-        Assert( pgnoDebugOnly < prangelock->rgrange[ irange ].pgnoStart ||
-                pgnoDebugOnly > prangelock->rgrange[ irange ].pgnoEnd );
+        Assert( !prangelock->rgrange[ irange ].FContains( pgnoDebugOnly ) );
     }
 #endif  //  DEBUG
 
-    LeaveRangeLock( irangelock );
+    m_msRangeLock.Leave( irangelock );
 }
 
 //  both inserts the range and locks it for further writes.
@@ -2198,8 +2184,7 @@ ERR FMP::ErrRangeLockAndEnter( const PGNO pgnoStart, const PGNO pgnoEnd, CMetere
     ERR err = JET_errSuccess;
     BOOL fRangeAdded = fFalse;
     BOOL fEnteredRange = fFalse;
-
-    Assert( pgnoStart <= pgnoEnd );
+    RANGE range( pgnoStart, pgnoEnd );
 
     //  prevent others from modifying the range lock while we are modifying the
     //  range lock.
@@ -2214,8 +2199,7 @@ ERR FMP::ErrRangeLockAndEnter( const PGNO pgnoStart, const PGNO pgnoEnd, CMetere
     {
         //  the current range contains this page range
 
-        if (    prangelock->rgrange[ irange ].pgnoStart <= pgnoEnd &&
-                prangelock->rgrange[ irange ].pgnoEnd >= pgnoStart )
+        if ( prangelock->rgrange[ irange ].FOverlaps( range ) )
         {
             //  this pgno is range locked
 
@@ -2257,7 +2241,30 @@ HandleError:
 
 VOID FMP::RangeUnlockAndLeave( const PGNO pgnoStart, const PGNO pgnoEnd, const CMeteredSection::Group irangelock )
 {
-    LeaveRangeLock( irangelock );
+#ifdef DEBUG
+    RANGE range( pgnoStart, pgnoEnd );
+    Assert( irangelock == 0 || irangelock == 1 );
+
+    const RANGELOCK* const prangelock = m_rgprangelock[ irangelock ];
+    BOOL fFoundRange = fFalse;
+
+    for ( SIZE_T irange = 0; irange < prangelock->crange; irange++ )
+    {
+        if ( prangelock->rgrange[ irange ].FMatches( range ) )
+        {
+            Assert( !fFoundRange );
+            fFoundRange = fTrue;
+        }
+        else
+        {
+            Assert( !prangelock->rgrange[ irange ].FOverlaps( range ) );
+        }
+    }
+
+    Assert( fFoundRange );
+#endif  //  DEBUG
+
+    m_msRangeLock.Leave( irangelock );
     RangeUnlock( pgnoStart, pgnoEnd );
 }
 
