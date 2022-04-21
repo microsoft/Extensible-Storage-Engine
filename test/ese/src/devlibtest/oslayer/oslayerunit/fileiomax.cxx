@@ -42,6 +42,17 @@ ERR OslayerHandlesLargeIoMax::ErrTest()
 
     TICK tickStart;
 
+    class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
+    {
+        public:
+            CFileSystemConfiguration()
+            {
+                //  we're going to set the IO max to an illegally high value ... the OS layer will
+                //  truncate it to what it can support.
+                m_cIOMaxOutstanding = 65000;
+            }
+    } fsconfig;
+
     COSLayerPreInit oslayer;
     if ( !oslayer.FInitd() )
     {
@@ -50,21 +61,9 @@ ERR OslayerHandlesLargeIoMax::ErrTest()
         goto HandleError;
     }
 
-#ifdef DEBUG
-    //  we're going to set the IO max to an illegally high value ... the OS layer will
-    //  truncate it to what it can support.
-    FNegTestSet( fInvalidUsage );
-#endif
-
-    COSLayerPreInit::SetIOMaxOutstanding( 65000 );
-
-#ifdef DEBUG
-    FNegTestUnset( fInvalidUsage );
-#endif
-
     OSTestCall( ErrOSInit() );
 
-    OSTestCheckErr( ErrOSFSCreate( NULL, &pfsapi ) );
+    OSTestCheckErr( ErrOSFSCreate( &fsconfig, &pfsapi ) );
 
     OSTestCheckErr( pfsapi->ErrFileCreate( szFilename, IFileAPI::fmfOverwriteExisting, &pfapi ) );
 

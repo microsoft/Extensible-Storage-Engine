@@ -22,8 +22,13 @@ class IFileSystemConfiguration  //  fsconfig
 
         virtual ULONG DtickAccessDeniedRetryPeriod() = 0;
 
-        //virtual ULONG CIOMaxOutstanding() = 0;
-        //virtual ULONG CIOMaxOutstandingBackground() = 0;
+        //  Max concurrent IO per disk.
+
+        virtual ULONG CIOMaxOutstanding() = 0;
+
+        //  Max concurrent background IO per disk.
+
+        virtual ULONG CIOMaxOutstandingBackground() = 0;
 
         //  Hung IO threshold.
 
@@ -95,8 +100,8 @@ class CDefaultFileSystemConfiguration : public IFileSystemConfiguration
 
         //ULONG CbZeroExtend() override;
         ULONG DtickAccessDeniedRetryPeriod() override;
-        //ULONG CIOMaxOutstanding() override;
-        //ULONG CIOMaxOutstandingBackground() override;
+        ULONG CIOMaxOutstanding() override;
+        ULONG CIOMaxOutstandingBackground() override;
         ULONG DtickHungIOThreshhold() override;
         DWORD GrbitHungIOActions() override;
         ULONG CbMaxReadSize() override;
@@ -135,8 +140,8 @@ class CDefaultFileSystemConfiguration : public IFileSystemConfiguration
 
         //ULONG m_cbZeroExtend;
         ULONG m_dtickAccessDeniedRetryPeriod;
-        //ULONG m_cIOMaxOutstanding;
-        //ULONG m_cIOMaxOutstandingBackground;
+        ULONG m_cIOMaxOutstanding;
+        ULONG m_cIOMaxOutstandingBackground;
         ULONG m_dtickHungIOThreshhold;
         DWORD m_grbitHungIOActions;
         ULONG m_cbMaxReadSize;

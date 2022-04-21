@@ -846,27 +846,31 @@ RetryRaceToAvoidStarved:
 
 
 // Needed to perform COSDisk Queue testing ...
-ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber, _Out_ IDiskAPI ** ppdiskapi );
+ERR ErrOSDiskConnect(   _In_    IFileSystemConfiguration* const pfsconfig,
+                        _In_z_  const WCHAR * const             wszDiskPathId, 
+                        _In_    const DWORD                     dwDiskNumber,
+                        _Out_   IDiskAPI** const                ppdiskapi );
 void OSDiskDisconnect( __inout IDiskAPI * pdiskapi, _In_ const _OSFILE * p_osf );
 extern COSFilePerfDummy g_cosfileperfDefault;
 
 extern LONG g_cioConcurrentMetedOpsMax;
 extern LONG g_cioLowQueueThreshold;
 extern LONG g_dtickStarvedMetedOpThreshold;
+extern CDefaultFileSystemConfiguration g_fsconfigDefault;
 
 #define ibGB    (QWORD)(1024 * 1024 * 1024)     // high uncombinable offset
 
-#define INIT_OSDISK_QUEUE_JUNK                                          \
-    const LONG cioOpsMax = g_cioConcurrentMetedOpsMax;                  \
-    const LONG cioThreshold = g_cioLowQueueThreshold;                   \
-    const LONG dtickStarved = g_dtickStarvedMetedOpThreshold;           \
-    Postls()->fIOThread = fTrue;                                        \
-    COSDisk * posd = NULL;                                              \
-    CallS( ErrOSDiskConnect( L"TestDisk", 0x42, (IDiskAPI**)&posd ) );  \
-    _OSFILE _osf;   /*  Note: This struct is no CZeroInit so it is largely stack garbage!  But we only need two things. */ \
-    _osf.m_posd = posd;                                                 \
-    _osf.fRegistered = fTrue; /* suppresses attempt to register */      \
-    _osf.pfsconfig = &fsconfig;                                         \
+#define INIT_OSDISK_QUEUE_JUNK                                                                                              \
+    const LONG cioOpsMax = g_cioConcurrentMetedOpsMax;                                                                      \
+    const LONG cioThreshold = g_cioLowQueueThreshold;                                                                       \
+    const LONG dtickStarved = g_dtickStarvedMetedOpThreshold;                                                               \
+    Postls()->fIOThread = fTrue;                                                                                            \
+    COSDisk * posd = NULL;                                                                                                  \
+    CallS( ErrOSDiskConnect( &g_fsconfigDefault, L"TestDisk", 0x42, (IDiskAPI**)&posd ) );                                  \
+    _OSFILE _osf;   /*  Note: This struct is no CZeroInit so it is largely stack garbage!  But we only need two things. */  \
+    _osf.m_posd = posd;                                                                                                     \
+    _osf.fRegistered = fTrue; /* suppresses attempt to register */                                                          \
+    _osf.pfsconfig = &fsconfig;                                                                                             \
     _osf.pfpapi = &g_cosfileperfDefault;
 
 #define TERM_OSDISK_QUEUE_JUNK                  \

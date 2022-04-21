@@ -435,13 +435,15 @@ class COSDisk : public CZeroInit
 
     public:
         COSDisk();
-        ERR ErrInitDisk( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber );
+        ERR ErrInitDisk(    _In_    IFileSystemConfiguration* const pfsconfig,
+                            _In_z_  const WCHAR * const             wszDiskPathId, 
+                            _In_    const DWORD                     dwDiskNumber );
         ~COSDisk();
 
         enum OSDiskState {
             eOSDiskInitCtor = 1,
             eOSDiskConnected
-    };
+        };
 
         void AddRef();
         static void Release( COSDisk * posd );
@@ -843,6 +845,11 @@ class COSDisk : public CZeroInit
         void TrackOsFfbComplete( const IOFLUSHREASON iofr, const DWORD error, const HRT hrtStart, const QWORD usFfb, const LONG64 cioFlushing, const WCHAR * const wszFileName );
 
     private:
+
+        ULONG           m_cioOutstandingMax;
+        ULONG           m_cioBackgroundMax;
+        ULONG           m_cioUrgentBackMax;
+
         //  This is the IO that the IO thread is dispatching or more likely is 
         //  dispatched.  I called it Dispatch_ing_ just to underscore there is
         //  a slim timing window where it might not be out to the OS yet. I call
@@ -1204,7 +1211,10 @@ class COSDisk : public CZeroInit
 
 //      Returns an initialized / ref-counted interface to the OS Disk System
 
-ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber, _Out_ IDiskAPI ** ppdiskapi );
+ERR ErrOSDiskConnect(   _In_    IFileSystemConfiguration* const pfsconfig,
+                        _In_z_  const WCHAR * const             wszDiskPathId, 
+                        _In_    const DWORD                     dwDiskNumber,
+                        _Out_   IDiskAPI** const                ppdiskapi );
 
 //      Disconnects the IO context from the OS Disk System, and deinitializes if necessary.
 

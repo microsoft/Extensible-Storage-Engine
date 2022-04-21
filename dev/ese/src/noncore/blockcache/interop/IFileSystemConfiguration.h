@@ -29,6 +29,18 @@ namespace Internal
                     TimeSpan AccessDeniedRetryPeriod();
 
                     /// <summary>
+                    /// Max concurrent IO per disk.
+                    /// </summary>
+                    /// <returns>The max concurrent IO per disk.</returns>
+                    int MaxConcurrentIO();
+
+                    /// <summary>
+                    /// Max concurrent background IO per disk.
+                    /// </summary>
+                    /// <returns>The max concurrent background IO per disk.</returns>
+                    int MaxConcurrentBackgroundIO();
+
+                    /// <summary>
                     /// Hung IO threshold.
                     /// </summary>
                     /// <returns>The hung IO threshold delay.</returns>

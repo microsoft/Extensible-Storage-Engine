@@ -195,8 +195,6 @@ class COSLayerPreInit
         //  os file settings
         //
         static void SetZeroExtend( QWORD cbZeroExtend );
-        static void SetIOMaxOutstanding( ULONG cIOs );
-        static void SetIOMaxOutstandingBackground( ULONG cIOs );
 
         //  analysis sub-systems, logging, perfmon, etc...
         //

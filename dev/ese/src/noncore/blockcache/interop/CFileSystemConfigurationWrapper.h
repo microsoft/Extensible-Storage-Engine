@@ -23,6 +23,8 @@ namespace Internal
                     public:
 
                         ULONG DtickAccessDeniedRetryPeriod() override;
+                        ULONG CIOMaxOutstanding() override;
+                        ULONG CIOMaxOutstandingBackground() override;
                         ULONG DtickHungIOThreshhold() override;
                         DWORD GrbitHungIOActions() override;
                         ULONG CbMaxReadSize() override;
@@ -62,6 +64,18 @@ namespace Internal
                 inline ULONG CFileSystemConfigurationWrapper<TM,TN>::DtickAccessDeniedRetryPeriod()
                 {
                     return (int)I()->AccessDeniedRetryPeriod().TotalMilliseconds;
+                }
+
+                template< class TM, class TN >
+                inline ULONG CFileSystemConfigurationWrapper<TM, TN>::CIOMaxOutstanding()
+                {
+                    return (int)I()->MaxConcurrentIO();
+                }
+
+                template< class TM, class TN >
+                inline ULONG CFileSystemConfigurationWrapper<TM, TN>::CIOMaxOutstandingBackground()
+                {
+                    return (int)I()->MaxConcurrentBackgroundIO();
                 }
 
                 template< class TM, class TN >

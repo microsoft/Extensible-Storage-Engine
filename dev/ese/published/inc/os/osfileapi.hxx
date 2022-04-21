@@ -101,7 +101,7 @@ static_assert( qosIODispatchUrgentBackgroundMax == ( qosIODispatchUrgentBackgrou
 //  This function allows the client to translate from 127 levels to the UrgentBackground QOS
 OSFILEQOS QosOSFileFromUrgentLevel( _In_ const ULONG iUrgentLevel );
 //  This function only provided for performance counter support, not advised for use by components other than IO manager.
-LONG CioOSDiskPerfCounterIOMaxFromUrgentQOS( _In_ const OSFILEQOS grbitQOS );
+LONG CioOSDiskPerfCounterIOMaxFromUrgentQOS( _In_ IFileSystemConfiguration* const pfsconfig, _In_ const OSFILEQOS grbitQOS );
 
 #define qosIODispatchMask                   (qosIODispatchImmediate | qosIODispatchUrgentBackgroundMask | qosIODispatchBackground | qosIODispatchIdle)
 

@@ -2850,8 +2850,8 @@ HandleError:
 CDefaultFileSystemConfiguration::CDefaultFileSystemConfiguration()
     :   //m_cbZeroExtend( 1024 * 1024 ),
         m_dtickAccessDeniedRetryPeriod( 100 * 1000 ),
-        //m_cIOMaxOutstanding( 1024 ),
-        //m_cIOMaxOutstandingBackground( 32 ),
+        m_cIOMaxOutstanding( 1024 ),
+        m_cIOMaxOutstandingBackground( 32 ),
         m_dtickHungIOThreshhold( 60 * 1024 ),
         m_grbitHungIOActions( JET_bitHungIOEvent ),
         m_cbMaxReadSize( 384 * 1024 ),
@@ -2870,6 +2870,16 @@ CDefaultFileSystemConfiguration::CDefaultFileSystemConfiguration()
 ULONG CDefaultFileSystemConfiguration::DtickAccessDeniedRetryPeriod()
 {
     return m_dtickAccessDeniedRetryPeriod;
+}
+
+ULONG CDefaultFileSystemConfiguration::CIOMaxOutstanding()
+{
+    return m_cIOMaxOutstanding;
+}
+
+ULONG CDefaultFileSystemConfiguration::CIOMaxOutstandingBackground()
+{
+    return m_cIOMaxOutstandingBackground;
 }
 
 //ULONG CDefaultFileSystemConfiguration::CIOMaxOutstanding()
@@ -3244,10 +3254,10 @@ const WCHAR * COSVolume::WszVolCanonicalPath() const
 
 const WCHAR * const wszLastDiskOnEarth = L"ThereCanBeOnlyOne";
 
-ERR COSVolume::ErrGetDisk( COSDisk ** pposd )
+ERR COSVolume::ErrGetDisk( _In_ IFileSystemConfiguration* const pfsconfig, _Out_ COSDisk** pposd )
 {
     Assert( m_posd != NULL );
-    return ErrOSDiskConnect( m_posd->WszDiskPathId(), m_posd->DwDiskNumber(), (IDiskAPI**)pposd );
+    return ErrOSDiskConnect( pfsconfig, m_posd->WszDiskPathId(), m_posd->DwDiskNumber(), (IDiskAPI**)pposd );
 }
 
 
@@ -3429,7 +3439,7 @@ ERR ErrOSVolumeConnect(
 
     IDiskAPI** const ppidiskapi = (IDiskAPI**)&( posv->m_posd );
     OnDebug( const IDiskAPI* const pidiskapi = *ppidiskapi; );
-    Call( ErrOSDiskConnect( wszDiskIdToUse, dwDiskNumber, ppidiskapi ) );
+    Call( ErrOSDiskConnect( posfs->Pfsconfig(), wszDiskIdToUse, dwDiskNumber, ppidiskapi ) );
     Assert( ( pidiskapi == NULL && *ppidiskapi != NULL ) || pidiskapi == *ppidiskapi );
 
     err = JET_errSuccess;

@@ -97,7 +97,6 @@ extern DWORD_PTR        g_cbReservePage;
 extern DWORD_PTR        g_cbCommitPage;
 extern CJetParam* const g_rgparam;
 extern const size_t     g_cparam;
-extern DWORD            g_cioOutstandingMax;
 extern volatile DWORD   g_cioreqInUse;
 extern HRT              g_hrtLastGiven;
 extern HRT              g_hrtHRTFreq;
@@ -161,7 +160,6 @@ const EDBGGlobals rgEDBGGlobals[] =
     EDBGAddGlobal( g_cbCommitPage, NULL ),
     EDBGAddGlobal( CPAGE::cbHintCache, NULL ),
     EDBGAddGlobal( CPAGE::maskHintCache, NULL ),
-    EDBGAddGlobal( g_cioOutstandingMax, NULL ),
     EDBGAddGlobal( g_cioreqInUse, NULL ),
     EDBGAddGlobal( RESINST, NULL ),
     EDBGAddGlobal( RESLOG, NULL ),
@@ -9080,7 +9078,6 @@ ULONG CusecHighWaitFromIOTime( const ULONG ciotime )  { return CmsecHighWaitFrom
 DEBUG_EXT( EDBGDumpIOREQs )
 //  ================================================================
 {
-    DWORD               cioOutstandingMaxT  = 0;
     DWORD               cioreqInUseT            = 0;
     EDBGIOREQCHUNK *    pedbgioreqchunkRoot = NULL;
     EDBGIOREQCHUNK *    pedbgioreqchunkT        = NULL;
@@ -9165,8 +9162,7 @@ DEBUG_EXT( EDBGDumpIOREQs )
         goto HandleError;
     }
 
-    if ( !FReadGlobal( "g_cioOutstandingMax", &cioOutstandingMaxT )
-        || !FReadGlobal( "g_cioreqInUse", &cioreqInUseT )
+    if ( !FReadGlobal( "g_cioreqInUse", &cioreqInUseT )
         || !FReadGlobal( "g_hrtLastGiven", &hrtLastGiven )
         || !FReadGlobal( "g_hrtHRTFreq", &hrtHRTFreq )
         || !FFetchIOREQCHUNKSLIST( &pedbgioreqchunkRoot ) )
@@ -9400,7 +9396,6 @@ DEBUG_EXT( EDBGDumpIOREQs )
 
     dprintf( "\n\n" );
     dprintf( "       g_pioreqchunkRoot: 0x%N\n", pedbgioreqchunkRoot->pioreqchunkDebuggee );
-    dprintf( "     g_cioOutstandingMax: %lu (0x%lx)\n", cioOutstandingMaxT, cioOutstandingMaxT );
     dprintf( "          <cioreqchunks>: %lu (0x%lx)\n", cChunk, cChunk );
     dprintf( "             g_cioreqInUse: %lu (0x%lx)\n", cioreqInUseT, cioreqInUseT );
     dprintf( "\n" );
@@ -20151,6 +20146,9 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_UINT_NOLINE( COSDisk, this, m_cioOsQueueDepth, dwOffset ) );
     (*pcprintf)( " ( %d ms old )\n", dtickOsQdLatency ); // dup print b/c not obvious m_cioOsQueueDepth relates to m_tickPerformanceLastMeasured
     
+    (*pcprintf)(FORMAT_UINT( COSDisk, this, m_cioOutstandingMax, dwOffset ));
+    (*pcprintf)(FORMAT_UINT( COSDisk, this, m_cioBackgroundMax, dwOffset ));
+    (*pcprintf)(FORMAT_UINT( COSDisk, this, m_cioUrgentBackMax, dwOffset ));
 
     //  I/O Q
 
@@ -20352,6 +20350,8 @@ const CHAR * SzIOIorp( IOREASONPRIMARY iorpTarget )
     return "Unknown IORP!";
 }
 
+ULONG IOSDiskIUrgentLevelFromQOS( _In_ const OSFILEQOS grbitQOS );
+
 VOID DumpOneIOREQ(
     const IOREQ * const pioreqDebuggee,
     const IOREQ * const pioreq
@@ -20435,7 +20435,7 @@ VOID DumpOneIOREQ(
         }
         if ( pioreq->grbitQOS & qosIODispatchUrgentBackgroundMask )
         {
-            dprintf( "qosIODispatchUrgentBackgroundMask, cio = %d", CioOSDiskPerfCounterIOMaxFromUrgentQOS( pioreq->grbitQOS ) );
+            dprintf( "qosIODispatchUrgentBackgroundMask, iUrgentLevel = %d", IOSDiskIUrgentLevelFromQOS( pioreq->grbitQOS ) );
         }
         if ( ( pioreq->grbitQOS & qosIODispatchMask ) == qosIODispatchIdle )
         {

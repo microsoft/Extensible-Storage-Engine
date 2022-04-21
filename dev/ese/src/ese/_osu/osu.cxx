@@ -400,27 +400,6 @@ ERR ErrOSUSetOSLayerGlobals()
     //  set file settings
     //
 
-    COSLayerPreInit::SetIOMaxOutstanding( (ULONG)UlParam( JET_paramOutstandingIOMax ) );
-#ifdef DEBUG
-    //  if default param, mix it up a bit ... though 256 isn't really mixing it up that much ... AND
-    //  the last problem we had with this param was setting it up, NOT down, so adding that ...
-    if ( FDefaultParam( JET_paramOutstandingIOMax ) )
-    {
-        DWORD cioT = 0;
-        switch( rand() % 5 )
-        {
-            case 0:     cioT = 324;     break;
-            case 1:     cioT = 1024;    break;
-            case 2:     cioT = 3072;    break;
-            case 3:     cioT = 10000;   break;
-            case 4:     cioT = 32764;   break;
-        }
-        COSLayerPreInit::SetIOMaxOutstanding( min( (ULONG)UlParam( JET_paramOutstandingIOMax ), cioT ) );
-    }
-#endif // DEBUG
-
-    COSLayerPreInit::SetIOMaxOutstandingBackground( (ULONG)UlParam( JET_paramCheckpointIOMax ) );
-
     COSLayerPreInit::SetZeroExtend( (ULONG)UlParam( JET_paramMaxCoalesceWriteSize ) );
 
     COSLayerPreInit::SetProcessFriendlyName( SzParam( JET_paramProcessFriendlyName ) );

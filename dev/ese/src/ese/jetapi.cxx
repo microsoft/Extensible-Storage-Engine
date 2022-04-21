@@ -3038,7 +3038,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
         CInstanceFileSystemConfiguration( INST * const pinst )
             :   m_pinst( pinst ),
-                //m_cioOutstandingMax( dwMax ),
+                m_cioOutstandingMax( dwMax ),
                 m_permillageSmoothIo( dwMax )
         {
         }
@@ -3055,35 +3055,50 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
             return (TICK)UlParam( m_pinst, JET_paramAccessDeniedRetryPeriod );
         }
 
-        //ULONG CIOMaxOutstanding() override
-        //{
-        //    //  initialize this setting
-        //    if ( m_cioOutstandingMax == dwMax )
-        //    {
-        //        //  if default param, mix it up a bit ... though 256 isn't really mixing it up that much ... AND
-        //        //  the last problem we had with this param was setting it up, NOT down, so adding that ...
-        //        if ( FDefaultParam( m_pinst, JET_paramOutstandingIOMax ) )
-        //        {
-        //            DWORD cioT = 0;
-        //            switch( rand() % 5 )
-        //            {
+        ULONG CIOMaxOutstanding() override
+        {
+            //  initialize this setting
+            if ( m_cioOutstandingMax == dwMax )
+            {
+                m_cioOutstandingMax = (ULONG)UlParam( m_pinst, JET_paramOutstandingIOMax );
+                    
+#ifdef DEBUG
+                //  if default param, mix it up a bit ... though 256 isn't really mixing it up that much ... AND
+                //  the last problem we had with this param was setting it up, NOT down, so adding that ...
 
+                if ( FDefaultParam( JET_paramOutstandingIOMax ) )
+                {
+                    DWORD cioT = 0;
+                    switch( rand() % 5 )
+                    {
+                        case 0:     cioT = 324;     break;
+                        case 1:     cioT = 1024;    break;
+                        case 2:     cioT = 3072;    break;
+                        case 3:     cioT = 10000;   break;
+                        case 4:     cioT = 32764;   break;
+                    }
+                    m_cioOutstandingMax = min( (ULONG)UlParam( m_pinst, JET_paramOutstandingIOMax ), cioT );
+                }
+#endif // DEBUG
 
-        //            m_cioOutstandingMax = min( (ULONG)UlParam( m_pinst, JET_paramOutstandingIOMax ), cioT );
-        //        }
-        //        else
-        //        {
-        //            m_cioOutstandingMax = (ULONG)UlParam( m_pinst, JET_paramOutstandingIOMax );
-        //        }
-        //    }
+                //  the IO stack uses CMeteredSection so limit our IO max concurrency to avoid overflow
 
-        //    return m_cioOutstandingMax;
-        //}
+                m_cioOutstandingMax = min( m_cioOutstandingMax, CMeteredSection::cMaxActive - 1 );
+            }
 
-        //ULONG CIOMaxOutstandingBackground() override
-        //{
-        //    return (ULONG)UlParam( m_pinst, JET_paramCheckpointIOMax );
-        //}
+            return m_cioOutstandingMax;
+        }
+
+        ULONG CIOMaxOutstandingBackground() override
+        {
+            ULONG cioCheckpointMax = (ULONG)UlParam( m_pinst, JET_paramCheckpointIOMax );
+
+            //  the IO stack uses CMeteredSection so limit our IO max concurrency to avoid overflow
+
+            cioCheckpointMax = min( cioCheckpointMax, CMeteredSection::cMaxActive - 1 );
+
+            return cioCheckpointMax;
+        }
 
         ULONG DtickHungIOThreshhold() override
         {
@@ -3170,9 +3185,14 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         static BOOL FBlockCacheTestEnabled()
         {
             WCHAR wszBuf[16] = { 0 };
-            return  FOSConfigGet( L"DEBUG", L"BlockCacheEnabled", wszBuf, sizeof( wszBuf ) ) &&
+            if (    FOSConfigGet( L"DEBUG", L"BlockCacheEnabled", wszBuf, sizeof( wszBuf ) ) &&
                     wszBuf[0] &&
-                    !!_wtol( wszBuf );
+                    !!_wtol( wszBuf ) )
+            {
+                return fTrue;
+            }
+
+            return fFalse;
         }
 
         class CInstanceBlockCacheConfiguration : public IBlockCacheConfiguration
@@ -3408,7 +3428,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
     private:
 
         INST* const m_pinst;
-        //ULONG       m_cioOutstandingMax;
+        ULONG       m_cioOutstandingMax;
         ULONG       m_permillageSmoothIo;
 };
 
