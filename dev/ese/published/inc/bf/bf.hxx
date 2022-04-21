@@ -267,7 +267,7 @@ void BFMarkAsSuperCold( IFMP ifmp, PGNO pgno, const BFLatchFlags bflf = bflfDefa
 void BFMarkAsSuperCold( BFLatch* pbfl );
 
 enum BFDirtyFlags;
-void BFCacheStatus( const IFMP ifmp, const PGNO pgno, BOOL* const pfInCache, ERR* const perrBF = NULL, BFDirtyFlags* const pbfdf = NULL );
+void BFCacheStatus( const IFMP ifmp, const PGNO pgno, BOOL* const pfInCache, ERR* const perrBF = NULL, BFDirtyFlags* const pbfdf = NULL, BOOL* const pfInRangeLock = NULL );
 BOOL FBFInCache( const IFMP ifmp, const PGNO pgno );
 BOOL FBFPreviouslyCached( const IFMP ifmp, const PGNO pgno );
 

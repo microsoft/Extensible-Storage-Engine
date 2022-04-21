@@ -600,3 +600,148 @@ JETUNITTEST( FMP, NewAndWriteLatch )
     return;
 }
 
+//  ================================================================
+JETUNITTEST( FMP, RangeStructAssignment )
+//  ================================================================
+{
+    FMP::RANGE range1( 2, 3 );
+    FMP::RANGE range2( 5, 6 );
+    CHECK( !range1.FMatches( range2 ) );
+    CHECK( !range2.FMatches( range1 ) );
+
+    range2 = range1;
+    CHECK( range1.FMatches( range2 ) );
+    CHECK( range2.FMatches( range1 ) );
+
+    range2.Set( 8, 9 );
+    CHECK( !range1.FMatches( range2 ) );
+    CHECK( !range2.FMatches( range1 ) );
+
+    range2.Set( 2, 3 );
+    CHECK( range1.FMatches( range2 ) );
+    CHECK( range2.FMatches( range1 ) );
+
+    FMP::RANGE rangeNull;
+    CHECK( !range1.FMatches( rangeNull ) );
+    CHECK( !rangeNull.FMatches( range1 ) );
+
+    range1 = rangeNull;
+    CHECK( range1.FMatches( rangeNull ) );
+    CHECK( rangeNull.FMatches( range1 ) );
+
+    range1.Set( 8, 9 );
+    CHECK( !range1.FMatches( rangeNull ) );
+    CHECK( !rangeNull.FMatches( range1 ) );
+
+    range1.Set( pgnoNull, pgnoNull );
+    CHECK( range1.FMatches( rangeNull ) );
+    CHECK( rangeNull.FMatches( range1 ) );
+}
+
+//  ================================================================
+JETUNITTEST( FMP, RangeStructComparisons )
+//  ================================================================
+{
+    for ( CPG cpg1 = 1; cpg1 <= 5; cpg1++ )
+    {
+        const PGNO pgnoStart1 = 100;
+        const PGNO pgnoEnd1 = pgnoStart1 + cpg1 - 1;
+        const FMP::RANGE range1( pgnoStart1, pgnoEnd1 );
+
+        CHECK( pgnoStart1 <= pgnoEnd1 );
+
+        int cLeft, cRight, cContains, cOverlaps, cMatches;
+
+        // Test FContains().
+        cLeft = cRight = cContains = 0;
+        for ( CPG cpgFromStart = -4; cpgFromStart <= ( cpg1 + 4 - 1 ); cpgFromStart++ )
+        {
+            const PGNO pgno = pgnoStart1 + cpgFromStart;
+
+            if ( pgno < pgnoStart1 )
+            {
+                // To the left.
+                cLeft++;
+                CHECK( !range1.FContains( pgno ) );
+            }
+            else if ( pgno > pgnoEnd1 )
+            {
+                // To the right.
+                cRight++;
+                CHECK( !range1.FContains( pgno ) );
+            }
+            else
+            {
+                // Contains.
+                cContains++;
+                CHECK( range1.FContains( pgno ) );
+            }
+        }
+        CHECK( cLeft == 4 );
+        CHECK( cRight == 4 );
+        CHECK( cContains == cpg1 );
+
+        // Test FOverlaps() and FMatches().
+        for ( CPG cpg2 = 1; cpg2 <= cpg1; cpg2++ )
+        {
+            cLeft = cRight = cOverlaps = cMatches = 0;
+            for ( CPG cpgEnd2FromStart1 = -4; cpgEnd2FromStart1 <= ( cpg1 + cpg2 + 4 - 2 ); cpgEnd2FromStart1++ )
+            {
+                const PGNO pgnoEnd2 = pgnoStart1 + cpgEnd2FromStart1;
+                const PGNO pgnoStart2 = pgnoEnd2 - cpg2 + 1;
+                const FMP::RANGE range2( pgnoStart2, pgnoEnd2 );
+
+                if ( pgnoEnd2 < pgnoStart1 )
+                {
+                    // To the left.
+                    cLeft++;
+                    CHECK( !range1.FOverlaps( range2 ) );
+                    CHECK( !range1.FMatches( range2 ) );
+                    CHECK( !range2.FOverlaps( range1 ) );
+                    CHECK( !range2.FMatches( range1 ) );
+                }
+                else if ( pgnoStart2 > pgnoEnd1 )
+                {
+                    // To the right.
+                    cRight++;
+                    CHECK( !range1.FOverlaps( range2 ) );
+                    CHECK( !range1.FMatches( range2 ) );
+                    CHECK( !range2.FOverlaps( range1 ) );
+                    CHECK( !range2.FMatches( range1 ) );
+                }
+                else
+                {
+                    // Overlaps.
+                    cOverlaps++;
+                    CHECK( range1.FOverlaps( range2 ) );
+                    CHECK( range2.FOverlaps( range1 ) );
+
+                    if ( pgnoStart1 == pgnoStart2 && pgnoEnd1 == pgnoEnd2 )
+                    {
+                        // Matches.
+                        cMatches++;
+                        CHECK( range1.FMatches( range2 ) );
+                        CHECK( range2.FMatches( range1 ) );
+                    }
+                    else
+                    {
+                        CHECK( !range1.FMatches( range2 ) );
+                        CHECK( !range2.FMatches( range1 ) );
+                    }
+                }
+            }
+            CHECK( cLeft == 4 );
+            CHECK( cRight == 4 );
+            CHECK( cOverlaps == ( cpg1 + cpg2 - 1 ) );
+            if ( cpg1 == cpg2 )
+            {
+                CHECK( cMatches == 1 );
+            }
+            else
+            {
+                CHECK( cMatches == 0 );
+            }
+        }
+    }
+}
+

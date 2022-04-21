@@ -1871,11 +1871,12 @@ void BFMarkAsSuperCold( BFLatch *pbfl )
     BFIMarkAsSuperCold( pbf, fTrue );
 }
 
-void BFCacheStatus( const IFMP ifmp, const PGNO pgno, BOOL* const pfInCache, ERR* const perrBF, BFDirtyFlags* const pbfdf )
+void BFCacheStatus( const IFMP ifmp, const PGNO pgno, BOOL* const pfInCache, ERR* const perrBF, BFDirtyFlags* const pbfdf, BOOL* const pfInRangeLock )
 {
     *pfInCache = fFalse;
     ( perrBF != NULL ) ? ( *perrBF = JET_errSuccess ) : 0;
     ( pbfdf != NULL ) ? ( *pbfdf = bfdfMin ) : 0;
+    ( pfInRangeLock != NULL ) ? ( *pfInRangeLock = fFalse ) : 0;
 
     if ( g_fBFCacheInitialized )
     {
@@ -1891,6 +1892,7 @@ void BFCacheStatus( const IFMP ifmp, const PGNO pgno, BOOL* const pfInCache, ERR
             *pfInCache = fTrue;
             ( perrBF != NULL ) ? ( *perrBF = pgnopbf.pbf->err ) : 0;
             ( pbfdf != NULL ) ? ( *pbfdf = (BFDirtyFlags)pgnopbf.pbf->bfdf ) : 0;
+            ( pfInRangeLock != NULL ) ? ( *pfInRangeLock = pgnopbf.pbf->bfbitfield.FRangeLocked() ) : 0;
         }
         g_bfhash.ReadUnlockKey( &lock );
     }
@@ -3937,6 +3939,19 @@ ERR ErrBFLockPageRangeForExternalZeroing( const IFMP ifmp, const PGNO pgnoFirst,
         }
     }
 
+    for ( PGNO pgno = pbfprl->pgnoFirst; pgno <= pbfprl->pgnoLast; pgno++ )
+    {
+        const size_t ipgno = pgno - pbfprl->pgnoFirst;
+        if ( !pbfprl->rgfLatched[ ipgno ] )
+        {
+            continue;
+        }
+
+        BF* const pbf = PBF( pbfprl->rgbfl[ ipgno ].dwContext );
+        AssertSz( !pbf->bfbitfield.FRangeLocked(), "BFLockRangeAlreadyLocked" );
+        pbf->bfbitfield.SetFRangeLocked( fTrue );
+    }
+
     // Fixup flush map.
     Call( pfmp->PFlushMap()->ErrSyncRangeInvalidateFlushType( pbfprl->pgnoFirst, pbfprl->cpg ) );
 
@@ -4021,6 +4036,19 @@ void BFUnlockPageRangeForExternalZeroing( const DWORD_PTR dwContext, const Trace
     // Rollback range locks if needed.
     if ( pbfprl->fRangeLocked )
     {
+        for ( PGNO pgno = pbfprl->pgnoFirst; pgno <= pbfprl->pgnoLast; pgno++ )
+        {
+            const size_t ipgno = pgno - pbfprl->pgnoFirst;
+            if ( !pbfprl->rgfLatched[ ipgno ] )
+            {
+                continue;
+            }
+
+            BF* const pbf = PBF( pbfprl->rgbfl[ ipgno ].dwContext );
+            AssertSz( pbf->bfbitfield.FRangeLocked(), "BFUnlockRangeNotLocked" );
+            pbf->bfbitfield.SetFRangeLocked( fFalse );
+        }
+
         pfmp->RangeUnlockAndLeave( pbfprl->pgnoFirst, pbfprl->pgnoLast, pbfprl->irangelock );
         pbfprl->fRangeLocked = fFalse;
     }
@@ -16836,7 +16864,7 @@ void BFIFreePage( PBF pbf, const BOOL fMRU, const BFFreePageFlags bffpfDangerous
     Enforce( pbf->err != wrnBFPageFlushPending );
     Enforce( pbf->pWriteSignalComplete == NULL );
     Enforce( PvBFIAcquireIOContext( pbf ) == NULL );
-    AssertTrack( !pbf->bfbitfield.FRangeLocked(), "BFFreeRangeStillLocked" );
+    AssertSz( !pbf->bfbitfield.FRangeLocked() || pbf->fAbandoned, "BFFreeRangeStillLocked" );
 
     Enforce( pbf->pbfTimeDepChainNext == NULL );
     Enforce( pbf->pbfTimeDepChainPrev == NULL );
@@ -17041,7 +17069,7 @@ ERR ErrBFICachePage(    PBF* const ppbf,
     pgnopbf.pbf->icbPage = icbPageSize;
     pgnopbf.pbf->tce = tce;
 
-    AssertTrack( !pgnopbf.pbf->bfbitfield.FRangeLocked(), "BFCacheRangeAlreadyLocked" );
+    AssertSz( !pgnopbf.pbf->bfbitfield.FRangeLocked(), "BFCacheRangeAlreadyLocked" );
     pgnopbf.pbf->bfbitfield.SetFRangeLocked( fFalse );
 
     PERFOpt( cBFCache.Inc( PinstFromIfmp( ifmp ), tce, ifmp ) );
@@ -21641,7 +21669,7 @@ ERR ErrBFIPrepareFlushPage(
 
     //  get the active range lock
 
-    AssertTrack( !pbf->bfbitfield.FRangeLocked(), "BFPrepRangeAlreadyLocked" );
+    AssertSz( !pbf->bfbitfield.FRangeLocked(), "BFPrepRangeAlreadyLocked" );
 
     CMeteredSection::Group irangelock = CMeteredSection::groupTooManyActiveErr;
     pfmp = &g_rgfmp[ pbf->ifmp ];
@@ -21835,9 +21863,9 @@ HandleError:
 
     if ( ( err < JET_errSuccess ) && fRangeLocked )
     {
-        AssertTrack( pbf->bfbitfield.FRangeLocked(), "BFPrepFlushRangeNotLocked" );
-        pfmp->LeaveRangeLock( pbf->pgno, pbf->irangelock );
+        AssertSz( pbf->bfbitfield.FRangeLocked(), "BFPrepFlushRangeNotLocked" );
         pbf->bfbitfield.SetFRangeLocked( fFalse );
+        pfmp->LeaveRangeLock( pbf->pgno, pbf->irangelock );
         fRangeLocked = fFalse;
     }
 
@@ -22098,9 +22126,9 @@ void CBFOpportuneWriter::RevertBFs_( ULONG ibfStart )
         {
             Assert( pbf->sxwl.FOwnExclusiveLatch() );
 
-            AssertTrack( pbf->bfbitfield.FRangeLocked(), "BFRevertRangeNotLocked" );
-            g_rgfmp[ pbf->ifmp ].LeaveRangeLock( pbf->pgno, pbf->irangelock );
+            AssertSz( pbf->bfbitfield.FRangeLocked(), "BFRevertRangeNotLocked" );
             pbf->bfbitfield.SetFRangeLocked( fFalse );
+            g_rgfmp[ pbf->ifmp ].LeaveRangeLock( pbf->pgno, pbf->irangelock );
             pbf->sxwl.ReleaseExclusiveLatch();
         }
     }
@@ -22229,9 +22257,9 @@ bool CBFOpportuneWriter::FVerifyCleanBFs_()
                     AssertSz( fFalse, "Unexpected error here, this should have been clean by now as ErrBFIPrepareFlushPage() rejects BFs with errors." );
                 }
 
-                AssertTrack( pbf->bfbitfield.FRangeLocked(), "BFVerCleanRangeNotLocked" );
-                g_rgfmp[ pbf->ifmp ].LeaveRangeLock( pbf->pgno, pbf->irangelock );
+                AssertSz( pbf->bfbitfield.FRangeLocked(), "BFVerCleanRangeNotLocked" );
                 pbf->bfbitfield.SetFRangeLocked( fFalse );
+                g_rgfmp[ pbf->ifmp ].LeaveRangeLock( pbf->pgno, pbf->irangelock );
 
                 Assert( FBFIUpdatablePage( pbf ) );
 
@@ -22527,9 +22555,9 @@ ERR ErrBFIFlushPage(    __inout const PBF       pbf,
         }
         else if ( errDiskTilt == err )
         {
-            AssertTrack( pbf->bfbitfield.FRangeLocked(), "BFFlushRangeNotLocked" );
-            g_rgfmp[ pbf->ifmp ].LeaveRangeLock( pbf->pgno, pbf->irangelock );
+            AssertSz( pbf->bfbitfield.FRangeLocked(), "BFFlushRangeNotLocked" );
             pbf->bfbitfield.SetFRangeLocked( fFalse );
+            g_rgfmp[ pbf->ifmp ].LeaveRangeLock( pbf->pgno, pbf->irangelock );
             pbf->sxwl.ReleaseExclusiveLatch();
             Call( err );
         }
@@ -24647,6 +24675,8 @@ void BFISyncWriteComplete(  const ERR           err,
 
             if ( fIsPagePatching && fIsFmRecoverable )
             {
+                //  OK to ignore errors because the sync write of a patched page can only be initiated once we
+                //  have already synchronously set its flush type to pgftUnknown.
                 (void)pfm->ErrSetPgnoFlushTypeAndWait( pbf->pgno, pgft, dbtime );
             }
             else
@@ -24658,9 +24688,9 @@ void BFISyncWriteComplete(  const ERR           err,
 
     //  release our reference count on the range lock now that our write has completed
 
-    AssertTrack( pbf->bfbitfield.FRangeLocked(), "BFSyncCompleteRangeNotLocked" );
-    g_rgfmp[ pbf->ifmp ].LeaveRangeLock( pbf->pgno, pbf->irangelock );
+    AssertSz( pbf->bfbitfield.FRangeLocked(), "BFSyncCompleteRangeNotLocked" );
     pbf->bfbitfield.SetFRangeLocked( fFalse );
+    g_rgfmp[ pbf->ifmp ].LeaveRangeLock( pbf->pgno, pbf->irangelock );
 
     //  write was successful
 
@@ -25500,9 +25530,9 @@ void BFIAsyncWriteComplete( const ERR           err,
     //  release our reference count on the range lock now that our write
     //  has completed
 
-    AssertTrack( pbf->bfbitfield.FRangeLocked(), "BFAsyncCompleteRangeNotLocked" );
-    pfmp->LeaveRangeLock( pbf->pgno, pbf->irangelock );
+    AssertSz( pbf->bfbitfield.FRangeLocked(), "BFAsyncCompleteRangeNotLocked" );
     pbf->bfbitfield.SetFRangeLocked( fFalse );
+    pfmp->LeaveRangeLock( pbf->pgno, pbf->irangelock );
 
     //  write was successful
 

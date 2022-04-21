@@ -4114,6 +4114,19 @@ HandleError:
 
 #define ENABLE_LOST_FLUSH_INSTRUMENTATION
 
+#ifdef DEBUG
+void AssertRangeLockConsistency( const IFMP ifmp, const PGNO pgnoStart, const PGNO pgnoEnd )
+{
+    for ( PGNO pgno = pgnoStart; pgno <= pgnoEnd; pgno++ )
+    {
+        BOOL fInCache = fFalse;
+        BOOL fInRangeLock = fFalse;
+        BFCacheStatus( ifmp, pgno, &fInCache, NULL, NULL, &fInRangeLock );
+        Assert( !fInCache || !fInRangeLock );
+    }
+}
+#endif // DEBUG
+
 ERR FMP::ErrDBReadPages(
     const PGNO pgnoFirst,
     VOID* const pvPageFirst,
@@ -4151,6 +4164,7 @@ ERR FMP::ErrDBReadPages(
 
         //  engage range lock for the region to copy
         Call( ErrRangeLock( pgnoStart, pgnoEnd ) );
+        OnDebug( AssertRangeLockConsistency( Ifmp(), pgnoStart, pgnoEnd ) );
 
 #ifdef ENABLE_LOST_FLUSH_INSTRUMENTATION
 #ifdef DEBUG
@@ -4170,7 +4184,9 @@ ERR FMP::ErrDBReadPages(
 #endif // DEBUG
 #endif // ENABLE_LOST_FLUSH_INSTRUMENTATION
 
+        OnDebug( AssertRangeLockConsistency( Ifmp(), pgnoStart, pgnoEnd ) );
         err = ErrIOReadDbPages( Ifmp(), Pfapi(), (BYTE *)pvPageFirst, pgnoStart, pgnoEnd, fTrue, pgnoLastFileSystem, tc, fExtensiveChecks );
+        OnDebug( AssertRangeLockConsistency( Ifmp(), pgnoStart, pgnoEnd ) );
 
 #ifdef ENABLE_LOST_FLUSH_INSTRUMENTATION
         BYTE* pvPageFirstCopy = NULL;
@@ -4202,7 +4218,11 @@ ERR FMP::ErrDBReadPages(
                 while ( cRetries < cRetriesMax )
                 {
                     cRetries++;
+
+                    OnDebug( AssertRangeLockConsistency( Ifmp(), pgnoStart, pgnoEnd ) );
                     errRetry = ErrIOReadDbPages( Ifmp(), Pfapi(), (BYTE *)pvPageFirst, pgnoStart, pgnoEnd, fTrue, pgnoLastFileSystem, tc, fExtensiveChecks );
+                    OnDebug( AssertRangeLockConsistency( Ifmp(), pgnoStart, pgnoEnd ) );
+
                     if ( errRetry != JET_errReadLostFlushVerifyFailure )
                     {
                         break;
@@ -4241,6 +4261,7 @@ ERR FMP::ErrDBReadPages(
 
         /*  disengage range lock for the region copied
         /**/
+        OnDebug( AssertRangeLockConsistency( Ifmp(), pgnoStart, pgnoEnd ) );
         RangeUnlock( pgnoStart, pgnoEnd );
 
         Call( err );

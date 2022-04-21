@@ -166,12 +166,66 @@ private:    // not implemented
 class FMP
     :   public CZeroInit
 {
+    public:
+#ifdef DEBUGGER_EXTENSION
+        VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
+#endif  //  DEBUGGER_EXTENSION
+
     private:
+
+#ifdef ENABLE_JET_UNIT_TEST
+        friend class TestFMPRangeStructAssignment;
+        friend class TestFMPRangeStructComparisons;
+#endif  // ENABLE_JET_UNIT_TEST
 
         struct RANGE
         {
-            PGNO    pgnoStart;
-            PGNO    pgnoEnd;
+            private:
+                PGNO pgnoStart;
+                PGNO pgnoEnd;
+
+#ifdef DEBUGGER_EXTENSION
+                friend VOID FMP::Dump( CPRINTF*, DWORD_PTR ) const;
+#endif  //  DEBUGGER_EXTENSION
+
+            public:
+                void Set( const PGNO pgnoStartNew, const PGNO pgnoEndNew )
+                {
+                    Assert( pgnoStartNew <= pgnoEndNew );
+                    pgnoStart = pgnoStartNew;
+                    pgnoEnd = pgnoEndNew;
+                }
+
+                RANGE()
+                {
+                    Set( pgnoNull, pgnoNull );
+                }
+
+                RANGE( const PGNO pgnoStartNew, const PGNO pgnoEndNew )
+                {
+                    Set( pgnoStartNew, pgnoEndNew );
+                }
+
+                BOOL FContains( const PGNO pgno ) const
+                {
+                    return ( pgno >= pgnoStart && pgno <= pgnoEnd );
+                }
+
+                BOOL FOverlaps( const RANGE& range ) const
+                {
+                    return ( range.pgnoStart <= pgnoEnd && range.pgnoEnd >= pgnoStart );
+                }
+
+                BOOL FMatches( const RANGE& range ) const
+                {
+                    return ( range.pgnoStart == pgnoStart && range.pgnoEnd == pgnoEnd );
+                }
+
+                RANGE& operator=( const RANGE& range )
+                {
+                    Set( range.pgnoStart, range.pgnoEnd );
+                    return *this;
+                }
         };
 
         struct RANGELOCK
@@ -987,7 +1041,6 @@ public:
 
         VOID AssertRangeLockEmpty() const;
         BOOL FEnterRangeLock( const PGNO pgno, CMeteredSection::Group* const pirangelock );
-        VOID LeaveRangeLock( const INT irangelock );
         VOID LeaveRangeLock( const PGNO pgnoDebugOnly, const INT irangelock );
 
         ERR ErrRangeLockAndEnter( const PGNO pgnoStart, const PGNO pgnoEnd, CMeteredSection::Group* const pirangelock );
@@ -1024,10 +1077,6 @@ public:
         ERR ErrEnsureLogRedoMapsAllocated();
         VOID FreeLogRedoMaps( const BOOL fAllocCleanup = fFalse );
         BOOL FRedoMapsEmpty();
-
-#ifdef DEBUGGER_EXTENSION
-        VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
-#endif  //  DEBUGGER_EXTENSION
 
     // =====================================================================
     // FMP management
