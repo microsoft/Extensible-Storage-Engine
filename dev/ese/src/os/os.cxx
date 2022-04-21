@@ -403,8 +403,6 @@ void COSLayerPreInit::SetDefaults()
     //  os file settings
     //
     SetZeroExtend( 1024 * 1024 );
-    SetIOMaxOutstanding( 1024 );
-    SetIOMaxOutstandingBackground( 32 );
 
     //  analysis sub-systems, logging, perfmon, etc...
     //

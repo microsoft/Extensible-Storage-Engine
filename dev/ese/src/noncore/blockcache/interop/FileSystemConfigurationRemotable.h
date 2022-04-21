@@ -31,6 +31,16 @@ namespace Internal
                             return this->target->AccessDeniedRetryPeriod();
                         }
 
+                        virtual Int32 MaxConcurrentIO()
+                        {
+                            return this->target->MaxConcurrentIO();
+                        }
+
+                        virtual Int32 MaxConcurrentBackgroundIO()
+                        {
+                            return this->target->MaxConcurrentBackgroundIO();
+                        }
+
                         virtual TimeSpan HungIOThreshhold()
                         {
                             return this->target->HungIOThreshhold();

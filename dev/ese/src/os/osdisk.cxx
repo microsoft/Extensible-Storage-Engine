@@ -209,8 +209,6 @@ typedef CPool< IOREQ, IOREQ::OffsetOfAPIC > IOREQPool;
 
 //  IOREQ quota / current max / and general pool
 
-DWORD           g_cioOutstandingMax;
-DWORD           g_cioBackgroundMax;
 volatile DWORD  g_cioreqInUse;
 IOREQPool*      g_pioreqpool;
 
@@ -469,11 +467,10 @@ ERR ErrOSDiskIOREQReserve()
 
 LOCAL ERR ErrOSDiskIOREQReserveAndLeak()
 {
-    //  We'll allow no more than 50% of the IOREQs to be leaked to detect runaway resources ...
-    const ULONG cioreqrespoolleakMax = g_cioOutstandingMax / 2; // note mismatch count of IO w/ count of IOREQ ... its ok though.
+    //  We'll allow a limited number of IOREQs to be leaked to detect runaway resources ...
+    const ULONG cioreqrespoolleakMax = 100;
     ULONG cioreqTemp;
-    if ( cioreqrespoolleakMax == 0 || cioreqrespoolleakMax > g_cioOutstandingMax ||
-        !FAtomicIncrementMax( &g_cioreqrespoolleak, &cioreqTemp, cioreqrespoolleakMax ) )
+    if ( !FAtomicIncrementMax( &g_cioreqrespoolleak, &cioreqTemp, cioreqrespoolleakMax ) )
     {
         AssertSz( fFalse, "I would not expect this to happen in anything, but a grossly mis-configured app, or an ESE bug reserving too much IO" );
         return ErrERRCheck( JET_errTooManyIO );
@@ -1295,20 +1292,8 @@ ERR ErrOSDiskIIOREQPoolInit()
 
     //  allocate IOREQ storage
 
-    if (  ( (~(DWORD)0) / sizeof( IOREQ ) < g_cioOutstandingMax ) )
-    {
-        Call( ErrERRCheck( JET_errInvalidParameter ) );
-    }
-
     C_ASSERT( ( 1024 - sizeof( IOREQCHUNK ) ) >= 4 );
-    g_cbIoreqChunk = 1024;
-#ifndef DEBUG
-    if ( g_cioOutstandingMax > 256 )
-    {
-        //  In retail and if we've a largish cap on IOREQs outstanding ...
-        g_cbIoreqChunk = 64 * 1024;
-    }
-#endif
+    g_cbIoreqChunk = 5 * sizeof( IOREQ );
 
     Alloc( g_pioreqchunkRoot = (IOREQCHUNK*)PvOSMemoryHeapAlloc( g_cbIoreqChunk ) );
     memset( g_pioreqchunkRoot, 0, g_cbIoreqChunk );
@@ -2974,7 +2959,9 @@ void COSDisk::LoadCachePerf_( HANDLE hDisk )
 
 //  Initialize the DISK.
 
-ERR COSDisk::ErrInitDisk( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber )
+ERR COSDisk::ErrInitDisk(   _In_    IFileSystemConfiguration* const pfsconfig,
+                            _In_z_  const WCHAR * const             wszDiskPathId, 
+                            _In_    const DWORD                     dwDiskNumber )
 {
     ERR         err     = JET_errSuccess;
     const INT       cchBuf      = 256;
@@ -2990,52 +2977,52 @@ ERR COSDisk::ErrInitDisk( __in_z const WCHAR * const wszDiskPathId, _In_ const D
     //  Process the registry parameters and defaults
     //
 
-    ULONG cioOutstandingMax = g_cioOutstandingMax;
+    m_cioOutstandingMax = pfsconfig->CIOMaxOutstanding();
     if ( FOSConfigGet( L"OS/IO", L"Total Quota", wszBuf, sizeof( wszBuf ) )
         && wszBuf[0] )
     {
-        cioOutstandingMax = _wtol( wszBuf );
+        m_cioOutstandingMax = _wtol( wszBuf );
     }
 
-    ULONG cioBackgroundMax = g_cioBackgroundMax;
+    m_cioBackgroundMax = pfsconfig->CIOMaxOutstandingBackground();
     if ( FOSConfigGet( L"OS/IO", L"Background Quota", wszBuf, sizeof( wszBuf ) )
         && wszBuf[0] )
     {
-        cioBackgroundMax = _wtol( wszBuf );
+        m_cioBackgroundMax = _wtol( wszBuf );
     }
 
     //  For urgent background (max) we choose 1/2 and 1/2 with foreground IOs.
 
-    ULONG cioUrgentBackMax = CioDefaultUrgentOutstandingIOMax( cioOutstandingMax );
+    m_cioUrgentBackMax = CioDefaultUrgentOutstandingIOMax( m_cioOutstandingMax );
     if ( FOSConfigGet( L"OS/IO", L"Urgent Background Quota Max", wszBuf, sizeof( wszBuf ) )
         && wszBuf[0] )
     {
-        cioUrgentBackMax = _wtol( wszBuf );
+        m_cioUrgentBackMax = _wtol( wszBuf );
     }
 
     //
     //  Sanitize a bit
     //
 
-    if ( cioOutstandingMax < 4 )
+    if ( m_cioOutstandingMax < 4 )
     {
         //  calculations won't work out if we don't have at least 3 outstanding.
         AssertSz( fFalse, "Total Quota / JET_paramOutstandingIOMax too low." );
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
-    cioBackgroundMax = UlBound( cioBackgroundMax, 1, cioOutstandingMax - 2 );
-    cioUrgentBackMax = UlBound( cioUrgentBackMax, cioBackgroundMax+1, cioOutstandingMax - 1 );
+    m_cioBackgroundMax = UlBound( m_cioBackgroundMax, 1, m_cioOutstandingMax - 2 );
+    m_cioUrgentBackMax = UlBound( m_cioUrgentBackMax, m_cioBackgroundMax +1, m_cioOutstandingMax - 1 );
     
     // ensure urgent background is larger than background
-    Assert( cioBackgroundMax <= ( cioOutstandingMax / 2 ) );
-    Assert( cioUrgentBackMax > cioBackgroundMax );
+    Assert( m_cioBackgroundMax <= (m_cioOutstandingMax / 2 ) );
+    Assert( m_cioUrgentBackMax > m_cioBackgroundMax );
 
     //
     //  Initialize the IO Queue
     //
 
-    Call( m_pIOQueue->ErrIOQueueInit( cioOutstandingMax, cioBackgroundMax, cioUrgentBackMax ) );
+    Call( m_pIOQueue->ErrIOQueueInit( m_cioOutstandingMax, m_cioBackgroundMax, m_cioUrgentBackMax ) );
 
     //  open the physical disk handle
 
@@ -3075,7 +3062,10 @@ HandleError:
 //  OS Disk Global Connect / Disconnect
 //
 
-ERR ErrOSDiskICreate( __in_z const WCHAR * const wszDiskPathId, const DWORD dwDiskNumber, _Out_ COSDisk ** pposd )
+ERR ErrOSDiskICreate(   _In_    IFileSystemConfiguration* const pfsconfig,
+                        _In_z_  const WCHAR * const             wszDiskPathId, 
+                        _In_    const DWORD                     dwDiskNumber,
+                        _Out_   COSDisk** const                 pposd )
 {
     ERR         err     = JET_errSuccess;
     COSDisk *   posd    = NULL;
@@ -3097,7 +3087,7 @@ ERR ErrOSDiskICreate( __in_z const WCHAR * const wszDiskPathId, const DWORD dwDi
     Call( ErrFaultInjection( 17348 ) );
     Alloc( posd = new COSDisk() );
 
-    Call( posd->ErrInitDisk( wszDiskPathId, dwDiskNumber ) );
+    Call( posd->ErrInitDisk( pfsconfig, wszDiskPathId, dwDiskNumber ) );
 
     //
     //  Must not fail after here ...
@@ -3243,7 +3233,10 @@ class OSDiskEnumerator
 
 };
 
-ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber, _Out_ IDiskAPI ** ppdiskapi )
+ERR ErrOSDiskConnect(   _In_    IFileSystemConfiguration* const pfsconfig,
+                        _In_z_  const WCHAR * const             wszDiskPathId, 
+                        _In_    const DWORD                     dwDiskNumber,
+                        _Out_   IDiskAPI** const                ppdiskapi )
 {
     ERR         err     = JET_errSuccess;
     COSDisk *   posd    = NULL;
@@ -3268,7 +3261,7 @@ ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD
 
     if ( NULL == posd )
     {
-        Call( ErrOSDiskICreate( wszDiskPathId, dwDiskNumber, &posd ) );
+        Call( ErrOSDiskICreate( pfsconfig, wszDiskPathId, dwDiskNumber, &posd ) );
         OSTrace( JET_tracetagDiskVolumeManagement, OSFormat( "Created Disk p=%p, PathId=%ws", posd, posd->WszDiskPathId() ) );
     }
     else
@@ -4428,31 +4421,6 @@ INLINE void COSDisk::IOQueue::IOHeapRemove( IOREQ* pioreq, _Out_ OSDiskIoQueueMa
 //
 
 CTaskManager*       g_postaskmgrFile;
-
-//  Over what the COSFile::m_msFileSize can handle, so truncate the value down.  Currently ~32765 IOs.
-const ULONG g_cioMaxMax = CMeteredSection::cMaxActive - 1 /* just to give even more room */;
-
-void COSLayerPreInit::SetIOMaxOutstanding( ULONG cIOs )
-{
-    if ( cIOs > g_cioMaxMax )
-    {
-        // Windows Live Mail sets JET_paramOutstandingIOMax to 65536, so we need to continue pretending that
-        // this value is still ok while using a smaller value internally
-        //AssertSz( FNegTest( fInvalidUsage ), "The cIOs (%d) value is too high (> %d)", cIOs, g_cioMaxMax );
-        cIOs = g_cioMaxMax;
-    }
-    g_cioOutstandingMax = cIOs;
-}
-
-void COSLayerPreInit::SetIOMaxOutstandingBackground( ULONG cIOs )
-{
-    if ( cIOs > g_cioMaxMax )
-    {
-        AssertSz( FNegTest( fInvalidUsage ), "The cIOs (%d) value is too high (> %d)", cIOs, g_cioMaxMax );
-        cIOs = g_cioMaxMax;
-    }
-    g_cioBackgroundMax = cIOs;
-}
     
 //  registers the given file for use with the I/O thread
 
@@ -5632,12 +5600,12 @@ LONG CioOSDiskIFromUrgentLevelLinear( _In_ const ULONG iUrgentLevel, _In_ const 
     return (LONG)cioMax;
 }
 
-LONG CioOSDiskIFromUrgentQOS( _In_ const OSFILEQOS grbitQOS, _In_ const DWORD cioUrgentMaxMax )
+LONG CioOSDiskIFromUrgentLevel( _In_ const ULONG iUrgentLevel, _In_ const DWORD cioUrgentMaxMax )
 {
     // Evolved this over time... keeping old versions...
-    //const ULONG cioMax = CioOSDiskIFromUrgentLevelLinear( IOSDiskIUrgentLevelFromQOS( grbitQOS ), cioUrgentMaxMax );
-    //const ULONG cioMax = CioOSDiskIFromUrgentLevelBiLinear( IOSDiskIUrgentLevelFromQOS( grbitQOS ), cioUrgentMaxMax );
-    const ULONG cioMax = CioOSDiskIFromUrgentLevelSmoothish( IOSDiskIUrgentLevelFromQOS( grbitQOS ), cioUrgentMaxMax );
+    //const ULONG cioMax = CioOSDiskIFromUrgentLevelLinear( iUrgentLevel, cioUrgentMaxMax );
+    //const ULONG cioMax = CioOSDiskIFromUrgentLevelBiLinear( iUrgentLevel, cioUrgentMaxMax );
+    const ULONG cioMax = CioOSDiskIFromUrgentLevelSmoothish( iUrgentLevel, cioUrgentMaxMax );
 
     Assert( cioMax >= 1 );
     Assert( cioMax <= cioUrgentMaxMax );
@@ -5645,9 +5613,15 @@ LONG CioOSDiskIFromUrgentQOS( _In_ const OSFILEQOS grbitQOS, _In_ const DWORD ci
     return (LONG)cioMax;
 }
 
-LONG CioOSDiskPerfCounterIOMaxFromUrgentQOS( _In_ const OSFILEQOS grbitQOS )
+LONG CioOSDiskIFromUrgentQOS( _In_ const OSFILEQOS grbitQOS, _In_ const DWORD cioUrgentMaxMax )
 {
-    return CioOSDiskIFromUrgentQOS( grbitQOS, CioDefaultUrgentOutstandingIOMax( g_cioOutstandingMax) );
+    const ULONG iUrgentLevel = IOSDiskIUrgentLevelFromQOS( grbitQOS );
+    return CioOSDiskIFromUrgentLevel( iUrgentLevel, cioUrgentMaxMax );
+}
+
+LONG CioOSDiskPerfCounterIOMaxFromUrgentQOS( _In_ IFileSystemConfiguration* const pfsconfig, _In_ const OSFILEQOS grbitQOS )
+{
+    return CioOSDiskIFromUrgentQOS( grbitQOS, CioDefaultUrgentOutstandingIOMax( pfsconfig->CIOMaxOutstanding() ) );
 }
 
 LONG CusecOSDiskSmallDuration( HRT dhrtDuration )
@@ -6272,7 +6246,7 @@ BOOL COSDisk::IOQueue::FReleaseQueueSpace( __inout IOREQ * pioreq )
         {
             iUrgentLevel--;
         }
-        if ( cioreqQueueOutstanding <= CioOSDiskIFromUrgentLevelSmoothish( iUrgentLevel, m_cioQosUrgentBackgroundMax ) )
+        if ( cioreqQueueOutstanding <= CioOSDiskIFromUrgentLevel( iUrgentLevel, m_cioQosUrgentBackgroundMax ) )
         {
             fFreedIoQuota = fTrue;
         }
@@ -7575,7 +7549,7 @@ INLINE LONG COSDisk::CioAllowedMetedOps( _In_ const LONG cioWaitingQ ) const
 
 
     return !FSeekPenalty() ?
-            g_cioOutstandingMax /* effectively unlimited for SSDs */ :
+            m_cioOutstandingMax /* effectively unlimited for SSDs */ :
             ( cioWaitingQ < g_cioLowQueueThreshold ?
                 1 : g_cioConcurrentMetedOpsMax );
 }

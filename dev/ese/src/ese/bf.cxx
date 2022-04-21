@@ -12671,15 +12671,16 @@ ERR ErrBFIOB0MaintScan(
         {
             if ( fOperations & bfob0moFlushing )
             {
-                const INT iUrgentLevelWorst = IUrgentBFIMaintCheckpointPriority( PinstFromIfmp( pbf->ifmp )->m_plog, lgposNewest, cbCheckpointDepth, lgposOldestBegin0 );
+                INST* const pinst = PinstFromIfmp( pbf->ifmp );
+                const INT iUrgentLevelWorst = IUrgentBFIMaintCheckpointPriority( pinst->m_plog, lgposNewest, cbCheckpointDepth, lgposOldestBegin0 );
                 if ( iUrgentLevelWorst )
                 {
-                    PERFOptDeclare( const INT cioOutstandingMax = CioOSDiskPerfCounterIOMaxFromUrgentQOS( QosOSFileFromUrgentLevel( iUrgentLevelWorst ) ) );
-                    PERFOpt( cBFCheckpointMaintOutstandingIOMax.Set( PinstFromIfmp( pbf->ifmp ), cioOutstandingMax ) );
+                    PERFOptDeclare( const INT cioOutstandingMax = CioOSDiskPerfCounterIOMaxFromUrgentQOS( pinst->m_pfsconfig, QosOSFileFromUrgentLevel( iUrgentLevelWorst ) ) );
+                    PERFOpt( cBFCheckpointMaintOutstandingIOMax.Set( pinst, cioOutstandingMax ) );
                 }
                 else
                 {
-                    PERFOpt( cBFCheckpointMaintOutstandingIOMax.Set( PinstFromIfmp( pbf->ifmp ), 1 ) );
+                    PERFOpt( cBFCheckpointMaintOutstandingIOMax.Set( pinst, 1 ) );
                 }
             }
             fSetUrgentCtr = fTrue;

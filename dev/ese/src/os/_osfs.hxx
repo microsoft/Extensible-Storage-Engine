@@ -540,7 +540,7 @@ class COSVolume //  osdiskapi
 
         //  returns the COSDisk managing the volume, adding a reference to the disk
 
-        ERR ErrGetDisk( COSDisk ** pposd );
+        ERR ErrGetDisk( _In_ IFileSystemConfiguration* const pfsconfig, _Out_ COSDisk** pposd );
 
     //
     //  Data

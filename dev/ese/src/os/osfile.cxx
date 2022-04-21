@@ -476,7 +476,7 @@ ERR COSFile::ErrInitFile(   COSFileSystem* const                posfs,
     //  we should not fail here because the disk is supposed to have been created at this point, when the volume
     //  got connected
 
-    CallS( m_posv->ErrGetDisk( &(m_p_osf->m_posd) ) );
+    CallS( m_posv->ErrGetDisk( posfs->Pfsconfig(), &(m_p_osf->m_posd)));
     Assert( m_p_osf->m_posd );
     ASSERT_VALID( m_p_osf->m_posd );
 

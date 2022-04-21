@@ -28,6 +28,10 @@ namespace Internal
 
                         virtual TimeSpan AccessDeniedRetryPeriod();
 
+                        virtual int MaxConcurrentIO();
+
+                        virtual int MaxConcurrentBackgroundIO();
+
                         virtual TimeSpan HungIOThreshhold();
 
                         virtual int GrbitHungIOActions();
@@ -49,6 +53,18 @@ namespace Internal
                 inline TimeSpan FileSystemConfigurationBase<TM,TN,TW>::AccessDeniedRetryPeriod()
                 {
                     return TimeSpan::FromMilliseconds( Pi->DtickAccessDeniedRetryPeriod() );
+                }
+
+                template< class TM, class TN, class TW >
+                inline int FileSystemConfigurationBase<TM, TN, TW>::MaxConcurrentIO()
+                {
+                    return Pi->CIOMaxOutstanding();
+                }
+
+                template< class TM, class TN, class TW >
+                inline int FileSystemConfigurationBase<TM, TN, TW>::MaxConcurrentBackgroundIO()
+                {
+                    return Pi->CIOMaxOutstandingBackground();
                 }
 
                 template< class TM, class TN, class TW >
