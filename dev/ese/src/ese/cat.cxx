@@ -13739,49 +13739,54 @@ BOOL FCATIExtentPageCountCacheCacheableObject(
     return fTrue;
 }
 
-
 //  ================================================================
 VOID CATIPossiblySetUpdatingExtentPageCountCacheFlag(
-    PIB * const ppib
+    PIB * const ppib,
+    BOOL *pfSetFlag
     )
 //  ================================================================
 {
+    *pfSetFlag = fFalse;
 #ifdef DEBUG
-    Assert( !ppib->FUpdatingExtentPageCountCache() );
 
-    // Set a flag saying we're messing with the ExtentPageCountCache.
-    if ( ppib->FBatchIndexCreation() )
+    if ( ppib->FUpdatingExtentPageCountCache() )
+    {
+        // We used to Assert this wasn't already set, but there are a few
+        // cases where we actually do end up here recursively.
+    }
+    else if ( ppib->FBatchIndexCreation() )
     {
         // We don't set this in BatchIndexCreation since that has multiple threads using
         // the same PIB.  We adjust the necessary asserts elsewhere to check for
         // BatchIndexCreation in addition to FUpdatingExtentPageCountCache  (see AssertDIRNoLatch() )
-        return;
     }
-
-    ppib->SetFUpdatingExtentPageCountCache();
+    else
+    {
+        // Set a flag saying we're messing with the ExtentPageCountCache.
+        ppib->SetFUpdatingExtentPageCountCache();
+        *pfSetFlag = fTrue;
+    }
 #endif
 }
 
 //  ================================================================
 VOID CATIPossiblyResetUpdatingExtentPageCountCacheFlag(
-    PIB * const ppib
+    PIB * const ppib,
+    BOOL fSetFlag
     )
 //  ================================================================
 {
 #ifdef DEBUG
-    if ( !ppib->FUpdatingExtentPageCountCache() )
+    if ( fSetFlag )
     {
-        // Didn't set the bit; happens in a number of code paths, generally when
-        // we got an answer (usually that we don't need to update the cache) without
-        // needing to do DB operations.
-        return;
-    }
+        // We should only be calling this in cases where we're sure we set it.
+        Assert( ppib->FUpdatingExtentPageCountCache() );
 
-    ppib->ResetFUpdatingExtentPageCountCache();
-    Assert( !ppib->FUpdatingExtentPageCountCache() );
+        ppib->ResetFUpdatingExtentPageCountCache();
+        Assert( !ppib->FUpdatingExtentPageCountCache() );
+    }
 #endif
 }
-
 VOID CATIExtentPageCountsCacheReportError(
     const PIB * const ppib,
     const IFMP ifmp,
@@ -13909,6 +13914,7 @@ VOID CATSetExtentPageCounts(
     PCWSTR          wszNote;
     FDPINFO         fdpinfo;
     BOOL            fReplace = fFalse;
+    BOOL            fSetUpdatingExtentPageCountCacheFlag;
     ExtentPageCountCacheEntryState epccesFlag;
     JET_SETCOLUMN   rgsetcolumn[] =
         {
@@ -13930,6 +13936,9 @@ VOID CATSetExtentPageCounts(
         return;
     }
 
+    // Maybe set a flag saying we're messing with the ExtentPageCountCache.
+    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib, &fSetUpdatingExtentPageCountCacheFlag );
+
     // Special case, we cache the DBRoot in memory only.
     if ( objidSystemRoot == objid )
     {
@@ -13949,9 +13958,6 @@ VOID CATSetExtentPageCounts(
     Assert ( FBFNotLatched( ifmp, pgnoFDPMSO ) );
     Assert ( pgnoNull != pfmp->PgnoExtentPageCountCacheFDP() );
     Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
-
-    // Set a flag saying we're messing with the ExtentPageCountCache.
-    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib );
 
     wszNote = L"LOOKING";
 
@@ -14072,7 +14078,7 @@ HandleError:
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
 
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib, fSetUpdatingExtentPageCountCacheFlag );
 
     Assert( pfucbNil == pfucbExtentPageCountCache );
 
@@ -14118,6 +14124,7 @@ VOID CATResetExtentPageCounts(
     CPG                 cpgAEBefore    = cpgNil;
     PCWSTR              wszNote;
     FDPINFO             fdpinfo;
+    BOOL                fSetUpdatingExtentPageCountCacheFlag;
     JET_RETRIEVECOLUMN  rgretrievecolumn[] =
         {
             { columnidMSExtentPageCountCache_cpgAE, &cpgAEBefore, sizeof( cpgAEBefore ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
@@ -14133,6 +14140,9 @@ VOID CATResetExtentPageCounts(
         Assert( NULL != wszNote );
         return;
     }
+
+    // Maybe set a flag saying we're messing with the ExtentPageCountCache.
+    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib, &fSetUpdatingExtentPageCountCacheFlag );
 
     // Special case.  This is cached in memory.
     if ( objidSystemRoot == objid )
@@ -14153,9 +14163,6 @@ VOID CATResetExtentPageCounts(
     Assert ( FBFNotLatched( ifmp, pgnoFDPMSO ) );
     Assert ( pgnoNull != pfmp->PgnoExtentPageCountCacheFDP() );
     Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
-
-    // Set a flag saying we're messing with the ExtentPageCountCache.
-    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib );
 
     wszNote = L"LOOKING";
 
@@ -14232,7 +14239,7 @@ HandleError:
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
 
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib, fSetUpdatingExtentPageCountCacheFlag );
 
     Assert( pfucbNil == pfucbExtentPageCountCache );
 
@@ -14282,6 +14289,7 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
     ExtentPageCountCacheEntryState epccesFlag;
     PCWSTR          wszNote;
     FDPINFO         fdpinfo;
+    BOOL            fSetUpdatingExtentPageCountCacheFlag;
 
     OnDebug( RCE *prceNewest = ppib->prceNewest );
 
@@ -14295,6 +14303,9 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
         Assert( NULL != wszNote );
         return JET_errSuccess;
     }
+
+    // Maybe set a flag saying we're messing with the ExtentPageCountCache.
+    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib, &fSetUpdatingExtentPageCountCacheFlag );
 
     // We expect to only be called from the Space Tree code, and it has to have a write lock
     // on the FDP of the pfucb for the update to be safe (in the Space Tree code).
@@ -14334,9 +14345,6 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
     // FBFNotLatched().
     Assert ( pgnoNull != pfmp->PgnoExtentPageCountCacheFDP() );
     Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
-
-    // Set a flag saying we're messing with the ExtentPageCountCache.
-    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib );
 
     wszNote = L"LOOKING";
 
@@ -14457,7 +14465,7 @@ HandleError:
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
 
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib, fSetUpdatingExtentPageCountCacheFlag );
 
     Assert( pfucbNil == pfucbExtentPageCountCache );
 
@@ -14507,6 +14515,7 @@ VOID CATAdjustExtentPageCounts(
     CPG                 cpgOEAfter     = cpgNil;
     PCWSTR              wszNote;
     FDPINFO             fdpinfo;
+    BOOL                fSetUpdatingExtentPageCountCacheFlag;
     ExtentPageCountCacheEntryState epccesFlag;
     JET_RETRIEVECOLUMN  rgretrievecolumn[] =
         {
@@ -14529,6 +14538,9 @@ VOID CATAdjustExtentPageCounts(
         Assert( NULL != wszNote );
         return;
     }
+
+    // Maybe set a flag saying we're messing with the ExtentPageCountCache.
+    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib, &fSetUpdatingExtentPageCountCacheFlag );
 
     // We expect to only be called from the Space Tree code, and it has to have a write lock
     // on the FDP of the pfucb for the update to be safe (in the Space Tree code).
@@ -14568,9 +14580,6 @@ VOID CATAdjustExtentPageCounts(
     // FBFNotLatched().
     Assert ( pgnoNull != pfmp->PgnoExtentPageCountCacheFDP() );
     Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
-
-    // Set a flag saying we're messing with the ExtentPageCountCache.
-    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib );
 
     wszNote = L"LOOKING";
 
@@ -14684,7 +14693,7 @@ HandleError:
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
 
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib, fSetUpdatingExtentPageCountCacheFlag );
 
     Assert( pfucbNil == pfucbExtentPageCountCache );
 
@@ -14738,6 +14747,7 @@ ERR ErrCATGetExtentPageCounts(
     FDPINFO             fdpinfo;
     CPG                 cpgAE;
     CPG                 cpgOE;
+    BOOL                fSetUpdatingExtentPageCountCacheFlag;
     ExtentPageCountCacheEntryState epccesFlag;
     JET_RETRIEVECOLUMN  rgretrievecolumn[] =
         {
@@ -14745,6 +14755,9 @@ ERR ErrCATGetExtentPageCounts(
             { columnidMSExtentPageCountCache_cpgOE,      &cpgOE,      sizeof( cpgOE ),      0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
             { columnidMSExtentPageCountCache_epccesFlag, &epccesFlag, sizeof( epccesFlag ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
         };
+
+    // Maybe set a flag saying we're messing with the ExtentPageCountCache.
+    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib, &fSetUpdatingExtentPageCountCacheFlag );
 
     if( !FCATIExtentPageCountCacheCacheableObject( ppib, ifmp, objid, &wszNote ) )
     {
@@ -14765,9 +14778,6 @@ ERR ErrCATGetExtentPageCounts(
             Error( ErrERRCheck( JET_errRecordNotFound ) );
         }
     }
-
-    // Set a flag saying we're messing with the ExtentPageCountCache.
-    CATIPossiblySetUpdatingExtentPageCountCacheFlag( ppib );
 
     Assert ( pgnoNull != pfmp->PgnoExtentPageCountCacheFDP() );
     Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
@@ -14869,7 +14879,7 @@ HandleError:
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
 
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib, fSetUpdatingExtentPageCountCacheFlag );
 
     Assert( pfucbNil == pfucbExtentPageCountCache );
 
