@@ -952,11 +952,12 @@ class THashedLRUKCache
         {
             public:
 
-                static ERR ErrExecute(  _In_ THashedLRUKCache<I>* const pc, 
-                                        _In_ CRequest* const            prequest,
-                                        _In_ ICachedBlockSlab* const    pcbs,
-                                        _In_ const BOOL                 fRead,
-                                        _In_ const QWORD                cbAvail )
+                static ERR ErrExecute(  _In_    THashedLRUKCache<I>* const  pc, 
+                                        _In_    CRequest* const             prequest,
+                                        _In_    ICachedBlockSlab* const     pcbs,
+                                        _In_    const BOOL                  fRead,
+                                        _In_    const QWORD                 cbRequested,
+                                        _Out_   QWORD* const                pcbProduced )
                 {
                     ERR                 err = JET_errSuccess;
                     CInspectSlabVisitor isv( pcbs );
@@ -970,11 +971,17 @@ class THashedLRUKCache
                     //  those as well.
 
                     {
-                        CCleanSlabVisitor csv( pc, prequest, pcbs, fRead, cbAvail, isv.CbTotal(), isv.CbWriteCache(), isv.CbReadCache() );
+                        CCleanSlabVisitor csv( pc, prequest, pcbs, fRead, cbRequested, isv.CbTotal(), isv.CbWriteCache(), isv.CbReadCache() );
                         Call( csv.ErrTryCleanSlots() );
+
+                        *pcbProduced = csv.CbProduced();
                     }
 
                 HandleError:
+                    if ( err < JET_errSuccess )
+                    {
+                        *pcbProduced = 0;
+                    }
                     return err;
                 }
 
@@ -991,7 +998,7 @@ class THashedLRUKCache
                                     _In_ CRequest* const            prequest,
                                     _In_ ICachedBlockSlab* const    pcbs,
                                     _In_ const BOOL                 fRead,
-                                    _In_ const QWORD                cbAvail,
+                                    _In_ const QWORD                cbRequested,
                                     _In_ const QWORD                cbTotal,
                                     _In_ const QWORD                cbWriteCache,
                                     _In_ const QWORD                cbReadCache )
@@ -1000,7 +1007,7 @@ class THashedLRUKCache
                         m_prequest( prequest ),
                         m_pcbs( pcbs ),
                         m_fRead( fRead ),
-                        m_cbAvailRequested( cbAvail ),
+                        m_cbRequested( cbRequested ),
                         m_cbTotal( cbTotal ),
                         m_pctWrite( max( 0, min( 100, m_pc->Pcconfig()->PctWrite() ) ) ),
                         m_cbWriteCacheMax( (QWORD)( m_cbTotal * m_pctWrite / 100 ) ),
@@ -1012,11 +1019,11 @@ class THashedLRUKCache
                         m_cbSeen( 0 ),
                         m_cbWriteCacheSeen( 0 ),
                         m_cbReadCacheSeen( 0 ),
-                        m_cbAvailInvalid( 0 ),
-                        m_cbAvailIORangeLocked( 0 ),
-                        m_cbAvailWriteBackPending( 0 ),
-                        m_cbAvailEvicted( 0 ),
-                        m_cbAvailInvalidatePending( 0 ),
+                        m_cbInvalid( 0 ),
+                        m_cbIORangeLocked( 0 ),
+                        m_cbWriteBackPending( 0 ),
+                        m_cbEvicted( 0 ),
+                        m_cbInvalidatePending( 0 ),
                         m_pcbsJournal( NULL )
                 {
                 }
@@ -1063,12 +1070,12 @@ class THashedLRUKCache
                                 OSFormat(   "C=%s R=0x%016I64x Clean cbRequested=%llu cbProduced=%llu (cbInvalid=%llu cbWriteBack=%llu cbEvicted=%llu cbInvalidated=%llu)",
                                             OSFormatFileId( m_pc ),
                                             QWORD( m_prequest ),
-                                            m_cbAvailRequested,
-                                            CbAvailProduced(),
-                                            m_cbAvailInvalid,
-                                            m_cbAvailWriteBackPending,
-                                            m_cbAvailEvicted,
-                                            m_cbAvailInvalidatePending ) );
+                                            m_cbRequested,
+                                            CbProduced(),
+                                            m_cbInvalid,
+                                            m_cbWriteBackPending,
+                                            m_cbEvicted,
+                                            m_cbInvalidatePending ) );
 
                     //  release the journal slab indicating if an error occurred
 
@@ -1077,12 +1084,12 @@ class THashedLRUKCache
                     return err;
                 }
 
-                QWORD CbAvailProduced() const
+                QWORD CbProduced() const
                 {
-                    return  m_cbAvailInvalid +
-                            m_cbAvailWriteBackPending + 
-                            m_cbAvailEvicted + 
-                            m_cbAvailInvalidatePending;
+                    return  m_cbInvalid +
+                            m_cbWriteBackPending + 
+                            m_cbEvicted + 
+                            m_cbInvalidatePending;
                 }
 
                 ERR ErrTryCleanSlot(    _In_ ICachedBlockSlab* const        pcbs,
@@ -1101,11 +1108,11 @@ class THashedLRUKCache
 
                     //  if we think we can produce enough available space without this slot then skip it
 
-                    if ( CbAvailProduced() >= m_cbAvailRequested )
+                    if ( CbProduced() >= m_cbRequested )
                     {
                         //  if we have no pending IO range locks to process then we have accomplished our goal
 
-                        if ( !m_cbAvailIORangeLocked )
+                        if ( !m_cbIORangeLocked )
                         {
                             Error( ErrERRCheck( JET_errNoCurrentRecord ) );
                         }
@@ -1125,7 +1132,7 @@ class THashedLRUKCache
                     {
                         //  note the available space observed
 
-                        m_cbAvailInvalid += cbCachedBlock;
+                        m_cbInvalid += cbCachedBlock;
 
                         Error( JET_errSuccess );
                     }
@@ -1167,8 +1174,8 @@ class THashedLRUKCache
 
                         Call( ErrWriteBackSlot( pcbs, slotstCurrent, pcfte, offsets ) );
 
-                        m_cbAvailIORangeLocked -= cbCachedBlock;
-                        m_cbAvailWriteBackPending += cbCachedBlock;
+                        m_cbIORangeLocked -= cbCachedBlock;
+                        m_cbWriteBackPending += cbCachedBlock;
 
                         Error( JET_errSuccess );
                     }
@@ -1182,8 +1189,8 @@ class THashedLRUKCache
 
                         //  note the available space evicted
 
-                        m_cbAvailIORangeLocked -= fEvicted && fIORangeLocked ? cbCachedBlock : 0;
-                        m_cbAvailEvicted += fEvicted ? cbCachedBlock : 0;
+                        m_cbIORangeLocked -= fEvicted && fIORangeLocked ? cbCachedBlock : 0;
+                        m_cbEvicted += fEvicted ? cbCachedBlock : 0;
 
                         //  if we evicted this slot then we're done with it
 
@@ -1198,14 +1205,14 @@ class THashedLRUKCache
 
                     if ( !pcfte )
                     {
-                        m_cbAvailInvalidatePending += cbCachedBlock;
+                        m_cbInvalidatePending += cbCachedBlock;
 
                         Error( JET_errSuccess );
                     }
 
                     //  if we couldn't do anything with this range locked block then it isn't potentially available
 
-                    m_cbAvailIORangeLocked -= fIORangeLocked ? cbCachedBlock : 0;
+                    m_cbIORangeLocked -= fIORangeLocked ? cbCachedBlock : 0;
 
                 HandleError:
                     m_pc->ReleaseCachedFile( &pcfte );
@@ -1411,7 +1418,7 @@ class THashedLRUKCache
 
                     //  if there is nothing to invalidate then we're done
 
-                    if ( !m_cbAvailInvalidatePending )
+                    if ( !m_cbInvalidatePending )
                     {
                         Error( JET_errSuccess );
                     }
@@ -1583,7 +1590,7 @@ class THashedLRUKCache
                                                     piorlNew->Offsets().IbStart(),
                                                     piorlNew->Offsets().Cb() ) );
 
-                            m_cbAvailIORangeLocked += piorlNew->Offsets().Cb();
+                            m_cbIORangeLocked += piorlNew->Offsets().Cb();
 
                             m_ilIORangeLock.InsertAsNextMost( piorlNew );
                             piorlExisting = piorlNew;
@@ -2306,7 +2313,7 @@ class THashedLRUKCache
                 CRequest* const                                         m_prequest;
                 ICachedBlockSlab* const                                 m_pcbs;
                 const BOOL                                              m_fRead;
-                const QWORD                                             m_cbAvailRequested;
+                const QWORD                                             m_cbRequested;
                 const QWORD                                             m_cbTotal;
                 const double                                            m_pctWrite;
                 const QWORD                                             m_cbWriteCacheMax;
@@ -2318,11 +2325,11 @@ class THashedLRUKCache
                 QWORD                                                   m_cbSeen;
                 QWORD                                                   m_cbWriteCacheSeen;
                 QWORD                                                   m_cbReadCacheSeen;
-                QWORD                                                   m_cbAvailInvalid;
-                QWORD                                                   m_cbAvailIORangeLocked;
-                QWORD                                                   m_cbAvailWriteBackPending;
-                QWORD                                                   m_cbAvailEvicted;
-                QWORD                                                   m_cbAvailInvalidatePending;
+                QWORD                                                   m_cbInvalid;
+                QWORD                                                   m_cbIORangeLocked;
+                QWORD                                                   m_cbWriteBackPending;
+                QWORD                                                   m_cbEvicted;
+                QWORD                                                   m_cbInvalidatePending;
                 ICachedBlockSlab*                                       m_pcbsJournal;
                 CInvasiveList<CIORangeLock, CIORangeLock::OffsetOfILE>  m_ilIORangeLock;
                 CInvasiveList<CWriteBack, CWriteBack::OffsetOfILE>      m_ilWriteBack;
@@ -3079,7 +3086,9 @@ class THashedLRUKCache
                                             _In_ const QWORD                    ibSlab );
         void ReleaseJournalEntries();
 
-        ERR ErrChangeSlabs( _In_ const CCachedBlockId& cbid, _Inout_ ICachedBlockSlab** const ppcbs );
+        ERR ErrChangeSlabs( _In_        const CCachedBlockId&       cbid,
+                            _Inout_     ICachedBlockSlab** const    ppcbs,
+                            _Out_opt_   BOOL* const                 pfChangedSlab = NULL );
 
         ERR ErrUpdateSlab( _In_opt_ ICachedBlockSlab* const pcbs )
         {
@@ -3187,7 +3196,8 @@ class THashedLRUKCache
         ERR ErrCleanSlab(   _In_ CRequest* const            prequest,
                             _In_ ICachedBlockSlab* const    pcbs,
                             _In_ const BOOL                 fRead,
-                            _In_ const QWORD                ib );
+                            _In_    const QWORD             ib,
+                            _Inout_ QWORD* const            pcbClean );
 
         void FailIO( _In_ CRequest* const prequestIO, _In_ const ERR err );
 
@@ -4986,13 +4996,20 @@ void THashedLRUKCache<I>::ReleaseJournalEntries()
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrChangeSlabs( _In_ const CCachedBlockId& cbid, _Inout_ ICachedBlockSlab** const ppcbs )
+ERR THashedLRUKCache<I>::ErrChangeSlabs(    _In_        const CCachedBlockId&       cbid,
+                                            _Inout_     ICachedBlockSlab** const    ppcbs,
+                                            _Out_opt_   BOOL* const                 pfChangedSlab )
 {
     ERR                 err                     = JET_errSuccess;
     ICachedBlockSlab*   pcbs                    = *ppcbs;
     BOOL                fIsSlabForCachedBlock   = fFalse;
+    BOOL                fChangedSlab            = fFalse;
 
     *ppcbs = NULL;
+    if ( pfChangedSlab )
+    {
+        *pfChangedSlab = fFalse;
+    }
 
     //  we already have a slab open
 
@@ -5019,18 +5036,27 @@ ERR THashedLRUKCache<I>::ErrChangeSlabs( _In_ const CCachedBlockId& cbid, _Inout
     if ( !pcbs )
     {
         Call( ErrGetSlab( cbid, &pcbs ) );
+        fChangedSlab = fTrue;
     }
 
     //  return the slab that can hold this cached block
 
     *ppcbs = pcbs;
     pcbs = NULL;
+    if ( pfChangedSlab )
+    {
+        *pfChangedSlab = fChangedSlab;
+    }
 
 HandleError:
     ReleaseSlab( err, &pcbs );
     if ( err < JET_errSuccess )
     {
         ReleaseSlab( err, ppcbs );
+        if ( pfChangedSlab )
+        {
+            *pfChangedSlab = fFalse;
+        }
     }
     return err;
 }
@@ -6587,8 +6613,10 @@ template<class I>
 void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const             prequest,
                                                 _Inout_ ICachedBlockSlab** const    ppcbs )
 {
-    ERR                 err     = JET_errSuccess;
-    ICachedBlockSlab*&  pcbs    = *ppcbs;
+    ERR                 err             = JET_errSuccess;
+    ICachedBlockSlab*&  pcbs            = *ppcbs;
+    BOOL                fChangedSlab    = fFalse;
+    QWORD               cbClean         = 0;
 
     //  determine if we should cache this request
 
@@ -6614,7 +6642,9 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
 
         //  get the slab for this cluster
 
-        Call( ErrChangeSlabs( cbid, &pcbs ) );
+        Call( ErrChangeSlabs( cbid, &pcbs, &fChangedSlab ) );
+
+        cbClean = fChangedSlab ? 0 : cbClean;
 
         //  determine if the block is already cached
 
@@ -6653,7 +6683,7 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
             //
             //  NOTE:  this can wait on cached file IO if the async clean process has fallen behind
 
-            Call( ErrCleanSlab( prequest, pcbs, fTrue, ibCachedBlock ) );
+            Call( ErrCleanSlab( prequest, pcbs, fTrue, ibCachedBlock, &cbClean ) );
 
             //  try to get a slot to cache this cluster
 
@@ -6663,6 +6693,7 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
                 //  update the slot corresponding to this cluster
 
                 Call( pcbs->ErrUpdateSlot( slot ) );
+                cbClean -= cbCachedBlock;
 
                 //  write the data we are caching to the cluster
 
@@ -6703,7 +6734,8 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
 {
     ERR                 err                     = JET_errSuccess;
     ICachedBlockSlab*&  pcbs                    = *ppcbs;
-    ICachedBlockSlab*   pcbsCachedBlock         = NULL;
+    BOOL                fChangedSlab            = fFalse;
+    QWORD               cbClean                 = 0;
     QWORD               ibCachedFileDeferred    = 0;
     size_t              cbCachedFileDeferred    = 0;
 
@@ -6740,16 +6772,14 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
         //  NOTE:  this may experience sync reads from the caching file
         //  NOTE:  this may wait for another request to finish accessing the slab
 
-        Call( ErrChangeSlabs( cbid, &pcbs ) );
+        Call( ErrChangeSlabs( cbid, &pcbs, &fChangedSlab ) );
 
-        if ( ibCachedBlock % min( m_pch->CbCachedFilePerSlab(), prequest->Pcfte()->CbBlockSize() ) == 0 )
-        {
-            pcbsCachedBlock = pcbs;
-        }
-        else if ( pcbsCachedBlock != pcbs )
+        if ( fChangedSlab && ibCachedBlock % min( m_pch->CbCachedFilePerSlab(), prequest->Pcfte()->CbBlockSize() ) )
         {
             BlockCacheNotableEvent( "TornWriteOpportunity" );
         }
+
+        cbClean = fChangedSlab ? 0 : cbClean;
 
         //  determine if the block is already cached
 
@@ -6791,7 +6821,7 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
 
                 const BOOL fUpdatedBeforeClean = pcbs->FUpdated();
 
-                Call( ErrCleanSlab( prequest, pcbs, fFalse, ibCachedBlock ) );
+                Call( ErrCleanSlab( prequest, pcbs, fFalse, ibCachedBlock, &cbClean ) );
 
                 if (    fUpdatedBeforeClean &&
                         !pcbs->FUpdated() &&
@@ -6819,6 +6849,7 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
                 //  update the slot corresponding to this cluster
 
                 Call( pcbs->ErrUpdateSlot( slot ) );
+                cbClean -= cbCachedBlock;
 
                 //  write the data we are caching to the cluster
 
@@ -6903,21 +6934,36 @@ template<class I>
 ERR THashedLRUKCache<I>::ErrCleanSlab(  _In_ CRequest* const            prequest,
                                         _In_ ICachedBlockSlab* const    pcbs,
                                         _In_ const BOOL                 fRead,
-                                        _In_ const QWORD                ib )
+                                        _In_    const QWORD             ib,
+                                        _Inout_ QWORD* const            pcbClean )
 {
     ERR         err                 = JET_errSuccess;
 
-    const DWORD cbBlockSize         = prequest->Pcfte()->CbBlockSize();
-    const DWORD ibBlock             = ib % cbBlockSize;
+    //  determine how much we should clean to cache the rest of this slice of this block
+
+    const QWORD cbBlockSize         = prequest->Pcfte()->CbBlockSize();
+    const QWORD ibBlock             = ib % cbBlockSize;
 
     const QWORD cbCachedFilePerSlab = m_pch->CbCachedFilePerSlab();
     const QWORD ibSlice             = ib % cbCachedFilePerSlab;
 
-    const DWORD cbCleanBlock        = cbBlockSize - ibBlock;
-    const DWORD cbCleanSlice        = (DWORD)min( cbBlockSize, cbCachedFilePerSlab - ibSlice );
-    const DWORD cbClean             = min( cbCleanBlock, cbCleanSlice );
+    const QWORD cbCleanBlock        = cbBlockSize - ibBlock;
+    const QWORD cbCleanSlice        = min( cbBlockSize, cbCachedFilePerSlab - ibSlice );
+    const QWORD cbClean             = min( cbCleanBlock, cbCleanSlice );
 
-    Call( CCleanSlabVisitor::ErrExecute( this, prequest, pcbs, fRead, cbClean ) );
+    //  if we don't already have enough then clean
+
+    if ( *pcbClean < cbClean )
+    {
+        Call( CCleanSlabVisitor::ErrExecute( this, prequest, pcbs, fRead, cbClean, pcbClean ) );
+    }
+
+    //  if we failed to clean enough then fail
+
+    if ( *pcbClean < cbClean )
+    {
+        Error( ErrBlockCacheInternalError( "ErrCleanSlab" ) );
+    }
 
 HandleError:
     return err;
