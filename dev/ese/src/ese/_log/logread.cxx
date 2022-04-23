@@ -2505,8 +2505,8 @@ LOG::LGPrereadExecute(
         for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
         {
             if ( FLGRICheckRedoConditionForDb( dbid, lgposPbNext ) &&
-                 // Experiment to only allocate the preread count to databases on HDD to see if it improves replay time.
-                 ( !BoolParam( m_pinst, JET_paramFlight_DisableReplayPrereadForSsd ) || g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FSeekPenalty() ) )
+                 // Only allocate the preread count to databases on HDD.
+                 g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FSeekPenalty() )
             {
                 //  Enabling an already-enabled database will wipe out the
                 //  current list.

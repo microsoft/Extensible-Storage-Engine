@@ -3985,7 +3985,6 @@ typedef enum
 #if ( JET_VERSION >= 0x0501 )
 #define JET_paramRuntimeCallback                73  //  pointer to runtime-only callback function
 // end_PubEsent
-#define JET_paramFlight_DisableReplayPrereadForSsd 74 // Disable replay preread for database on SSD
 // #define JET_paramSLVDefragFreeThreshold      74  //  chunks whose free % is > this will be allocated from
 // #define JET_paramSLVDefragMoveThreshold      75  //  chunks whose free % is > this will be relocated
 #define JET_paramEnableSortedRetrieveColumns    76  //  internally sort (in a dynamically allocated parallel array) JET_RETRIEVECOLUMN structures passed to JetRetrieveColumns()

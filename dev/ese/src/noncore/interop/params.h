@@ -145,7 +145,6 @@ MSINTERNAL enum class MJET_PARAM
     ZeroDatabaseDuringBackup = 71, // Overwrite deleted records/LVs during backup
     UnicodeIndexDefault = 72, // default LCMapString() lcid and flags to use for CreateIndex() and unique multi-values check
     RuntimeCallback = 73, // pointer to runtime-only callback function
-    Flight_DisableReplayPrereadForSsd = 74, // Disable replay preread for database on SSD
     EnableSortedRetrieveColumns = 76, // internally sort (in a dynamically allocated parallel array) JET_RETRIEVECOLUMN structures passed to JetRetrieveColumns()
     CleanupMismatchedLogFiles = 77, // instead of erroring out after a successful recovery with JET_errLogFileSizeMismatchDatabasesConsistent, ESE will silently delete the old log files and checkpoint file and continue operations
     RecordUpgradeDirtyLevel = 78, // how aggresively should pages with their record format converted be flushed (0-3)
