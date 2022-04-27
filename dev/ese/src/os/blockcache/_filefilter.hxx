@@ -656,6 +656,10 @@ class TFileFilter  //  ff
                                                         errToReturn ) );
                     OSTraceResumeGC();
 
+#if defined( USE_HAPUBLISH_API )
+                    m_pff->m_pfsconfig->EmitFailureTag( HaDbFailureTagIoHard, L"834f46a3-37e7-4bb8-b8a7-a5af4394a9c6" );
+#endif
+
                     return errToReturn;
                 }
 
