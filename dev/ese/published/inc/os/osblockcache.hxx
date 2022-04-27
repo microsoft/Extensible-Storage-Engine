@@ -724,8 +724,11 @@ enum class TouchNumber : DWORD  //  tono
 constexpr TouchNumber tonoInvalid = TouchNumber::tonoInvalid;
 
 INLINE TouchNumber operator+( _In_ const TouchNumber tono, _In_ const LONG i ) { return ( (LONG)tono + i == (LONG)tonoInvalid ) ? (TouchNumber)( (LONG)tonoInvalid + 1 ) : (TouchNumber)( (LONG)tono + i ); }
-INLINE BOOL operator<( _In_ const TouchNumber tonoA, _In_ const TouchNumber tonoB ) { return (LONG)tonoA - (LONG)tonoB < 0; }
-INLINE BOOL operator>( _In_ const TouchNumber tonoA, _In_ const TouchNumber tonoB ) { return (LONG)tonoA - (LONG)tonoB > 0; }
+INLINE int CmpTono( _In_ const TouchNumber tonoA, _In_ const TouchNumber tonoB ) { return (LONG)( (DWORD)tonoA - (DWORD)tonoB ); }
+INLINE BOOL operator<( _In_ const TouchNumber tonoA, _In_ const TouchNumber tonoB ) { return CmpTono( tonoA, tonoB ) < 0; }
+INLINE BOOL operator<=( _In_ const TouchNumber tonoA, _In_ const TouchNumber tonoB ) { return CmpTono( tonoA, tonoB ) <= 0; }
+INLINE BOOL operator>( _In_ const TouchNumber tonoA, _In_ const TouchNumber tonoB ) { return CmpTono( tonoA, tonoB ) > 0; }
+INLINE BOOL operator>=( _In_ const TouchNumber tonoA, _In_ const TouchNumber tonoB ) { return CmpTono( tonoA, tonoB ) >= 0; }
 
 //  Update Number
 //
@@ -743,8 +746,11 @@ constexpr UpdateNumber updnoInvalid = UpdateNumber::updnoInvalid;
 constexpr UpdateNumber updnoMax = UpdateNumber::updnoMax;
 
 INLINE UpdateNumber operator+( _In_ const UpdateNumber updno, _In_ const LONG i ) { return ( (LONG)updno + i > (LONG)updnoMax ) ? (UpdateNumber)( (LONG)updnoInvalid + 1 ) : (UpdateNumber)( (LONG)updno + i ); }
-INLINE BOOL operator<( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return (LONG)updnoA - (LONG)updnoB < 0; }
-INLINE BOOL operator>( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return (LONG)updnoA - (LONG)updnoB > 0; }
+INLINE int CmpUpdno( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return (SHORT)( (USHORT)updnoA - (USHORT)updnoB ); }
+INLINE BOOL operator<( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return CmpUpdno( updnoA, updnoB ) < 0; }
+INLINE BOOL operator<=( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return CmpUpdno( updnoA, updnoB ) <= 0; }
+INLINE BOOL operator>( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return CmpUpdno( updnoA, updnoB ) > 0; }
+INLINE BOOL operator>=( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return CmpUpdno( updnoA, updnoB ) >= 0; }
 
 //  Cached Block
 
