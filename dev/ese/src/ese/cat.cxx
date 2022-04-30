@@ -4119,10 +4119,13 @@ ERR ErrCATChangePgnoFDPLastSetTime(
     _In_ const __int64      ftCurrent )
 {
     ERR         err             = JET_errSuccess;
+    ERR         errNoMoreWrite  = JET_errSuccess;
     FUCB *      pfucbCatalog    = pfucbNil;
     BOOKMARK    bm;
     BYTE        *pbBookmark     = NULL;
     ULONG       cbBookmark;
+
+    Assert( ppib );
 
     BOOL    fBeginTrx           = fFalse;
     JET_GRBIT grbitCommitBefore = ppib->grbitCommitDefault;
@@ -4191,24 +4194,23 @@ HandleError:
         CallS( ErrCATClose( ppib, pfucbCatalog ) );
     }
 
-    if ( ppib )
+    if ( fBeginTrx )
     {
-        if ( fBeginTrx )
+        if ( err >= 0 )
         {
-            if ( err >= 0 )
-            {
-                err = ErrDIRCommitTransaction( ppib, NO_GRBIT );
-            }
-            if ( err < 0 )
-            {
-                CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
-            }
+            err = ErrDIRCommitTransaction( ppib, NO_GRBIT );
         }
-
-        ppib->grbitCommitDefault = grbitCommitBefore;
+        if ( err < 0 )
+        {
+            CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
+        }
     }
 
-    if ( err < JET_errSuccess )
+    ppib->grbitCommitDefault = grbitCommitBefore;
+
+    // Skip logging event if log writes are failing due to instance being in FailWrite mode
+    // which happens when the instance is about to be terminated.
+    if ( err < JET_errSuccess && !( PinstFromPpib( ppib )->m_plog->FNoMoreLogWrite( &errNoMoreWrite ) && errNoMoreWrite == errLogServiceStopped ) )
     {
         OSTraceSuspendGC();
         const WCHAR* rgcwsz[] =
