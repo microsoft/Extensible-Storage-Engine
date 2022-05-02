@@ -280,11 +280,15 @@ ERR INST::ErrINSTInit( )
 
     CallJ( ErrLVInit( this ), TermVER );
 
-    // If revert snapshot cleaner is not initialized, initialize them.
+    // If revert snapshot cleaner is not initialized and RBS file path was set, initialize them.
     if ( m_prbscleaner == NULL )
     {
         CallJ( RBSCleanerFactory::ErrRBSCleanerCreate( this, &m_prbscleaner ), TermRBS );
-        CallJ( m_prbscleaner->ErrStartCleaner(), TermRBS );
+
+        if ( m_prbscleaner )
+        {
+            CallJ( m_prbscleaner->ErrStartCleaner(), TermRBS );
+        }
     }
 
     this->m_fSTInit = fSTInitDone;
