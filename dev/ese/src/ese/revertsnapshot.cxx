@@ -85,7 +85,7 @@ HandleError:
 LOCAL ERR ErrRBSAbsRootDir( INST* pinst, __out_bcount( cbRBSRootDir ) PWSTR wszRBSRootDirPath, LONG cbRBSRootDir )
 {
     ERR err                 = JET_errSuccess;
-    PCWSTR wszRBSFilePath   = FDefaultParam( pinst, JET_paramRBSFilePath ) ? SzParam( pinst, JET_paramLogFilePath ) : SzParam( pinst, JET_paramRBSFilePath );
+    PCWSTR wszRBSFilePath   = SzParam( pinst, JET_paramRBSFilePath );
     WCHAR wszAbsDirRootPath[ IFileSystemAPI::cchPathMax ];
 
     if ( NULL == wszRBSFilePath || 0 == *wszRBSFilePath )
@@ -2852,9 +2852,10 @@ ERR CRevertSnapshotForAttachedDbs::ErrRBSInitFromRstmap( INST* const pinst )
 
     if ( pinst->m_plog->FLogDisabled() ||
         !BoolParam( pinst, JET_paramEnableRBS ) || 
-        !pinst->m_plog->FRBSFeatureEnabledFromRstmap() )
+        !pinst->m_plog->FRBSFeatureEnabledFromRstmap() ||
+        FDefaultParam( pinst, JET_paramRBSFilePath ) )
     {
-        // We will skip setting up the revert snapshot if either it is not enabled, not supported or if the required range is too wide.
+        // We will skip setting up the revert snapshot if either it is not enabled, RBSFilePath isn't set, not supported or if the required range is too wide.
         // Enable/disable is only allowed during db attach/create
         return JET_errSuccess;
     }
@@ -3205,8 +3206,8 @@ ERR CRevertSnapshotForPatch::ErrRBSInitForPatch( INST* const pinst )
 {
     Assert( pinst );
 
-    // If either RBS is disabled or already initialized skip initialization.
-    if ( !BoolParam( pinst, JET_paramEnableRBS ) || ( pinst->m_prbsfp && pinst->m_prbsfp->FInitialized() ) )
+    // If either RBS is disabled, RBSFilePath isn't set or already initialized, skip initialization.
+    if ( !BoolParam( pinst, JET_paramEnableRBS ) || FDefaultParam( pinst, JET_paramRBSFilePath ) || ( pinst->m_prbsfp && pinst->m_prbsfp->FInitialized() ) )
     {
         return JET_errSuccess;
     }
@@ -3260,7 +3261,7 @@ ERR RBSCleanerFactory::ErrRBSCleanerCreate( INST*  pinst, _Out_ RBSCleaner ** pr
 {
      ERR err = JET_errSuccess;
 
-    if ( pinst && prbscleaner )
+    if ( pinst && prbscleaner && !FDefaultParam(pinst, JET_paramRBSFilePath) )
     {
         unique_ptr<RBSCleanerIOOperator> prbscleaneriooperator( new RBSCleanerIOOperator( pinst ) );
         unique_ptr<RBSCleanerState> prbscleanerstate( new RBSCleanerState() );
@@ -3757,7 +3758,7 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
     }
 
 HandleError:  
-    if ( BoolParam( m_pinst, JET_paramEnableRBS ) )
+    if ( err >= JET_errSuccess && !m_msigRBSCleanerStop.FIsSet() && BoolParam( m_pinst, JET_paramEnableRBS ) )
     {
         OSTraceSuspendGC();
         WCHAR wszTimeRevertPossible[ 32 ], wszDateRevertPossible[ 32 ];
