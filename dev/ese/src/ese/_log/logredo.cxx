@@ -6838,6 +6838,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
 
             case JET_errOutOfMemory:
             case JET_errOutOfCursors:
+            case JET_errVersionStoreOutOfMemory:
                 break;
 
             default:
