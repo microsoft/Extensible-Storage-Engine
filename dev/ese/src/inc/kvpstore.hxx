@@ -235,7 +235,7 @@ private:
         const TrxPosition eTrxPos,
         const WCHAR * const wszKey,
         const KVPIValueType kvpvt,
-        _Out_bytecap_( cbValue ) BYTE * const pbValue,
+        _Out_writes_bytes_to_( cbValue, *pcbActual ) BYTE * const pbValue,
         const ULONG cbValue,
         _Out_opt_ ULONG *pcbActual = NULL );
 
@@ -286,7 +286,7 @@ public:
     
     ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT * piValue );
     ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT64 * pi64Value );
-    ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ BYTE * const pbValue, const ULONG cbValueMax, _Out_opt_ ULONG *pcbValueActual = NULL );
+    ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_writes_bytes_to_( cbValueMax, *pcbValueActual ) BYTE * const pbValue, const ULONG cbValueMax, _Out_opt_ ULONG *pcbValueActual = NULL );
 
     //  deleting keys
     //

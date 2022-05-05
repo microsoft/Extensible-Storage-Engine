@@ -991,7 +991,7 @@ LOCAL VOID LGIReportChecksumMismatch(
     OSStrCbFormatW( szError, sizeof(szError), L"%i (0x%08x)", err, err );
     
     rgpszT[ irgpsz++ ] = wszLogName;
-    rgpszT[ irgpsz++ ] = g_rgwszLogCorruptReason[ reason < eLCMax ? reason : eLCUnknown ];
+    rgpszT[ irgpsz++ ] = g_rgwszLogCorruptReason[ ( reason < eLCMax && reason > eLCUnknown ) ? reason : eLCUnknown ];
     rgpszT[ irgpsz++ ] = szLastValid;
     rgpszT[ irgpsz++ ] = szCurrent;
     rgpszT[ irgpsz++ ] = szChecksumStored;

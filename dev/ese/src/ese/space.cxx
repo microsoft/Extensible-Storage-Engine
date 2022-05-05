@@ -13929,6 +13929,7 @@ HandleError:
             "%hs: %s from [<parent>] for [0x%x:0x%x:%lu].",
             __FUNCTION__,
             ( err >= JET_errSuccess) ? "Got" : "Failed to get",
+            pfucb->ifmp,
             ObjidFDP( pfucb ),
             PgnoFDP( pfucb ) ) );
 

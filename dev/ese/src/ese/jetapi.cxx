@@ -2120,7 +2120,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
                         dckbPagefileUsagePeak ||
                         dckbPrivateUsage ) )
             {
-                OSStrCbFormatW( pwszCurr, cbCurrLeft, L" +M(C:%I64dK, Fs:%d, WS:%IdK # %IdK, PF:%IdK # %IdK, P:%IdK)",
+                OSStrCbFormatW( pwszCurr, cbCurrLeft, L" +M(C:%I64dK, Fs:%d, WS:%IdK # %IdK, PF:%IdK # %IdK, P:%I64dK)",
                                     dckbCacheMem,
                                     m_rgDiagInfo[seq].memstat.cPageFaultCount - m_rgDiagInfo[seqBefore].memstat.cPageFaultCount,
                                     dckbWorkingSetSize,
