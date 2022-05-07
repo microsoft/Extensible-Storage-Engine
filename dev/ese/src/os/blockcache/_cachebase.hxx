@@ -424,7 +424,7 @@ class TCacheBase  //  c
                                         fileid,
                                         fileserial,
                                         m_ftc,
-                                        ( m_grbitQOS & ~qosIOCompleteMask ) | m_grbitQOSComplete,
+                                        ( m_grbitQOS & qosIOInMask ) | m_grbitQOSComplete,
                                         m_offsets.IbStart(),
                                         (DWORD)m_offsets.Cb(),
                                         m_pbData,

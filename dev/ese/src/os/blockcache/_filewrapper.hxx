@@ -273,7 +273,7 @@ class TFileWrapper  //  fw
                         {
                             CleanupBeforeAsyncIOCompletion();
 
-                            m_pfnIOComplete(   err,
+                            m_pfnIOComplete(    err,
                                                 m_pfapi,
                                                 tc,
                                                 grbitQOS,
@@ -470,7 +470,6 @@ class TFileWrapper  //  fw
                                     _In_opt_                const DWORD_PTR                 keyIOComplete,
                                     _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
                                     _In_opt_                const VOID *                    pioreq,
-                                    _In_                    const BOOL                      fIOREQUsed,
                                     _In_                    const ERR                       errOriginal,
                                     _In_opt_                CIOComplete* const              piocompleteOriginal = NULL );
 
@@ -633,7 +632,6 @@ ERR TFileWrapper<I>::ErrIORead( const TraceContext&                 tc,
                                 const VOID *                        pioreq )
 {
     ERR             err         = JET_errSuccess;
-    BOOL            fIOREQUsed  = fFalse;
     CIOComplete*    piocomplete = NULL;
 
     if ( pfnIOComplete || pfnIOHandoff )
@@ -650,8 +648,7 @@ ERR TFileWrapper<I>::ErrIORead( const TraceContext&                 tc,
                             keyIOComplete ) );
     }
 
-    fIOREQUsed = fTrue;
-    Call( m_piInner->ErrIORead( tc,
+    err = m_piInner->ErrIORead( tc,
                                 ibOffset,
                                 cbData,
                                 pbData,
@@ -659,7 +656,9 @@ ERR TFileWrapper<I>::ErrIORead( const TraceContext&                 tc,
                                 pfnIOComplete ? CIOComplete::IOComplete_ : NULL,
                                 DWORD_PTR( piocomplete ),
                                 piocomplete ? CIOComplete::IOHandoff_ : NULL,
-                                pioreq ) );
+                                pioreq );
+    pioreq = NULL;
+    Call( err );
 
 HandleError:
     err = HandleReservedIOREQ(  tc, 
@@ -671,7 +670,6 @@ HandleError:
                                 keyIOComplete, 
                                 pfnIOHandoff,
                                 pioreq,
-                                fIOREQUsed,
                                 err,
                                 piocomplete );
     if ( piocomplete )
@@ -844,7 +842,6 @@ ERR TFileWrapper<I>::HandleReservedIOREQ(   _In_                    const TraceC
                                             _In_opt_                const DWORD_PTR                 keyIOComplete,
                                             _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
                                             _In_opt_                const VOID *                    pioreq,
-                                            _In_                    const BOOL                      fIOREQUsed,
                                             _In_                    const ERR                       errOriginal,
                                             _In_opt_                CIOComplete* const              piocompleteOriginal )
 {
@@ -855,7 +852,7 @@ ERR TFileWrapper<I>::HandleReservedIOREQ(   _In_                    const TraceC
 
     Assert( pfnIOComplete || !pioreq );
 
-    if ( pioreq && !fIOREQUsed )
+    if ( pioreq )
     {
         //  if we were given a reserved IOREQ and we failed before it could be passed on then we must release it
 

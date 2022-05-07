@@ -1535,13 +1535,13 @@ ERR CFlushMap::ErrReadIoComplete_( const ERR errIo, const BOOL fSync, FlushMapPa
     return err;
 }
 
-ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, const BOOL fIoThread, FlushMapPageDescriptor* const pfmd )
+ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, const BOOL fIoCompletion, FlushMapPageDescriptor* const pfmd )
 {
     const FMPGNO fmpgno = pfmd->fmpgno;
     const BOOL fFmHeaderPage = FIsFmHeader_( fmpgno );
-    const BOOL fMayBlockIoThread = fIoThread && ( errIo >= JET_errSuccess ) && fFmHeaderPage;
+    const BOOL fMayBlockIoCompletion = fIoCompletion && ( errIo >= JET_errSuccess ) && fFmHeaderPage;
 
-    Assert( !( fSync && fIoThread ) );
+    Assert( !( fSync && fIoCompletion ) );
     Assert( ( pfmd->pvWriteBuffer != NULL ) || ( ( errIo == JET_errOutOfMemory ) && !fFmHeaderPage ) );
     OnDebug( AssertOnIoCompletion_( fSync, fTrue, pfmd ) );
 
@@ -1556,7 +1556,7 @@ ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, const BOO
         // Refresh the persisted state of the header.
         if ( fFmHeaderPage )
         {
-            if ( !fMayBlockIoThread )
+            if ( !fMayBlockIoCompletion )
             {
                 pfmd->sxwl.UpgradeExclusiveLatchToWriteLatch();
             }

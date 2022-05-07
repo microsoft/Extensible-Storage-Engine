@@ -15,13 +15,23 @@ class TCacheThreadLocalStorage
         TCacheThreadLocalStorage()
             :   m_cacheThreadLocalStorage( rankCacheThreadLocalStorage ),
                 m_critThreadLocalStorage( CLockBasicInfo( CSyncBasicInfo( "TCacheThreadLocalStorage<CTLS>::m_critThreadLocalStorage" ), rankCacheThreadLocalStorage, 0 ) ),
-                m_pctlsCleanup( NULL )
+                m_pctlsCleanup( NULL ),
+                m_fTerm( fFalse )
         {
         }
 
         ~TCacheThreadLocalStorage()
         {
-            TermThreadLocalStorageTable();
+            Cleanup();
+        }
+
+        void Cleanup()
+        {
+            if ( !m_fTerm )
+            {
+                m_fTerm = fTrue;
+                TermThreadLocalStorageTable();
+            }
         }
 
         ERR ErrGetThreadLocalStorage( _Out_ CTLS** const ppctls )
@@ -56,6 +66,7 @@ class TCacheThreadLocalStorage
         CCriticalSection                                                        m_critThreadLocalStorage;
         typename CInvasiveList<CTLS, CCacheThreadLocalStorageBase::OffsetOfILE> m_ilThreadLocalStorage;
         CTLS*                                                                   m_pctlsCleanup;
+        BOOL                                                                    m_fTerm;
 };
 
 template<class CTLS>

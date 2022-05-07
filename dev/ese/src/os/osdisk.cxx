@@ -2475,6 +2475,11 @@ ULONG CioDefaultUrgentOutstandingIOMax( _In_ const ULONG cioOutstandingMax )
     return cioOutstandingMax / 2;
 }
 
+ULONG CioBackgroundIOLow( _In_ const ULONG cioBackgroundMax )
+{
+    return max( 1, cioBackgroundMax / 20 );   // 5% ...
+}
+
 char * SzSkipPreceding( char * szT, char chSkip )
 {
     //  Trim up past last preceding char
@@ -4161,9 +4166,7 @@ ERR COSDisk::IOQueue::ErrIOQueueInit( _In_ LONG cIOEnqueuedMax, _In_ LONG cIOBac
     //  init other IO quota and low queue thresholds ...
 
     m_cioQosBackgroundMax = cIOBackgroundMax;
-    m_cioreqQOSBackgroundLow = cIOBackgroundMax / 20;   // 5% ...
-    m_cioreqQOSBackgroundLow = max( m_cioreqQOSBackgroundLow, 1 );
-
+    m_cioreqQOSBackgroundLow = CioBackgroundIOLow( cIOBackgroundMax );
     m_cioQosUrgentBackgroundMax = cIOUrgentBackgroundMax;
 
     return JET_errSuccess;

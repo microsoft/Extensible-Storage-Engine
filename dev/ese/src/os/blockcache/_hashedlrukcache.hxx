@@ -77,6 +77,8 @@ class THashedLRUKCache
                             _Inout_ IFileFilter** const                 ppffCaching,
                             _Inout_ CCacheHeader** const                ppch );
 
+        IFileFilter* PffCaching() const { return (IFileFilter*)&m_ffCaching; }
+
         ERR ErrGetThreadLocalStorage( _Out_ CHashedLRUKCacheThreadLocalStorage<I>** const ppctls ) override;
 
     private:
@@ -1849,34 +1851,50 @@ class THashedLRUKCache
                             return fTrue;
                         }
 
-                        static BOOL FOutOfOrder( _In_ CWriteBack* const pwbA, _In_ CWriteBack* const pwbB )
+                        static int Cmp( _In_ CWriteBack* const pwbA, _In_ CWriteBack* const pwbB )
                         {
                             //  write backs from different cached files are ordered by their volume id and file id for
                             //  deterministic behavior
 
-                            if ( pwbA->m_pcfte->Volumeid() <= pwbB->m_pcfte->Volumeid() )
+                            if ( pwbA->m_pcfte->Volumeid() < pwbB->m_pcfte->Volumeid() )
                             {
-                                return fFalse;
+                                return -1;
+                            }
+                            else if ( pwbA->m_pcfte->Volumeid() > pwbB->m_pcfte->Volumeid() )
+                            {
+                                return 1;
                             }
 
-                            if ( pwbA->m_pcfte->Fileid() <= pwbB->m_pcfte->Fileid() )
+                            if ( pwbA->m_pcfte->Fileid() < pwbB->m_pcfte->Fileid() )
                             {
-                                return fFalse;
+                                return -1;
+                            }
+                            else if ( pwbA->m_pcfte->Fileid() > pwbB->m_pcfte->Fileid() )
+                            {
+                                return 1;
                             }
 
-                            if ( pwbA->m_pcfte->Fileserial() <= pwbB->m_pcfte->Fileserial() )
+                            if ( pwbA->m_pcfte->Fileserial() < pwbB->m_pcfte->Fileserial() )
                             {
-                                return fFalse;
+                                return -1;
+                            }
+                            else if ( pwbA->m_pcfte->Fileserial() > pwbB->m_pcfte->Fileserial() )
+                            {
+                                return 1;
                             }
 
                             //  write backs whose offsets are in ascending order are not out of order
 
-                            if ( pwbA->m_offsets.IbStart() <= pwbB->m_offsets.IbStart() )
+                            if ( pwbA->m_offsets.IbStart() < pwbB->m_offsets.IbStart() )
                             {
-                                return fFalse;
+                                return -1;
+                            }
+                            else if ( pwbA->m_offsets.IbStart() > pwbB->m_offsets.IbStart() )
+                            {
+                                return 1;
                             }
 
-                            return fTrue;
+                            return 0;
                         }
 
                         static SIZE_T OffsetOfILE() { return OffsetOf( CWriteBack, m_ile ); }
@@ -1984,7 +2002,7 @@ class THashedLRUKCache
                     pwbNew = NULL;
 
                     for (   CWriteBack* pwbPrev = m_ilWriteBack.Prev( pwb );
-                            pwbPrev && CWriteBack::FOutOfOrder( pwbPrev, pwb );
+                            pwbPrev && CWriteBack::Cmp( pwbPrev, pwb ) > 0;
                             pwbPrev = m_ilWriteBack.Prev( pwbPrev ) )
                     {
                         m_ilWriteBack.Remove( pwb );
@@ -2891,6 +2909,129 @@ class THashedLRUKCache
                 const CMeteredSection::Group    m_group;
         };
 
+        //  Caching File Wrapper
+        //
+        //  Guarantees that, whenever we perform IO on a caching file:
+        //  -  all IO is either iomRaw or iomEngine.
+        //  -  all normal IO is unthrottled (doesn't block if we exceed max concurrent IO).
+
+        class CCachingFileWrapper : public CFileFilterWrapper
+        {
+            public:
+
+                CCachingFileWrapper( _In_ IFileFilter* const pff )
+                    :   CFileFilterWrapper( pff, iomEngine )
+                {
+                }
+
+            public:  //  IFileFilter
+
+                ERR ErrReserveIOREQ(    _In_    const QWORD     ibOffset,
+                                        _In_    const DWORD     cbData,
+                                        _In_    const OSFILEQOS grbitQOS,
+                                        _Out_   VOID **         ppioreq ) override
+                {
+                    return CFileFilterWrapper::ErrReserveIOREQ( ibOffset, 
+                                                                cbData, 
+                                                                grbitQOS | CFileFilter::qosBypassIOQuota,
+                                                                ppioreq );
+                }
+
+                ERR ErrIORead(  _In_                    const TraceContext&             tc,
+                                _In_                    const QWORD                     ibOffset,
+                                _In_                    const DWORD                     cbData,
+                                _Out_writes_( cbData )  BYTE* const                     pbData,
+                                _In_                    const OSFILEQOS                 grbitQOS,
+                                _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
+                                _In_opt_                const VOID *                    pioreq ) override
+                {
+                    return CFileFilterWrapper::ErrIORead(   tc,
+                                                            ibOffset,
+                                                            cbData,
+                                                            pbData,
+                                                            grbitQOS | CFileFilter::qosBypassIOQuota,
+                                                            pfnIOComplete,
+                                                            keyIOComplete,
+                                                            pfnIOHandoff,
+                                                            pioreq );
+                }
+
+                ERR ErrIOWrite( _In_                    const TraceContext&             tc,
+                                _In_                    const QWORD                     ibOffset,
+                                _In_                    const DWORD                     cbData,
+                                _In_reads_( cbData )    const BYTE* const               pbData,
+                                _In_                    const OSFILEQOS                 grbitQOS,
+                                _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override
+                {
+                    return CFileFilterWrapper::ErrIOWrite(  tc,
+                                                            ibOffset,
+                                                            cbData,
+                                                            pbData,
+                                                            grbitQOS | CFileFilter::qosBypassIOQuota,
+                                                            pfnIOComplete,
+                                                            keyIOComplete,
+                                                            pfnIOHandoff );
+                }
+
+                ERR ErrRead(    _In_                    const TraceContext&             tc,
+                                _In_                    const QWORD                     ibOffset,
+                                _In_                    const DWORD                     cbData,
+                                _Out_writes_( cbData )  BYTE* const                     pbData,
+                                _In_                    const OSFILEQOS                 grbitQOS,
+                                _In_                    const IFileFilter::IOMode       iom,
+                                _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
+                                _In_opt_                const VOID *                    pioreq ) override
+                {
+                    if ( iom != iomRaw && iom != iomEngine )
+                    {
+                        return ErrERRCheck( JET_errInternalError );
+                    }
+
+                    return CFileFilterWrapper::ErrRead( tc,
+                                                        ibOffset,
+                                                        cbData,
+                                                        pbData,
+                                                        grbitQOS | CFileFilter::qosBypassIOQuota,
+                                                        iom,
+                                                        pfnIOComplete,
+                                                        keyIOComplete,
+                                                        pfnIOHandoff,
+                                                        pioreq );
+                }
+
+                ERR ErrWrite(   _In_                    const TraceContext&             tc,
+                                _In_                    const QWORD                     ibOffset,
+                                _In_                    const DWORD                     cbData,
+                                _In_reads_( cbData )    const BYTE* const               pbData,
+                                _In_                    const OSFILEQOS                 grbitQOS,
+                                _In_                    const IFileFilter::IOMode       iom,
+                                _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override
+                {
+                    if ( iom != iomRaw && iom != iomEngine )
+                    {
+                        return ErrERRCheck( JET_errInternalError );
+                    }
+
+                    return CFileFilterWrapper::ErrWrite(    tc,
+                                                            ibOffset,
+                                                            cbData,
+                                                            pbData,
+                                                            grbitQOS | CFileFilter::qosBypassIOQuota,
+                                                            iom,
+                                                            pfnIOComplete,
+                                                            keyIOComplete,
+                                                            pfnIOHandoff );
+                }
+        };
+
     private:
 
         ERR ErrDumpJournalMetadata( _In_ CPRINTF* const pcprintf );
@@ -3157,7 +3298,7 @@ class THashedLRUKCache
         ERR ErrEnqueue( _Inout_ CRequest** const pprequest );
         BOOL FConflicting( _In_ CRequest* const prequestIOA, _In_ CRequest* const prequestIOB );
         BOOL FCombinable( _In_ CRequest* const prequestIOA, _In_ CRequest* const prequestIOB );
-        BOOL FOutOfOrder( _In_ CRequest* const prequestIOA, _In_ CRequest* const prequestIOB );
+        int CmpRequestIO( _In_ CRequest* const prequestIOA, _In_ CRequest* const prequestIOB );
 
         void Issue();
 
@@ -3326,6 +3467,7 @@ class THashedLRUKCache
         static const CCachedBlockId                                                         s_cbidInvalid;
 
         CHashedLRUKCacheHeader*                                                             m_pch;
+        CCachingFileWrapper                                                                 m_ffCaching;
         IJournal*                                                                           m_pj;
         ICachedBlockWriteCountsManager*                                                     m_pcbwcm;
         ICachedBlockSlabManager*                                                            m_pcbsmHash;
@@ -4079,6 +4221,7 @@ THashedLRUKCache<I>::THashedLRUKCache(  _In_    IFileSystemFilter* const        
                                         ppffCaching, 
                                         ppch ),
                 m_pch( NULL ),
+                m_ffCaching( THashedLRUKCacheBase<I>::PffCaching() ),
                 m_pj( NULL ),
                 m_pcbwcm( NULL ),
                 m_pcbsmHash( NULL ),
@@ -6020,7 +6163,7 @@ ERR THashedLRUKCache<I>::ErrEnqueue( _Inout_ CRequest** const pprequest )
             pctls->IlIORequested().Remove( prequestIO );
             prequestIO = prequestIOPrev;
         }
-        else if ( FOutOfOrder( prequestIOPrev, prequestIO ) )
+        else if ( CmpRequestIO( prequestIOPrev, prequestIO ) > 0 )
         {
             pctls->IlIORequested().Remove( prequestIO );
             pctls->IlIORequested().Insert( prequestIO, prequestIOPrev );
@@ -6096,33 +6239,49 @@ BOOL THashedLRUKCache<I>::FCombinable( _In_ CRequest* const prequestIOA, _In_ CR
  }
 
 template<class I>
-BOOL THashedLRUKCache<I>::FOutOfOrder( _In_ CRequest* const prequestIOA, _In_ CRequest* const prequestIOB )
+int THashedLRUKCache<I>::CmpRequestIO( _In_ CRequest* const prequestIOA, _In_ CRequest* const prequestIOB )
 {
     //  IOs from different cached files are ordered by their volume id and file id for deterministic behavior
 
-    if ( prequestIOA->Pcfte()->Volumeid() <= prequestIOB->Pcfte()->Volumeid() )
+    if ( prequestIOA->Pcfte()->Volumeid() < prequestIOB->Pcfte()->Volumeid() )
     {
-        return fFalse;
+        return -1;
+    }
+    else if ( prequestIOA->Pcfte()->Volumeid() > prequestIOB->Pcfte()->Volumeid() )
+    {
+        return 1;
     }
 
-    if ( prequestIOA->Pcfte()->Fileid() <= prequestIOB->Pcfte()->Fileid() )
+    if ( prequestIOA->Pcfte()->Fileid() < prequestIOB->Pcfte()->Fileid() )
     {
-        return fFalse;
+        return -1;
+    }
+    else if ( prequestIOA->Pcfte()->Fileid() > prequestIOB->Pcfte()->Fileid() )
+    {
+        return 1;
     }
 
-    if ( prequestIOA->Pcfte()->Fileserial() <= prequestIOB->Pcfte()->Fileserial() )
+    if ( prequestIOA->Pcfte()->Fileserial() < prequestIOB->Pcfte()->Fileserial() )
     {
-        return fFalse;
+        return -1;
+    }
+    else if ( prequestIOA->Pcfte()->Fileserial() > prequestIOB->Pcfte()->Fileserial() )
+    {
+        return 1;
     }
 
     //  IOs whose offsets are in ascending order are not out of order
 
-    if ( prequestIOA->OffsetsForIO().IbStart() <= prequestIOB->OffsetsForIO().IbStart() )
+    if ( prequestIOA->OffsetsForIO().IbStart() < prequestIOB->OffsetsForIO().IbStart() )
     {
-        return fFalse;
+        return -1;
+    }
+    else if ( prequestIOA->OffsetsForIO().IbStart() > prequestIOB->OffsetsForIO().IbStart() )
+    {
+        return 1;
     }
 
-    return fTrue;
+    return 0;
 }
 
 template<class I>

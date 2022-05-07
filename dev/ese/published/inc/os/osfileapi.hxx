@@ -536,8 +536,6 @@ class IFileAPI  //  fapi
 
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( IFileAPI::FileModeFlags )
 
-BOOL FIOThread( void );
-
 // Exposing for log zero filling
 extern QWORD g_cbZero;
 extern BYTE* g_rgbZero;

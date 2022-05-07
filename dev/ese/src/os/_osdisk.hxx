@@ -1326,8 +1326,19 @@ void OSDiskIIOThreadIComplete(  const DWORD     dwError,
 VOID OSDiskIIOThreadIRetryIssue();
 
 
+//      IO Throttling Helpers
+//
+
+ULONG CioBackgroundIOLow( _In_ const ULONG cioBackgroundMax );
+ULONG CioDefaultUrgentOutstandingIOMax( _In_ const ULONG cioOutstandingMax );
+ULONG IOSDiskIUrgentLevelFromQOS( _In_ const OSFILEQOS grbitQOS );
+LONG CioOSDiskIFromUrgentLevel( _In_ const ULONG iUrgentLevel, _In_ const DWORD cioUrgentMaxMax );
+
+
 //      Miscellaneous
 //
+
+BOOL FIOThread( void );
 
 BOOL GetOverlappedResult_(  HANDLE          hFile,
                             LPOVERLAPPED    lpOverlapped,
