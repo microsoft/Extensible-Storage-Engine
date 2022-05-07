@@ -587,11 +587,6 @@ private:
     CSmallLookasideCache& operator=( const CSmallLookasideCache& );
 };
 
-#ifdef DEBUG
-// Lookaside buffer for validating pages in the IO thread
-extern void * g_pvIoThreadImageCheckCache;
-#endif
-
 //  LRUK
 
 DECLARE_LRUK_RESOURCE_UTILITY_MANAGER( Kmax, BF, BF::OffsetOfLRUKIC, IFMPPGNO, BFLRUK );

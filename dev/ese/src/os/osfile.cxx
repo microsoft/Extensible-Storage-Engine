@@ -1463,7 +1463,7 @@ ERR ErrIOWriteContiguous(   IFileAPI* const                         pfapi,
     Assert( !( pfapi->Fmf() & IFileAPI::fmfReadOnlyClient ) );
     Expected( !( pfapi->Fmf() & IFileAPI::fmfReadOnly ) ); // will fail at OS op, but unexpected.
 
-    Expected( ( grbitQOS & qosIOOptimizeCombinable ) );
+    Expected( !( grbitQOS & qosIOOptimizeCombinable ) );
 
     Assert( 0 == ( qosIOCompleteMask & grbitQOS ) ); // no completion signals should be set
 
@@ -1495,7 +1495,7 @@ ERR ErrIOWriteContiguous(   IFileAPI* const                         pfapi,
                                     ibOffsetCurrent,
                                     rgcbData[iData],
                                     rgpbData[iData],
-                                    grbitQOS,
+                                    grbitQOS | ( iData == 0 ? 0 : qosIOOptimizeCombinable ),
                                     IFileAPI::PfnIOComplete( IOWriteContiguousComplete_ ),
                                     DWORD_PTR( &rgIoComplete[iData] ) );
         Assert( err != errDiskTilt );

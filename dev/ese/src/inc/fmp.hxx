@@ -493,7 +493,7 @@ class FMP
         //  Used to indicate this stack frame / code knows it has BFContext pinned by having 
         //  a BF pinned in write IO.
         //
-        DWORD                m_tidBFContextPinned;
+        DWORD                m_cBFContextPinned;
 
     public:
         //  timing sequence for create, attach, and detach
@@ -1456,31 +1456,19 @@ INLINE VOID FMP::LeaveBFContextAsWriter()
 INLINE VOID FMP::ImplicitBFContextPin()
 {
 #ifdef DEBUG
-    // we expect only single thread to perform this pin (the IO thread), so if this is 
-    // changed some clever locking will need to be done, that doesn't re-introduce the
-    // deadlock between:
-    //     Thread 1: is doing checkpoint depth maintenance for and owns the BF FMP Context 
-    //               for a database.edb as a reader but becomes blocked because we ran out 
-    //               of IOREQs
-    //     Thread 2: is flushing after a create index and thus needs the same BF FMP Context 
-    //               as a writer and blocks, quiescing future readers
-    //     Thread 3: is the IO thread and is completing a BF write and is trying to decide 
-    //               if it needs to request checkpoint maintenance for which it needs the 
-    //               same BF FMP Context as a reader and blocks, preventing IOREQ production
-    // BF is deadlocking itself here using that lock on its IO completion.
-    Assert( FIOThread() );
-    Assert( m_tidBFContextPinned == 0 );
-  
-    m_tidBFContextPinned = DwUtilThreadId();
+    // we expect only IO completions to perform this transient pin
+    Assert( Ptls()->fInBFAsyncIOCompletion );
+
+    AtomicIncrement( &m_cBFContextPinned );
 #endif
 }
 INLINE VOID FMP::ImplicitBFContextUnpin()
 {
 #ifdef DEBUG
-    Assert( FIOThread() );
-    Assert( m_tidBFContextPinned == DwUtilThreadId() );
+    Assert( Ptls()->fInBFAsyncIOCompletion );
+    Assert( m_cBFContextPinned );
 
-    m_tidBFContextPinned = 0x0;
+    AtomicDecrement( &m_cBFContextPinned );
 #endif
 }
 
@@ -1490,7 +1478,7 @@ INLINE DWORD_PTR FMP::DwBFContext()
     Assert( Ptls()->PFMP() == this || 
             RwlIBFContext().FReader() || 
             RwlIBFContext().FWriter() || 
-            m_tidBFContextPinned == DwUtilThreadId() );
+            ( Ptls()->fInBFAsyncIOCompletion && m_cBFContextPinned ) );
 #endif  //  SYNC_DEADLOCK_DETECTION
 
     return m_dwBFContext;

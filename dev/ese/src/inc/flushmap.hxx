@@ -462,7 +462,7 @@ class CFlushMap
             const BYTE* const pbData,
             const DWORD_PTR keyIOComplete );
         ERR ErrReadIoComplete_( const ERR errIo, const BOOL fSync, FlushMapPageDescriptor* const pfmd );
-        ERR ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, const BOOL fIoThread, FlushMapPageDescriptor* const pfmd );
+        ERR ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, const BOOL fIoCompletion, FlushMapPageDescriptor* const pfmd );
         static void WriteFmHeaderPageComplete_( void* pvGroupContext, void* pvRuntimeContext );
         ERR ErrSyncReadFmPage_( FlushMapPageDescriptor* const pfmd );
         ERR ErrSyncWriteFmPage_( FlushMapPageDescriptor* const pfmd );

@@ -22,7 +22,8 @@ public:
             FLAG32  fIsRCECleanup:1;    //  VER:  is this thread currently in RCEClean?
             FLAG32  fAddColumn:1;       //  VER:  are we currently creating an AddColumn RCE?
             FLAG32  fInCallback:1;      //  CALLBACKS: are we currently in a callback
-            FLAG32  fCheckpoint:1;      //  this thread is performing checkpoint advancement
+            FLAG32  fCheckpoint:1;      //  BF:  this thread is performing checkpoint advancement
+            FLAG32  fInBFAsyncIOCompletion:1;   //  BF:  are we processing an async IO completion
             FLAG32  fInSoftStart:1;     //  are we currently running recovery / JetInit-style (note off for JetRestore())
             FLAG32  fInJetAPI:1;        //  is this thread in a call to a Jet API? (to prevent recursion except in specific cases)
 #ifdef DEBUG

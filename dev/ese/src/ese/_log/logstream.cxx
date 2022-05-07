@@ -3167,7 +3167,7 @@ ERR LOG_STREAM::ErrLGIWriteSectorData(
                                     rgcbLogData,
                                     rgpbLogData,
                                     cLogData,
-                                    QosSyncDefault( m_pinst ) | qosIOOptimizeCombinable | qosIOOptimizeOverrideMaxIOLimits );
+                                    QosSyncDefault( m_pinst ) | qosIOOptimizeOverrideMaxIOLimits );
 
         for ( size_t i = 0; i < cLogData; i++ )
         {

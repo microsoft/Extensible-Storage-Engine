@@ -85,7 +85,7 @@ ERR WRITECONTIGUOUSTESTS::ErrTest()
     perfTest = new COSFilePerfTest;
     pfapi->RegisterIFilePerfAPI( perfTest );
     // The offset cannot be zero since that must be written by a sync IO.
-    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, cWriteSectors, qosIODispatchImmediate | qosIOOptimizeCombinable ) );
+    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, cWriteSectors, qosIODispatchImmediate ) );
     OSTestCheck( 1 == perfTest->NumberOfIOCompletions() );
     OSTestCheck( cWriteSectors * cbSectorSize == perfTest->NumberOfBytesWritten() );
     delete pfapi;
@@ -96,7 +96,7 @@ ERR WRITECONTIGUOUSTESTS::ErrTest()
     perfTest = new COSFilePerfTest;
     pfapi->RegisterIFilePerfAPI( perfTest );
     // The offset cannot be zero since that must be written by a sync IO.
-    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, cWriteSectors, qosIODispatchImmediate | qosIOOptimizeCombinable ) );
+    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, cWriteSectors, qosIODispatchImmediate ) );
     OSTestCheck( cWriteSectors == perfTest->NumberOfIOCompletions() );
     OSTestCheck( cWriteSectors * cbSectorSize == perfTest->NumberOfBytesWritten() );
     delete pfapi;
@@ -128,7 +128,7 @@ ERR WRITECONTIGUOUSTESTS::ErrTest()
     perfTest = new COSFilePerfTest;
     pfapi->RegisterIFilePerfAPI( perfTest );
     // The offset cannot be zero since that must be written by a sync IO.
-    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, 2, qosIODispatchImmediate | qosIOOptimizeCombinable | qosIOOptimizeOverrideMaxIOLimits ) );
+    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, 2, qosIODispatchImmediate | qosIOOptimizeOverrideMaxIOLimits ) );
     OSTestCheck( 1 == perfTest->NumberOfIOCompletions() );
     OSTestCheck( cbTotal == perfTest->NumberOfBytesWritten() );
     delete pfapi;
@@ -145,7 +145,7 @@ ERR WRITECONTIGUOUSTESTS::ErrTest()
     perfTest = new COSFilePerfTest;
     pfapi->RegisterIFilePerfAPI( perfTest );
     // The offset cannot be zero since that must be written by a sync IO.
-    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, 2, qosIODispatchImmediate | qosIOOptimizeCombinable | qosIOOptimizeOverrideMaxIOLimits ) );
+    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, 2, qosIODispatchImmediate | qosIOOptimizeOverrideMaxIOLimits ) );
     OSTestCheck( 1 == perfTest->NumberOfIOCompletions() );
     OSTestCheck( cbTotal == perfTest->NumberOfBytesWritten() );
     delete pfapi;
@@ -163,7 +163,7 @@ ERR WRITECONTIGUOUSTESTS::ErrTest()
     perfTest = new COSFilePerfTest;
     pfapi->RegisterIFilePerfAPI( perfTest );
     // The offset cannot be zero since that must be written by a sync IO.
-    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, 2, qosIODispatchImmediate | qosIOOptimizeCombinable ) );
+    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, 2, qosIODispatchImmediate ) );
     OSTestCheck( 2 == perfTest->NumberOfIOCompletions() );
     OSTestCheck( cbTotal == perfTest->NumberOfBytesWritten() );
     delete pfapi;
@@ -178,7 +178,7 @@ ERR WRITECONTIGUOUSTESTS::ErrTest()
     perfTest = new COSFilePerfTest;
     pfapi->RegisterIFilePerfAPI( perfTest );
     // The offset cannot be zero since that must be written by a sync IO.
-    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, 2, qosIODispatchImmediate | qosIOOptimizeCombinable ) );
+    OSTestCheckErr( ErrIOWriteContiguous( pfapi, rgtc, cbSectorSize, rgcbLogData, rgpbLogData, 2, qosIODispatchImmediate ) );
     OSTestCheck( 2 == perfTest->NumberOfIOCompletions() );
     OSTestCheck( cbTotal == perfTest->NumberOfBytesWritten() );
     delete pfapi;
@@ -220,7 +220,6 @@ void FileApiWaitAsyncIO(    const ERR           err,
                                 const BYTE* const   pbData,
                                 const void *        pvCtx )
 {
-    Assert( FIOThread() );
     FILEAPI_WAIT_ASYNC_IO_CTX * pComplete = (FILEAPI_WAIT_ASYNC_IO_CTX*) pvCtx;
 
     Assert( pComplete->pbData == pbData );

@@ -5,6 +5,8 @@
 
 //  Block Cache Lock Ranks
 
+const INT rankThrottleContexts = 0;
+const INT rankThrottleContext = 0;
 const INT rankFileFilterReferences = 0;
 const INT rankCachedFileHash = 0;
 const INT rankCacheThreadLocalStorage = 0;

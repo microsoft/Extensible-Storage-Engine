@@ -228,11 +228,6 @@ void BFTerm()
     OSMemoryPageFree( g_rgbBFTemp );
     g_rgbBFTemp = NULL;
 
-#ifdef DEBUG
-    OSMemoryPageFree( g_pvIoThreadImageCheckCache );
-    g_pvIoThreadImageCheckCache = NULL;
-#endif
-
     g_pBFAllocLookasideList->Term();
     delete g_pBFAllocLookasideList;
     g_pBFAllocLookasideList = NULL;
@@ -11202,13 +11197,13 @@ ERR ErrBFIMaintScavengeIScavengePages( const char* const szContextTraceOnly, con
                 fHungIO = fTrue;
             }
 
-            // Ignore pages that can't be flushed because we are on the I/O thread.
+            // Ignore pages that can't be flushed because we are in an I/O completion.
             else if ( errFlush == errBFIPageFlushDisallowedOnIOThread )
             {
                 // We should only see this if we are on the I/O thread
                 Assert( !fPermanentErr );
-                Assert( FIOThread() );
-                FireWall( "ScavengeFromIoThread" );
+                Assert( Ptls()->fInBFAsyncIOCompletion );
+                FireWall( "ScavengeInIOCompletion" );
             }
 
             // If we got errDiskTilt then flush our I/O queue to hopefully get a head start on our I/O.
@@ -11803,7 +11798,7 @@ void BFIMaintCheckpointIDepthRequest_( BF * pbfImplicitlyPinnedDatabase, FMP * p
             FireWall( "CheckpointDepthIoThresholdProvidePinnedPbfArg" );
             return;
         }
-        Expected( FIOThread() );
+        Expected( Ptls()->fInBFAsyncIOCompletion );
         Expected( !Ptls()->fCheckpoint );
         Assert( pbfImplicitlyPinnedDatabase->err == wrnBFPageFlushPending );
         Assert( NULL == pbfImplicitlyPinnedDatabase->pWriteSignalComplete );
@@ -11917,7 +11912,7 @@ void BFIMaintCheckpointDepthRequest( BF * pbfImplicitlyPinnedDatabase, const BFC
     Assert( pbfImplicitlyPinnedDatabase != NULL );
     Assert( pbfImplicitlyPinnedDatabase->err == wrnBFPageFlushPending );
     Assert( NULL == pbfImplicitlyPinnedDatabase->pWriteSignalComplete );
-    Expected( FIOThread() );
+    Expected( Ptls()->fInBFAsyncIOCompletion );
 
     g_rgfmp[ pbfImplicitlyPinnedDatabase->ifmp ].ImplicitBFContextPin();
 
@@ -21394,10 +21389,10 @@ ERR ErrBFIPrepareFlushPage(
         Call( ErrERRCheck( errBFIDependentPurged ) );
     }
 
-    //  if this is the I/O thread then do not allow the page to be flushed to
+    //  if this is an I/O completion then do not allow the page to be flushed to
     //  avoid a possible deadlock if the IOREQ pool is empty
 
-    if ( FIOThread() )
+    if ( ptls->fInBFAsyncIOCompletion )
     {
         AssertSz( fFalse, "We have changed the Buffer Manager so this should never happen.  Please tell SOMEONE if it does." );
         Call( ErrERRCheck( errBFIPageFlushDisallowedOnIOThread ) );
@@ -24484,6 +24479,9 @@ void BFIAsyncReadComplete(  const ERR           err,
                             const BYTE* const   pbData,
                             const PBF           pbf )
 {
+    TLS* const ptls = Ptls();
+
+    ptls->fInBFAsyncIOCompletion = fTrue;
 
     pbf->sxwl.ClaimOwnership( bfltWrite );
 
@@ -24571,6 +24569,8 @@ void BFIAsyncReadComplete(  const ERR           err,
     //  release our Write Latch on this BF
 
     pbf->sxwl.ReleaseWriteLatch();
+
+    ptls->fInBFAsyncIOCompletion = fFalse;
 }
 
 //  this function performs a Sync Write from the specified Exclusive Latched BF
@@ -25089,11 +25089,6 @@ JETUNITTEST( BF, LocklessWriteCompleteSignaling )
     pbf->sxwl.ReleaseOwnership( bfltWrite );
 }
 
-#ifdef DEBUG
-// Used to check entire page image on IOs that happen from the IO thread (which is 99% of them).
-void * g_pvIoThreadImageCheckCache = NULL;
-#endif
-
 //  remap a buffer page back (or map/reroute an allocated page) to the OS FS cache
 //
 //  There are two interesting cases:
@@ -25198,21 +25193,6 @@ BOOL FBFICacheRemapPage( __inout PBF pbf, IFileAPI* const pfapi )
     
 #ifdef DEBUG
     void * pvPageImageCheckPre = NULL;
-    if ( FIOThread() )
-    {
-        //  We only do this on the IO thread, so I can just keep the buffer around.  Note that there
-        //  is a case through IOChangeFileSizeComplete() where this happens on a different thread, and
-        //  so is not "implicitly locked".
-        if ( g_pvIoThreadImageCheckCache == NULL )
-        {
-            Expected( pbf->icbPage == g_icbCacheMax );  //  should be full sized
-            Assert( pbf->icbPage <= icbPageBiggest );   //  full size shouldn't outsize the biggest
-            //  Alloc the maximal we could possibly use ... because we're lazy
-            g_pvIoThreadImageCheckCache = PvOSMemoryPageAlloc( g_rgcbPageSize[icbPageBiggest], NULL );
-        }
-        //  This means 99.9% of all page images will be simply cached efficiently without memalloc/free
-        pvPageImageCheckPre = g_pvIoThreadImageCheckCache;
-    }
     if ( pvPageImageCheckPre == NULL )
     {
         pvPageImageCheckPre = PvOSMemoryPageAlloc( g_rgcbPageSize[icbPageBiggest], NULL );
@@ -25419,12 +25399,7 @@ BOOL FBFICacheRemapPage( __inout PBF pbf, IFileAPI* const pfapi )
                     dbtimeCheckPre, (DBTIME)ppghdrPreCopy->dbtimeDirtied, errReRead, errCheckPage );
         AssertSz( 0 == memcmp( pvPageImageCheckPre, pbf->pv, g_rgcbPageSize[pbf->icbPage] ), "Remap page image mismatch: %I64x != %I64x, errs = %d / %d",
                     pvPageImageCheckPre, pbf->pv, errReRead, errCheckPage );
-        if ( pvPageImageCheckPre != g_pvIoThreadImageCheckCache )
-        {
-            //  means we're not the IO thread (or first alloc failed and 2nd succeeded above), needs freeing
-            OSMemoryPageFree( pvPageImageCheckPre );
-        }
-        //  Note g_pvIoThreadImageCheckCache is released in BFTerm()
+        OSMemoryPageFree( pvPageImageCheckPre );
     }
 
     if ( errReRead >= JET_errSuccess && // must have successfully read to do this level of validation in RFS IO tests
@@ -25449,8 +25424,12 @@ void BFIAsyncWriteComplete( const ERR           err,
                             const BYTE* const   pbData,
                             const PBF           pbf )
 {
+    TLS* const  ptls    = Ptls();
+
     const IFMP  ifmp    = pbf->ifmp;
     FMP * const pfmp    = &g_rgfmp[ ifmp ];
+
+    ptls->fInBFAsyncIOCompletion = fTrue;
 
     Assert( pbf->err == wrnBFPageFlushPending );
     Expected( err <= JET_errSuccess );  //  no expected warnings
@@ -25635,6 +25614,8 @@ void BFIAsyncWriteComplete( const ERR           err,
     {
         g_asigBFFlush.Set();
     }
+
+    ptls->fInBFAsyncIOCompletion = fFalse;
 }
 
 //  Finalizes a flush on a pending (err == wrnBFPageFlushPending) BF that has

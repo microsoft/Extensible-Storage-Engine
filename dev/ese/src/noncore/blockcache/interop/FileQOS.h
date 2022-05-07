@@ -195,6 +195,14 @@ namespace Internal
                     /// IO complete mask.
                     /// </summary>
                     IOCompleteMask = IOCompleteIoCombined | IOCompleteReadGameOn | IOCompleteWriteGameOn | IOCompleteIoSlow,
+
+                    /// <summary>
+                    /// IO throttling override.
+                    /// </summary>
+                    /// <remarks>
+                    /// TFileFilter internal flag (qosBypassIOQuota).
+                    /// </remarks>
+                    BypassIOQuota = 0x8000000000000000L,
                 };
             }
         }
