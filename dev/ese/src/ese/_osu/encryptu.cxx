@@ -133,8 +133,6 @@ ErrOSUDecrypt(
             0,
             NULL,
             PinstFromPfucb( pfucb ) );
-
-        OSUHAEmitFailureTag( PinstFromPfucb( pfucb ), HaDbFailureTagCorruption, L"0d175521-4682-4f2a-aaff-e24daae1c12b" );
     }
 
     return err;
