@@ -26,7 +26,9 @@ class TFileFilter  //  ff
         TFileFilter(    _Inout_     IFileAPI** const                    ppfapi,
                         _In_        IFileSystemFilter* const            pfsf,
                         _In_        IFileSystemConfiguration* const     pfsconfig,
+                        _In_        IFileIdentification* const          pfident,
                         _In_        ICacheTelemetry* const              pctm,
+                        _In_        ICacheRepository* const             pcrep,
                         _In_        const VolumeId                      volumeid,
                         _In_        const FileId                        fileid,
                         _Inout_opt_ ICachedFileConfiguration** const    ppcfconfig,
@@ -37,14 +39,21 @@ class TFileFilter  //  ff
 
         static void Cleanup();
 
+        ICache* Pc() { return m_pc; }
+
         void SetFileId( _In_ const VolumeId volumeid, _In_ const FileId fileid )
         {
             m_volumeid = volumeid;
             m_fileid = fileid;
         }
 
+        void SetEverEligibleForCaching( _In_ const BOOL fEverEligible )
+        {
+            m_fEverEligibleForCaching = fEverEligible;
+        }
+
         void SetCacheState( _Inout_     ICachedFileConfiguration** const    ppcfconfig,
-                            _Inout_     ICache** const                      ppc,
+                            _Inout_opt_ ICache** const                      ppc,
                             _Inout_opt_ CCachedFileHeader** const           ppcfh )
         {
             m_pcfconfig = *ppcfconfig;
@@ -382,6 +391,10 @@ class TFileFilter  //  ff
             return pff->ErrAttach( offsetsFirstWrite );
         }
         ERR ErrAttach( _In_ const COffsets& offsetsFirstWrite );
+        ERR ErrGetConfiguredCache();
+        ERR ErrCacheOpenFailure(    _In_ const char* const                  szFunction,
+                                    _In_ const ERR                          errFromCall,
+                                    _In_ const ERR                          errToReturn );
 
         ERR ErrTryEnqueueWriteBack( _In_                    const TraceContext&             tc,
                                     _In_                    const QWORD                     ibOffset,
@@ -1943,10 +1956,13 @@ class TFileFilter  //  ff
 
         IFileSystemFilter* const                                    m_pfsf;
         IFileSystemConfiguration* const                             m_pfsconfig;
+        IFileIdentification* const                                  m_pfident;
         ICacheTelemetry* const                                      m_pctm;
+        ICacheRepository* const                                     m_pcrep;
         VolumeId                                                    m_volumeid;
         FileId                                                      m_fileid;
         FileSerial                                                  m_fileserial;
+        BOOL                                                        m_fEverEligibleForCaching;
         ICachedFileConfiguration*                                   m_pcfconfig;
         ICache*                                                     m_pc;
         CCacheWrapper                                               m_cWrapper;
@@ -2171,7 +2187,9 @@ template< class I >
 TFileFilter<I>::TFileFilter(    _Inout_     IFileAPI** const                    ppfapi,
                                 _In_        IFileSystemFilter* const            pfsf,
                                 _In_        IFileSystemConfiguration* const     pfsconfig,
+                                _In_        IFileIdentification* const          pfident,
                                 _In_        ICacheTelemetry* const              pctm,
+                                _In_        ICacheRepository* const             pcrep,
                                 _In_        const VolumeId                      volumeid,
                                 _In_        const FileId                        fileid,
                                 _Inout_opt_ ICachedFileConfiguration** const    ppcfconfig,
@@ -2180,17 +2198,20 @@ TFileFilter<I>::TFileFilter(    _Inout_     IFileAPI** const                    
     :   TFileWrapper<I>( (I** const)ppfapi ),
         m_pfsf( pfsf ),
         m_pfsconfig( pfsconfig ),
+        m_pfident( pfident ),
         m_pctm( pctm ),
+        m_pcrep( pcrep ),
         m_volumeid( volumeid ),
         m_fileid( fileid ),
         m_fileserial( fileserialInvalid ),
+        m_fEverEligibleForCaching( fFalse ),
         m_pcfconfig( ppcfconfig ? *ppcfconfig : NULL ),
         m_pc( ppc && *ppc ? &m_cWrapper : NULL ),
         m_cWrapper( this, ppc ),
         m_pcfh( ppcfh ? *ppcfh : NULL ),
         m_filenumber( filenumberInvalid ),
-        m_cbBlockSize( 0 ),
-        m_offsetsCachedFileHeader( 0, sizeof( CCachedFileHeader ) ),
+        m_cbBlockSize( cbCachedBlock ),
+        m_offsetsCachedFileHeader( 0, sizeof( CCachedFileHeader ) - 1 ),
         m_critWaiters( CLockBasicInfo( CSyncBasicInfo( "TFileFilter<I>::m_critWaiters" ), rankFileFilter, 0 ) ),
         m_critPendingWriteBacks( CLockBasicInfo( CSyncBasicInfo( "TFileFilter<I>::m_critPendingWriteBacks" ), rankFileFilter, 0 ) ),
         m_cPendingWriteBacksMax( 0 ),
@@ -2694,7 +2715,7 @@ ERR TFileFilter<I>::ErrBeginAccess( _In_    const COffsets&                 offs
     //  if this is a write and the file is cached and not yet attached then expand the offset range to include the
     //  header so that we can write our cached file header
 
-    const BOOL fNotYetAttached = m_pc && !m_pcfh && !m_initOnceAttach.FIsInit();
+    const BOOL fNotYetAttached = !m_pcfh && !m_initOnceAttach.FIsInit();
     const BOOL fNeedsAttach = fWrite && fNotYetAttached;
     if ( fNeedsAttach )
     {
@@ -2912,20 +2933,20 @@ HandleError:
 template< class I >
 ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
 {
-    ERR                 err                         = JET_errSuccess;
-    QWORD               cbSize                      = 0;
-    QWORD               cbSizeWithFirstWrite        = 0;
-    void*               pvData                      = NULL;
-    TraceContextScope   tcScope( iorpBlockCache );
-    CCachedFileHeader*  pcfh                        = NULL;
-    BOOL                fPresumeCached              = fFalse;
-    BOOL                fPresumeAttached            = fFalse;
+    ERR                         err                         = JET_errSuccess;
+    QWORD                       cbSize                      = 0;
+    QWORD                       cbSizeWithFirstWrite        = 0;
+    void*                       pvData                      = NULL;
+    TraceContextScope           tcScope( iorpBlockCache );
+    CCachedFileHeader*          pcfh                        = NULL;
+    BOOL                        fPresumeCached              = fFalse;
+    BOOL                        fPresumeAttached            = fFalse;
 
     //  we do not currently support caching files opened for write through
 
     if ( ( Fmf() & fmfStorageWriteBack ) == 0 )
     {
-        goto HandleError;
+        Error( JET_errSuccess );
     }
 
     //  get the size of the cached file and extend to include the proposed write.  if it is smaller than the header
@@ -2937,7 +2958,30 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
 
     if ( cbSizeWithFirstWrite < m_offsetsCachedFileHeader.Cb() )
     {
-        goto HandleError;
+        Error( JET_errSuccess );
+    }
+
+    //  if the file is not marked as having ever been eligible for caching then we cannot attach the cache
+
+    if ( !m_fEverEligibleForCaching )
+    {
+        Error( JET_errSuccess );
+    }
+
+    //  try to open the cache for this file.  if we can't then we will use access the file without caching.  this
+    //  is intentionally best effort only to allow continued operation if the caching storage is failed
+
+    err = ErrGetConfiguredCache();
+    if ( err < JET_errSuccess )
+    {
+        Error( ErrCacheOpenFailure( "Open", err, JET_errSuccess ) );
+    }
+
+    //  if we didn't get a cache because caching is not enabled then we cannot attach the cache
+
+    if ( !m_pc )
+    {
+        Error( JET_errSuccess );
     }
 
     //  read the data to be displaced by the cached file header, if any
@@ -3030,6 +3074,105 @@ HandleError:
     delete pcfh;
     OSMemoryPageFree( pvData );
     return fPresumeAttached ? err : JET_errSuccess;
+}
+
+template< class I >
+ERR TFileFilter<I>::ErrGetConfiguredCache()
+{
+    ERR                             err                                                 = JET_errSuccess;
+    const DWORD                     cwchAbsPathCachedFileMax                            = IFileSystemAPI::cchPathMax;
+    WCHAR                           wszAbsPathCachedFile[ cwchAbsPathCachedFileMax ]    = { 0 };
+    const DWORD                     cwchKeyPathCachedFileMax                            = IFileIdentification::cwchKeyPathMax;
+    WCHAR                           wszKeyPathCachedFile[ cwchKeyPathCachedFileMax ]    = { 0 };
+    IBlockCacheConfiguration*       pbcconfig                                           = NULL;
+    ICachedFileConfiguration*       pcfconfig                                           = NULL;
+    const DWORD                     cwchAbsPathCachingFileMax                           = IFileSystemAPI::cchPathMax;
+    WCHAR                           wszAbsPathCachingFile[ cwchAbsPathCachingFileMax ]  = { 0 };
+    const DWORD                     cwchKeyPathCachingFileMax                           = IFileIdentification::cwchKeyPathMax;
+    WCHAR                           wszKeyPathCachingFile[ cwchKeyPathCachingFileMax ]  = { 0 };
+    ICacheConfiguration*            pcconfig                                            = NULL;
+    ICache*                         pc                                                  = NULL;
+
+    //  if we already have a cache then we're done
+
+    if ( m_pc )
+    {
+        Error( JET_errSuccess );
+    }
+
+    //  get the caching configuration for this file
+
+    Call( ErrPath( wszAbsPathCachedFile ) );
+    Call( m_pfident->ErrGetFileKeyPath( wszAbsPathCachedFile, wszKeyPathCachedFile ) );
+    Call( m_pfsconfig->ErrGetBlockCacheConfiguration( &pbcconfig ) );
+    Call( pbcconfig->ErrGetCachedFileConfiguration( wszKeyPathCachedFile, &pcfconfig ) );
+
+    //  if caching is enabled for this file then open its backing store
+
+    if ( pcfconfig->FCachingEnabled() )
+    {
+        //  get the cache configuration for this file
+
+        pcfconfig->CachingFilePath( wszAbsPathCachingFile );
+        Call( m_pfident->ErrGetFileKeyPath( wszAbsPathCachingFile, wszKeyPathCachingFile ) );
+        Call( pbcconfig->ErrGetCacheConfiguration( wszKeyPathCachingFile, &pcconfig ) );
+
+        //  open the cache for this file
+
+        Call( m_pcrep->ErrOpen( m_pfsf, m_pfsconfig, &pcconfig, &pc ) );
+
+        //  if we didn't get a cache then we're done
+
+        if ( !pc )
+        {
+            Error( JET_errSuccess );
+        }
+
+        //  save the file's cache configuration and cache
+
+        SetCacheState( &pcfconfig, &pc, NULL );
+    }
+
+HandleError:
+    delete pc;
+    delete pcconfig;
+    delete pcfconfig;
+    delete pbcconfig;
+    return err;
+}
+
+template< class I >
+ERR TFileFilter<I>::ErrCacheOpenFailure(    _In_ const char* const                  szFunction,
+                                            _In_ const ERR                          errFromCall,
+                                            _In_ const ERR                          errToReturn )
+{
+    WCHAR           wszCachingFile[ IFileSystemAPI::cchPathMax ]    = { 0 };
+    WCHAR           wszFunction[ 256 ]                              = { 0 };
+    WCHAR           wszErrorFromCall[ 64 ]                          = { 0 };
+    WCHAR           wszErrorToReturn[ 64 ]                          = { 0 };
+    const WCHAR*    rgpwsz[]                                        = { wszCachingFile, wszFunction, wszErrorFromCall, wszErrorToReturn };
+
+    CallS( ErrPath( wszCachingFile ) );
+    OSStrCbFormatW( wszFunction, sizeof( wszFunction ), L"%hs", szFunction );
+    OSStrCbFormatW( wszErrorFromCall, sizeof( wszErrorFromCall ), L"%i (0x%08x)", errFromCall, errFromCall );
+    OSStrCbFormatW( wszErrorToReturn, sizeof( wszErrorToReturn ), L"%i (0x%08x)", errToReturn, errToReturn );
+
+    m_pfsconfig->EmitEvent( eventWarning,
+                            BLOCK_CACHE_CATEGORY,
+                            BLOCK_CACHE_CACHING_FILE_OPEN_FAILURE_ID,
+                            _countof( rgpwsz ),
+                            rgpwsz,
+                            JET_EventLoggingLevelMin );
+
+    OSTraceSuspendGC();
+    BlockCacheNotableEvent( wszCachingFile, 
+                            OSFormat(   "CacheOpenFailure:%hs:%i:%i",
+                                        szFunction, 
+                                        errFromCall,
+                                        errToReturn ) );
+    OSTraceResumeGC();
+
+    return errToReturn;
 }
 
 template< class I >
@@ -3908,13 +4051,15 @@ class CFileFilter : public TFileFilter<IFileFilter>
         CFileFilter(    _Inout_     IFileAPI** const                    ppfapi,
                         _In_        IFileSystemFilter* const            pfsf,
                         _In_        IFileSystemConfiguration* const     pfsconfig,
+                        _In_        IFileIdentification* const          pfident,
                         _In_        ICacheTelemetry* const              pctm,
+                        _In_        ICacheRepository* const             pcrep,
                         _In_        const VolumeId                      volumeid,
                         _In_        const FileId                        fileid,
                         _Inout_opt_ ICachedFileConfiguration** const    ppcfconfig,
                         _Inout_opt_ ICache** const                      ppc,
                         _Inout_opt_ CCachedFileHeader** const           ppcfh )
-            :   TFileFilter<IFileFilter>( ppfapi, pfsf, pfsconfig, pctm, volumeid, fileid, ppcfconfig, ppc, ppcfh )
+            :   TFileFilter<IFileFilter>( ppfapi, pfsf, pfsconfig, pfident, pctm, pcrep, volumeid, fileid, ppcfconfig, ppc, ppcfh )
         {
         }
 

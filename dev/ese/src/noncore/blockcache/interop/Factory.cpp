@@ -308,14 +308,16 @@ namespace Internal
                         static FileFilter^ CreateFileFilter(    IFile^ fInner,
                                                                 FileSystemFilter^ fsf,
                                                                 FileSystemConfiguration^ fsconfig,
+                                                                FileIdentification^ fident,
                                                                 CacheTelemetry^ ctm,
+                                                                CacheRepository^ crep,
                                                                 VolumeId volumeid,
                                                                 FileId fileid,
                                                                 ICachedFileConfiguration^ icfconfig,
                                                                 ICache^ ic,
                                                                 ArraySegment<BYTE> header )
                         {
-                            return factory->CreateFileFilter( fInner, fsf, fsconfig, ctm, volumeid, fileid, icfconfig, ic, header );
+                            return factory->CreateFileFilter( fInner, fsf, fsconfig, fident, ctm, crep, volumeid, fileid, icfconfig, ic, header );
                         }
 
                         static FileFilter^ CreateFileFilterWrapper( IFileFilter^ iffInner, IOMode ioMode )

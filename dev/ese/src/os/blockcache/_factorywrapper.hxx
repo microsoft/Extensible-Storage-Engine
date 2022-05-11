@@ -59,7 +59,9 @@ class TBlockCacheFactoryWrapper
         ERR ErrCreateFileFilter(    _Inout_                     IFileAPI** const                    ppfapiInner,
                                     _In_                        IFileSystemFilter* const            pfsf,
                                     _In_                        IFileSystemConfiguration* const     pfsconfig,
+                                    _In_                        IFileIdentification* const          pfident,
                                     _In_                        ICacheTelemetry* const              pctm,
+                                    _In_                        ICacheRepository* const             pcrep,
                                     _In_                        const VolumeId                      volumeid,
                                     _In_                        const FileId                        fileid,
                                     _Inout_                     ICachedFileConfiguration** const    ppcfconfig,
@@ -68,7 +70,7 @@ class TBlockCacheFactoryWrapper
                                     _In_                        const int                           cbHeader,
                                     _Out_                       IFileFilter** const                 ppff ) override
         {
-            return m_piInner->ErrCreateFileFilter( ppfapiInner, pfsf, pfsconfig, pctm, volumeid, fileid, ppcfconfig, ppc, pbHeader, cbHeader, ppff );
+            return m_piInner->ErrCreateFileFilter( ppfapiInner, pfsf, pfsconfig, pfident, pctm, pcrep, volumeid, fileid, ppcfconfig, ppc, pbHeader, cbHeader, ppff );
         }
 
         ERR ErrCreateFileFilterWrapper( _Inout_ IFileFilter** const         ppffInner,

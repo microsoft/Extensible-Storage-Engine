@@ -29,7 +29,9 @@ class COSBlockCacheFactoryImpl : public IBlockCacheFactory
         ERR ErrCreateFileFilter(    _Inout_                     IFileAPI** const                    ppfapiInner,
                                     _In_                        IFileSystemFilter* const            pfsf,
                                     _In_                        IFileSystemConfiguration* const     pfsconfig,
+                                    _In_                        IFileIdentification* const          pfident,
                                     _In_                        ICacheTelemetry* const              pctm,
+                                    _In_                        ICacheRepository* const             pcrep,
                                     _In_                        const VolumeId                      volumeid,
                                     _In_                        const FileId                        fileid,
                                     _Inout_                     ICachedFileConfiguration** const    ppcfconfig,
@@ -233,7 +235,9 @@ HandleError:
 INLINE ERR COSBlockCacheFactoryImpl::ErrCreateFileFilter(   _Inout_                     IFileAPI** const                    ppfapiInner,
                                                             _In_                        IFileSystemFilter* const            pfsf,
                                                             _In_                        IFileSystemConfiguration* const     pfsconfig,
+                                                            _In_                        IFileIdentification* const          pfident,
                                                             _In_                        ICacheTelemetry* const              pctm,
+                                                            _In_                        ICacheRepository* const             pcrep,
                                                             _In_                        const VolumeId                      volumeid,
                                                             _In_                        const FileId                        fileid,
                                                             _Inout_                     ICachedFileConfiguration** const    ppcfconfig,
@@ -243,7 +247,7 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrCreateFileFilter(   _Inout_             
                                                             _Out_                       IFileFilter** const                 ppff )
 {
     ERR                 err     = JET_errSuccess;
-    IFileFilter*        pff     = NULL;
+    CFileFilter*        pff     = NULL;
     CCachedFileHeader*  pcfh    = NULL;
 
     *ppff = NULL;
@@ -257,7 +261,9 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrCreateFileFilter(   _Inout_             
 
     //  create the file filter
 
-    Alloc( pff = new CFileFilter( ppfapiInner, pfsf, pfsconfig, pctm, volumeid, fileid, ppcfconfig, ppc, &pcfh ) );
+    Alloc( pff = new CFileFilter( ppfapiInner, pfsf, pfsconfig, pfident, pctm, pcrep, volumeid, fileid, ppcfconfig, ppc, &pcfh ) );
+
+    pff->SetEverEligibleForCaching( fTrue );
 
     //  return the file filter
 
