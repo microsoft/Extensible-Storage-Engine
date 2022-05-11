@@ -567,12 +567,14 @@ ERR ErrRECRetrieveAndReserveAutoInc(
     if ( ptdb->F8BytesAutoInc() )
     {
         Assert( pfield->cbMaxLen == sizeof( QWORD ) );
+        AssumePREFAST( pfield->cbMaxLen == sizeof( QWORD ) );
         *( (QWORD*)pv ) = qw;
     }
     else
     {
         Assert( pfield->cbMaxLen == sizeof( DWORD ) );
         Assert( qw < (QWORD)ulMax );
+        AssumePREFAST( pfield->cbMaxLen == sizeof( DWORD ) );
         *( (DWORD*)pv ) = (DWORD)qw;
     }
 
