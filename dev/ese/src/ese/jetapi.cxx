@@ -3185,6 +3185,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         static BOOL FBlockCacheTestEnabled()
         {
             WCHAR wszBuf[16] = { 0 };
+#pragma prefast( suppress:6237, "The rest of the conditions do not have any side effects." )
             if (    FOSConfigGet( L"DEBUG", L"BlockCacheEnabled", wszBuf, sizeof( wszBuf ) ) &&
                     wszBuf[0] &&
                     !!_wtol( wszBuf ) )

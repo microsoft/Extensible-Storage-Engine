@@ -10669,7 +10669,7 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB* pfucbParent, FCB* pfcb, const BOOL fP
                 OSFormatW( L"%I32u", pfcb->PgnoFDP() ),
                 OSFormatW( L"%I32u", pfcb->ObjidFDP() ),
                 OSFormatW( L"%I32u", cpgOwned ),
-                OSFormatW( L"%I32u", UlParam( PinstFromPfucb( pfucbParent ), JET_paramFlight_RBSLargeRevertableDeletePages ) ),
+                OSFormatW( L"%I32u", (ULONG)UlParam( PinstFromPfucb( pfucbParent ), JET_paramFlight_RBSLargeRevertableDeletePages ) ),
             };
 
             UtilReportEvent(
