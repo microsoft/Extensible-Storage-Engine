@@ -1270,11 +1270,11 @@ class TFileFilter  //  ff
                                 _In_ const OSFILEQOS    grbitQOS,
                                 _In_ CWaiter* const     pwaiter )
                 {
-                    BOOL                                            fAcquiredIO                 = fFalse;
-                    BOOL                                            fAcquiredBackground         = fFalse;
-                    BOOL                                            fAcquiredUrgentBackground   = fFalse;
-                    BOOL                                            fSucceeded                  = fFalse;
-                    CInvasiveList<CWaiter, CWaiter::OffsetOfILE>    ilWaitersToRelease;
+                    BOOL                                                fAcquiredIO                 = fFalse;
+                    BOOL                                                fAcquiredBackground         = fFalse;
+                    BOOL                                                fAcquiredUrgentBackground   = fFalse;
+                    BOOL                                                fSucceeded                  = fFalse;
+                    CInvasiveList<CWaiter, CWaiter::OffsetOfToComplete> ilToComplete;
 
                     m_crit.Enter();
 
@@ -1305,13 +1305,13 @@ class TFileFilter  //  ff
                         if ( fAcquiredIO )
                         {
                             ReleaseIO( grbitQOS, pwaiter );
-                            GetIOWaitersToRelease( pwaiter, ilWaitersToRelease );
+                            GetIOWaitersToComplete( pwaiter, ilToComplete );
                         }
                     }
 
                     m_crit.Leave();
 
-                    ReleaseIOWaiters( ilWaitersToRelease );
+                    CompleteIOWaiters( ilToComplete );
 
                     return fSucceeded;
                 }
@@ -1322,16 +1322,16 @@ class TFileFilter  //  ff
                                 _Inout_opt_ BOOL* const     pfThrottleReleaser,   
                                 _In_opt_    CWaiter* const  pwaiter )
                 {
-                    const BOOL                                      fThrottleReleaser   = pfThrottleReleaser ? *pfThrottleReleaser : fFalse;
-                    BOOL                                            fQuotaAvailable     = fFalse;
-                    CInvasiveList<CWaiter, CWaiter::OffsetOfILE>    ilWaitersToRelease;
+                    const BOOL                                          fThrottleReleaser   = pfThrottleReleaser ? *pfThrottleReleaser : fFalse;
+                    BOOL                                                fQuotaAvailable     = fFalse;
+                    CInvasiveList<CWaiter, CWaiter::OffsetOfToComplete> ilToComplete;
 
                     if ( pfThrottleReleaser )
                     {
                         *pfThrottleReleaser = fFalse;
                     }
 
-                    if ( fThrottleReleaser || pwaiter )
+                    if ( fThrottleReleaser )
                     {
                         m_crit.Enter();
 
@@ -1350,12 +1350,12 @@ class TFileFilter  //  ff
                             ReleaseIO( grbitQOS, pwaiter );
                         }
 
-                        GetIOWaitersToRelease( pwaiter, ilWaitersToRelease );
+                        GetIOWaitersToComplete( pwaiter, ilToComplete );
 
                         m_crit.Leave();
-
-                        ReleaseIOWaiters( ilWaitersToRelease );
                     }
+
+                    CompleteIOWaiters( ilToComplete );
 
                     return fQuotaAvailable;
                 }
@@ -1380,6 +1380,8 @@ class TFileFilter  //  ff
                             Wait();
                         }
 
+                        BOOL FWaiting() const { return !m_ileWaiting.FUninitialized(); }
+
                         BOOL FComplete() const { return m_sig.FIsSet(); }
 
                         void Complete()
@@ -1392,12 +1394,14 @@ class TFileFilter  //  ff
                             m_sig.Wait();
                         }
 
-                        static SIZE_T OffsetOfILE() { return OffsetOf( CWaiter, m_ile ); }
+                        static SIZE_T OffsetOfWaiting() { return OffsetOf( CWaiter, m_ileWaiting ); }
+                        static SIZE_T OffsetOfToComplete() { return OffsetOf( CWaiter, m_ileToComplete ); }
 
                     private:
 
-                        typename CInvasiveList<CWaiter, CWaiter::OffsetOfILE>::CElement m_ile;
-                        CManualResetSignal                                              m_sig;
+                        typename CInvasiveList<CWaiter, CWaiter::OffsetOfWaiting>::CElement     m_ileWaiting;
+                        typename CInvasiveList<CWaiter, CWaiter::OffsetOfToComplete>::CElement  m_ileToComplete;
+                        CManualResetSignal                                                      m_sig;
                 };
 
             private:
@@ -1429,7 +1433,7 @@ class TFileFilter  //  ff
                         }
                     }
 
-                    m_ilWaiters.InsertAsNextMost( pwaiter );
+                    m_ilWaiting.InsertAsNextMost( pwaiter );
 
                     return fTrue;
                 }
@@ -1441,36 +1445,36 @@ class TFileFilter  //  ff
                         return;
                     }
 
-                    if ( !pwaiter || !m_ilWaiters.FMember( pwaiter ) )
+                    if ( !pwaiter || !pwaiter->FWaiting() )
                     {
                         DecrementMin( m_cIO, 0 );
                     }
                 }
 
-                void GetIOWaitersToRelease( _In_opt_    CWaiter* const                                  pwaiter,
-                                            _Inout_     CInvasiveList<CWaiter, CWaiter::OffsetOfILE>&   ilWaitersToRelease)
+                void GetIOWaitersToComplete(    _In_opt_    CWaiter* const                                          pwaiter,
+                                                _Inout_     CInvasiveList<CWaiter, CWaiter::OffsetOfToComplete>&    ilToComplete )
                 {
-                    if ( pwaiter && m_ilWaiters.FMember( pwaiter ) )
+                    if ( pwaiter && pwaiter->FWaiting() )
                     {
-                        m_ilWaiters.Remove( pwaiter );
-                        ilWaitersToRelease.InsertAsPrevMost( pwaiter );
+                        m_ilWaiting.Remove( pwaiter );
+                        ilToComplete.InsertAsPrevMost( pwaiter );
                     }
 
-                    while ( m_ilWaiters.PrevMost() && FIncrementMax( m_cIO, m_cIOMax ) )
+                    while ( m_ilWaiting.PrevMost() && FIncrementMax( m_cIO, m_cIOMax ) )
                     {
-                        CWaiter* const pwaiterToRelease = m_ilWaiters.PrevMost();
-                        m_ilWaiters.Remove( pwaiterToRelease );
-                        ilWaitersToRelease.InsertAsPrevMost( pwaiterToRelease );
+                        CWaiter* const pwaiterToComplete = m_ilWaiting.PrevMost();
+                        m_ilWaiting.Remove( pwaiterToComplete );
+                        ilToComplete.InsertAsPrevMost( pwaiterToComplete );
                     }
                 }
 
-                void ReleaseIOWaiters( _Inout_ CInvasiveList<CWaiter, CWaiter::OffsetOfILE>& ilWaitersToRelease )
+                void CompleteIOWaiters( _Inout_ CInvasiveList<CWaiter, CWaiter::OffsetOfToComplete>& ilToComplete )
                 {
-                    while ( ilWaitersToRelease.PrevMost() )
+                    while ( ilToComplete.PrevMost() )
                     {
-                        CWaiter* const pwaiterToRelease = ilWaitersToRelease.PrevMost();
-                        ilWaitersToRelease.Remove( pwaiterToRelease );
-                        pwaiterToRelease->Complete();
+                        CWaiter* const pwaiterToComplete = ilToComplete.PrevMost();
+                        ilToComplete.Remove( pwaiterToComplete );
+                        pwaiterToComplete->Complete();
                     }
                 }
 
@@ -1592,7 +1596,7 @@ class TFileFilter  //  ff
                 const DWORD                                                                                 m_cIOUrgentBackgroundMax;
                 typename CCountedInvasiveList<CThrottleContext, CThrottleContext::OffsetOfILE>::CElement    m_ile;
                 CCriticalSection                                                                            m_crit;
-                CCountedInvasiveList<CWaiter, CWaiter::OffsetOfILE>                                         m_ilWaiters;
+                CCountedInvasiveList<CWaiter, CWaiter::OffsetOfWaiting>                                     m_ilWaiting;
                 DWORD                                                                                       m_cIO;
                 DWORD                                                                                       m_cIOBackground;
                 DWORD                                                                                       m_cIOUrgentBackground;
@@ -1808,13 +1812,16 @@ class TFileFilter  //  ff
             *pfCombined = fCombined;
 
         HandleError:
-            if ( fThrottleAcquired )
+            if ( ptc )
             {
                 (void)ptc->FRelease( fAsync, fRead, grbitQOS, &fThrottleAcquired, pwaiter );
             }
             if ( err < JET_errSuccess )
             {
-                (void)ptc->FRelease( fAsync, fRead, grbitQOS, pfThrottleReleaser, pwaiter );
+                if ( ptc )
+                {
+                    (void)ptc->FRelease( fAsync, fRead, grbitQOS, pfThrottleReleaser, pwaiter );
+                }
                 *pfCombined = fFalse;
             }
             return err;
@@ -1924,7 +1931,7 @@ class TFileFilter  //  ff
             {
                 err = ErrERRCheck( errDiskTilt );
 
-                (void)FThrottleRelease( m_pfsconfig, ulDiskId, fAsync, fRead, grbitQOS, pfThrottleReleaser );
+                (void)FThrottleRelease( m_pfsconfig, ulDiskId, fAsync, fRead, grbitQOS, pfThrottleReleaser, &waiter );
                 *pfCombined = fFalse;
             }
             return err;
