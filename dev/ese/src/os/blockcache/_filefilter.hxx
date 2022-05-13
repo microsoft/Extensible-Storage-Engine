@@ -787,6 +787,7 @@ class TFileFilter  //  ff
 
                 ~CThreadLocalStorage()
                 {
+                    ClearRequests();
                 }
 
             private:
