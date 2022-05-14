@@ -22519,10 +22519,10 @@ ERR ErrBFIFlushPage(    __inout const PBF       pbf,
         //  See where this is passed to BFIOpportunisticallyFlushPage() - ErrBFIAcquireExclusiveLatchForFlush() should
         //  have completed the IO, and cleaned the page for this IORP ... so we should be in the if, just release the
         //  latch and return.
-        Expected( iorBase.Iorp() != iorpBFImpedingWriteCleanDoubleIo || 
-                     // There is an exception though - a write failure, may mean the page stayed dirty & in err state
-                     // causing us to attempt the double write.
-                     ( pbf->bfdf >= bfdfUntidy && pbf->err < JET_errSuccess ) ); 
+        //  Expected( iorBase.Iorp() != iorpBFImpedingWriteCleanDoubleIo || 
+        //              // There is an exception though - a write failure, may mean the page stayed dirty & in err state
+        //              // causing us to attempt the double write.
+        //              ( pbf->bfdf >= bfdfUntidy && pbf->err < JET_errSuccess ) ); 
 
         //  try to remove all dependencies on this BF.  if there is an
         //  issue, release our latch and fail with the error
