@@ -477,7 +477,6 @@ class TFileWrapper  //  fw
 
         I* const        m_piInner;
         const BOOL      m_fReleaseOnClose;
-        volatile BOOL   m_fRegisteredIFilePerfAPI;
 };
 
 template< class I >
@@ -489,16 +488,14 @@ CIOCompleteHash TFileWrapper<I>::CIOComplete::s_iocompleteHash( rankIOCompleteHa
 template< class I >
 TFileWrapper<I>::TFileWrapper( _In_ I* const pi )
     :   m_piInner( pi ),
-        m_fReleaseOnClose( fFalse ),
-        m_fRegisteredIFilePerfAPI( fFalse )
+        m_fReleaseOnClose( fFalse )
 {
 }
 
 template< class I >
 TFileWrapper<I>::TFileWrapper( _Inout_ I** const ppi )
     :   m_piInner( *ppi ),
-        m_fReleaseOnClose( fTrue ),
-        m_fRegisteredIFilePerfAPI( fFalse )
+        m_fReleaseOnClose( fTrue )
 {
     *ppi = NULL;
 }
@@ -771,12 +768,6 @@ ERR TFileWrapper<I>::ErrMMFree( void* const pvMap )
 template< class I >
 VOID TFileWrapper<I>::RegisterIFilePerfAPI( IFilePerfAPI * const pfpapi )
 {
-    if ( AtomicCompareExchange( (LONG*)&m_fRegisteredIFilePerfAPI, fFalse, fTrue ) )
-    {
-        delete pfpapi;
-        return;
-    }
-
     m_piInner->RegisterIFilePerfAPI( pfpapi );
 }
 

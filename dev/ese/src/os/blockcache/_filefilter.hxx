@@ -128,6 +128,8 @@ class TFileFilter  //  ff
                         _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override;
         ERR ErrIOIssue() override;
 
+        void RegisterIFilePerfAPI( _In_ IFilePerfAPI* const pfpapi ) override;
+
     public:  //  IFileFilter
 
         ERR ErrRead(    _In_                    const TraceContext&             tc,
@@ -1967,6 +1969,8 @@ class TFileFilter  //  ff
         IFileIdentification* const                                  m_pfident;
         ICacheTelemetry* const                                      m_pctm;
         ICacheRepository* const                                     m_pcrep;
+        CReaderWriterLock                                           m_rwlRegisterIFilePerfAPI;
+        BOOL                                                        m_fRegisteredIFilePerfAPI;
         VolumeId                                                    m_volumeid;
         FileId                                                      m_fileid;
         FileSerial                                                  m_fileserial;
@@ -1993,6 +1997,62 @@ class TFileFilter  //  ff
         volatile int                                                m_cCacheWriteBackForIssue;
         CInitOnceAttach                                             m_initOnceAttach;
         CSemaphore                                                  m_semCachedFileHeader;
+
+    private:
+
+        void BeginIORequest()
+        {
+            //  disallow registration of IFilePerfAPI during any IO request
+
+            CLockDeadlockDetectionInfo::DisableOwnershipTracking();
+            CLockDeadlockDetectionInfo::DisableDeadlockDetection();
+            m_rwlRegisterIFilePerfAPI.EnterAsReader();
+            CLockDeadlockDetectionInfo::EnableDeadlockDetection();
+            CLockDeadlockDetectionInfo::EnableOwnershipTracking();
+        }
+
+        void EndIORequest()
+        {
+            //  disallow registration of IFilePerfAPI during any IO request
+
+            CLockDeadlockDetectionInfo::DisableOwnershipTracking();
+            CLockDeadlockDetectionInfo::DisableDeadlockDetection();
+            m_rwlRegisterIFilePerfAPI.LeaveAsReader();
+            CLockDeadlockDetectionInfo::EnableDeadlockDetection();
+            CLockDeadlockDetectionInfo::EnableOwnershipTracking();
+        }
+
+        //  context used to track pending IO requests
+
+        class CIORequestPending
+        {
+            public:
+
+                CIORequestPending( _In_ TFileFilter<I>* const pff )
+                    :   m_pff( pff ),
+                        m_fComplete( fFalse )
+                {
+                    m_pff->BeginIORequest();
+                }
+
+                ~CIORequestPending()
+                {
+                    Complete();
+                }
+
+                void Complete()
+                {
+                    if ( AtomicCompareExchange( (LONG*)&m_fComplete, fFalse, fTrue ) == fFalse )
+                    {
+                        m_pff->EndIORequest();
+                    }
+                }
+
+            private:
+
+                TFileFilter<I>* const   m_pff;
+                volatile BOOL           m_fComplete;
+        };
 
     protected:
 
@@ -2034,7 +2094,8 @@ class TFileFilter  //  ff
                         m_pwriteback( pwriteback ),
                         m_fReleaseWriteback( m_pwriteback != NULL ),
                         m_fThrottleReleaser( pfThrottleReleaser ? *pfThrottleReleaser : fFalse ),
-                        m_fReleaseResources( fTrue )
+                        m_fReleaseResources( fTrue ),
+                        m_iorequestpending( pff )
                 {
                     if ( pgroupPendingWriteBacks )
                     {
@@ -2133,6 +2194,7 @@ class TFileFilter  //  ff
                         (void)FReleaseThrottle();
                         m_pff->EndAccess( &m_groupPendingWriteBacks, &m_psemCachedFileHeader );
                         m_pff->CompleteWriteBack( m_fReleaseWriteback ? m_pwriteback : NULL );
+                        m_iorequestpending.Complete();
                     }
                 }
 
@@ -2188,6 +2250,7 @@ class TFileFilter  //  ff
                 BOOL                    m_fReleaseWriteback;
                 BOOL                    m_fThrottleReleaser;
                 volatile BOOL           m_fReleaseResources;
+                CIORequestPending       m_iorequestpending;
         };
 };
 
@@ -2209,6 +2272,8 @@ TFileFilter<I>::TFileFilter(    _Inout_     IFileAPI** const                    
         m_pfident( pfident ),
         m_pctm( pctm ),
         m_pcrep( pcrep ),
+        m_rwlRegisterIFilePerfAPI( CLockBasicInfo( CSyncBasicInfo( "TFileFilter<I>::m_rwlRegisterIFilePerfAPI" ), rankRegisterIFilePerfAPI, 0 ) ),
+        m_fRegisteredIFilePerfAPI( fFalse ),
         m_volumeid( volumeid ),
         m_fileid( fileid ),
         m_fileserial( fileserialInvalid ),
@@ -2463,6 +2528,33 @@ ERR TFileFilter<I>::ErrIOIssue()
 }
 
 template< class I >
+void TFileFilter<I>::RegisterIFilePerfAPI( _In_ IFilePerfAPI* const pfpapi )
+{
+    //  ensure any previously requested IO is issued to avoid deadlock during registration
+
+    CallS( ErrIOIssue() );
+
+    //  disallow registration of IFilePerfAPI during any IO request
+
+    m_rwlRegisterIFilePerfAPI.EnterAsWriter();
+
+    //  if we already registered an IFilePerfAPI then drop this one, otherwise register it
+
+    if ( m_fRegisteredIFilePerfAPI )
+    {
+        delete pfpapi;
+    }
+    else
+    {
+        TFileWrapper<I>::RegisterIFilePerfAPI( pfpapi );
+
+        m_fRegisteredIFilePerfAPI = fTrue;
+    }
+
+    m_rwlRegisterIFilePerfAPI.LeaveAsWriter();
+}
+
+template< class I >
 ERR TFileFilter<I>::ErrRead(    _In_                    const TraceContext&             tc,
                                 _In_                    const QWORD                     ibOffset,
                                 _In_                    const DWORD                     cbData,
@@ -2474,10 +2566,11 @@ ERR TFileFilter<I>::ErrRead(    _In_                    const TraceContext&     
                                 _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
                                 _In_opt_                const VOID *                    pioreq )
 {
-    ERR                     err         = JET_errSuccess;
-    COffsets                offsets     = COffsets( ibOffset, ibOffset + cbData - 1 );
-    CMeteredSection::Group  group       = CMeteredSection::groupInvalidNil;
-    CSemaphore*             psem        = NULL;
+    ERR                     err                 = JET_errSuccess;
+    COffsets                offsets             = COffsets( ibOffset, ibOffset + cbData - 1 );
+    CIORequestPending       iorequestpending( this );
+    CMeteredSection::Group  group               = CMeteredSection::groupInvalidNil;
+    CSemaphore*             psem                = NULL;
 
     Assert( cbData > 0 );  //  underlying impl also asserts no zero length IO
     Assert( iom == iomRaw || iom == iomEngine || iom == iomCacheMiss );
@@ -2538,10 +2631,11 @@ ERR TFileFilter<I>::ErrWrite(   _In_                    const TraceContext&     
                                 _In_opt_                const DWORD_PTR                 keyIOComplete,
                                 _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff )
 {
-    ERR                     err     = JET_errSuccess;
-    COffsets                offsets = COffsets( ibOffset, ibOffset + cbData - 1 );
-    CMeteredSection::Group  group   = CMeteredSection::groupInvalidNil;
-    CSemaphore*             psem    = NULL;
+    ERR                     err                 = JET_errSuccess;
+    COffsets                offsets             = COffsets( ibOffset, ibOffset + cbData - 1 );
+    CIORequestPending       iorequestpending( this );
+    CMeteredSection::Group  group               = CMeteredSection::groupInvalidNil;
+    CSemaphore*             psem                = NULL;
 
     Assert( cbData > 0 );  //  underlying impl also asserts no zero length IO
     Assert( iom == iomRaw ||

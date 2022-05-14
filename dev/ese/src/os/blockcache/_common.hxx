@@ -17,6 +17,7 @@ const INT rankSlabWriteBackHash = 0;
 const INT rankSlabHash = 0;
 const INT rankCachedBlockWriteCounts = 0;
 const INT rankCacheRepository = 0;
+const INT rankRegisterIFilePerfAPI = 0;
 const INT rankFileFilter = 0;
 const INT rankFileIdentification = 0;
 const INT rankIOCompleteHash = 0;
