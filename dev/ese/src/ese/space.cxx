@@ -8466,7 +8466,7 @@ ERR ErrSPCaptureNonRevertableFDPRootPage( PIB *ppib, FCB* pfcbFDPToFree, const P
     CPG cpgCaptured = 0;
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
 
-    Call( ErrBTOpen( ppib, pfcbFDPToFree, &pfucb ) );
+    CallR( ErrBTOpen( ppib, pfcbFDPToFree, &pfucb ) );
 
     Assert( pfucbNil != pfucb );
     Assert( pfucb->u.pfcb->FInitialized() );
@@ -8542,6 +8542,11 @@ ERR ErrSPCaptureNonRevertableFDPRootPage( PIB *ppib, FCB* pfcbFDPToFree, const P
     }
 
 HandleError:
+    if ( err < JET_errSuccess )
+    {
+        SPIReportSpaceLeak( pfucb, err, pfcbFDPToFree->PgnoFDP(), 1, "CaptureNonRevertableFDPRootPage" );
+    }
+
     if ( pfucbNil != pfucb )
     {
         pfucb->pcsrRoot = pcsrNil;
@@ -8566,8 +8571,10 @@ ERR ErrSPCaptureSpaceTreePages( FUCB* const pfucbParent, FCB* pfcb, CPG* pcpgSna
     CSPExtentKeyBM spoebmStart( SPEXTKEY::fSPExtentTypeOE, 0, SpacePool::MinPool );
     CSPExtentKeyBM spoebmEnd( SPEXTKEY::fSPExtentTypeOE, pgnoSysMax, SpacePool::AvailExtLegacyGeneralPool );
     LONG cbmPreread;
-    PGNO* rgPgnos = NULL;
-    CPG   cpgno   = 0;
+    PGNO* rgPgnos   = NULL;
+    CPG   cpgno     = 0;
+    PGNO pgnoFirst  = pgnoNull;
+    LONG cpgExtent  = 0;
 
     PIBTraceContextScope tcScope = pfucbOE->ppib->InitTraceContextScope();
     tcScope->nParentObjectClass = TceFromFUCB( pfucbOE );
@@ -8603,9 +8610,6 @@ ERR ErrSPCaptureSpaceTreePages( FUCB* const pfucbParent, FCB* pfcb, CPG* pcpgSna
 
     std::sort( rgPgnos, rgPgnos + cpgno - 1, CmpPgno );
 
-    PGNO pgnoFirst = pgnoNull;
-    LONG cpgExtent = 0;
-
     // Find if there is any continuous extent in space tree. Also capture preimage if needed.
     for ( LONG ipg = 0; ipg < cpgno; ++ipg )
     {
@@ -8636,6 +8640,11 @@ ERR ErrSPCaptureSpaceTreePages( FUCB* const pfucbParent, FCB* pfcb, CPG* pcpgSna
     *pcpgSnapshotted = cpgno;
 
 HandleError:
+    if ( err < JET_errSuccess )
+    {
+        SPIReportSpaceLeak( pfucbOE, err, pgnoFirst, cpgExtent, "CaptureSpaceTreePages" );
+    }
+
     if ( pfucbOE != pfucbNil )
     {
         pfucbOE->pcsrRoot = pcsrNil;
