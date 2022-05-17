@@ -807,6 +807,7 @@ protected:
         long lRBSGen,
         LOGTIME tmPrevGen,
         _In_ const SIGNATURE signPrevRBSHdrFlush,
+        _In_ const BOOL fDeleteCorruptUninitializedRBS,
         _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) PWSTR wszRBSAbsFilePath,
         _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) PWSTR wszRBSAbsLogDirPath );
 
