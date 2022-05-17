@@ -6620,6 +6620,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errRBSFDPToBeDeleted            -1943  /* The FDP is about to be deleted. The table was originally deleted using non-revertable flag and the database was then reverted to a previous state using RBS causing the table's pages to not be reverted but table root page and space tree pages were reverted to assist in catalog cleanup. */
 #define JET_errRBSRevertableDeleteNotPossible -1944  /* The table being deleted with revertable delete flag is not possible as this table was previously deleted with non-revertable flag and partially reverted by RBS. */
 #define errRBSDeleteTableTooSoonTimeNull     -1945  /* The time the table was created or the time since the root page of table was last moved is not set and hence a non-revertable delete cannot be attempted right now. */
+#define errRBSCorruptUninitializedRBSRemoved -1946  /* The RBS being loaded is either missing or corrupt and uninitialized, so it has been removed. */
 // begin_PubEsent
 
 #define JET_wrnDefragAlreadyRunning          2000 /* Online defrag already running on specified database */

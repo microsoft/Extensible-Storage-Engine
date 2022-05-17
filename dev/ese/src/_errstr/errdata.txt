@@ -572,6 +572,7 @@
 	EXTERNAL_ERR( -1943,	State,		JET_errRBSFDPToBeDeleted	 )
 	EXTERNAL_ERR( -1944,	State,		JET_errRBSRevertableDeleteNotPossible	 )
 	INTERNAL_ERR( -1945,	State,		errRBSDeleteTableTooSoonTimeNull	 )
+	INTERNAL_ERR( -1946,	State,		errRBSCorruptUninitializedRBSRemoved	 )
 	EXTERNAL_WRN( 2000,	State,		JET_wrnDefragAlreadyRunning	 )
 	EXTERNAL_WRN( 2001,	State,		JET_wrnDefragNotRunning	 )
 	EXTERNAL_WRN( 2002,	State,		JET_wrnDatabaseScanAlreadyRunning	 )

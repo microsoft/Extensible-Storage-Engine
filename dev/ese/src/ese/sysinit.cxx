@@ -284,11 +284,6 @@ ERR INST::ErrINSTInit( )
     if ( m_prbscleaner == NULL )
     {
         CallJ( RBSCleanerFactory::ErrRBSCleanerCreate( this, &m_prbscleaner ), TermRBS );
-
-        if ( m_prbscleaner )
-        {
-            CallJ( m_prbscleaner->ErrStartCleaner(), TermRBS );
-        }
     }
 
     this->m_fSTInit = fSTInitDone;
