@@ -4528,7 +4528,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
                 Assert( JET_coltypNil != field.coltyp );
             }
 
-            if ( ( FFIELDNotNull( field.ffield ) && !FFIELDDefault( field.ffield ) ) || FFIELDAutoincrement( field.ffield ) )
+            if ( ( FFIELDNotNull( field.ffield ) || FFIELDAutoincrement( field.ffield ) ) && !FFIELDDefault( field.ffield ) )
             {
                 const ERR   errCheckNull    = ErrRECIFixedColumnInRecord( columnid, pfcb, dataRec );
 

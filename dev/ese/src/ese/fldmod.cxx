@@ -549,6 +549,14 @@ ERR ErrRECRetrieveAndReserveAutoInc(
         Error( ErrERRCheck( JET_errInvalidOperation ) );
     }
 
+    if ( FFIELDDefault( pfield->ffield ) ||
+         FFIELDUserDefinedDefault( pfield->ffield ) )
+    {
+        // See comments around the handling of JET_prepInsertMustSetAutoIncrement below.
+        Assert( !FFIELDUserDefinedDefault( pfield->ffield ) );
+        Error( ErrERRCheck( JET_errInvalidOperation ) );
+    }
+
     if ( cbMax != pfield->cbMaxLen )
     {
         Error( ErrERRCheck( JET_errInvalidBufferSize ) );
@@ -823,6 +831,26 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
             if ( fMustSetAutoInc )
             {
                 if ( !fContainsAutoInc )
+                {
+                    return ErrERRCheck( JET_errIllegalOperation );
+                }
+
+                // Defining an auto-inc column with a default value does not make sense, but because
+                // this hasn't historically been blocked by our API, there might be clients that do it,
+                // so we are blocking this feature for now to avoid dealing with any potential unintended
+                // side effects.
+                //
+                // One of the pitfalls, for instance, is the case where JET_prepInsertMustSetAutoIncrement
+                // is used on an auto-inc column with a default value and proceeds to not setting a value for the column.
+                // The contract for JET_prepInsertMustSetAutoIncrement is that the client MUST set a value explicitly,
+                // or JetUpdate() will fail with JET_errAutoIncrementNotSet. The problem is that we detect that
+                // the column hasn't been set by checking if the copy buffer carries a value for the column, which it
+                // will if a default value is defined. Therefore, we would have to track whether or not the column has been
+                // set explicitly by the user, rather than just internally.
+                const BOOL fTemplateColumn = pfucb->u.pfcb->Ptdb()->FFixedTemplateColumn( fidAutoInc );
+                FIELD* const pfield = pfucb->u.pfcb->Ptdb()->PfieldFixed( ColumnidOfFid( fidAutoInc, fTemplateColumn ) );
+                Assert( !FFIELDUserDefinedDefault( pfield->ffield ) );
+                if ( FFIELDDefault( pfield->ffield ) || FFIELDUserDefinedDefault( pfield->ffield ) )
                 {
                     return ErrERRCheck( JET_errIllegalOperation );
                 }
@@ -2160,7 +2188,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
         {
             return ErrERRCheck( JET_errNullInvalid );
         }
-        else if ( FFIELDAutoincrement( pfield->ffield ) )
+        else if ( FFIELDAutoincrement( pfield->ffield ) && !FFIELDDefault( pfield->ffield ) )
         {
             Assert( FFUCBMustSetAutoIncPrepared( pfucb ) );
             return ErrERRCheck( JET_errAutoIncrementNotSet );
@@ -2439,12 +2467,11 @@ LOCAL ERR ErrRECISetIFixedColumn(
 
         //  check for validity of data provided if we are explicitly setting an auto-inc column
         //
-        if ( FFIELDAutoincrement( pfield->ffield ) )
+        if ( FFIELDAutoincrement( pfield->ffield ) && FFUCBMustSetAutoIncPrepared( pfucb ) )
         {
-            //  ErrFILEIUpdateAutoInc() resets ptdb->FidAutoincrement() when creating
-            //  a new auto-inc column on a table which already contains rows.
-            //
-            const BOOL fNewColumn = ( ptdb->FidAutoincrement() == 0 );
+            Assert( !FFIELDDefault( pfield->ffield ) );
+            Assert( !FFIELDUserDefinedDefault( pfield->ffield ) );
+            Assert( ptdb->FidAutoincrement() != 0  );
 
             //  This function might be called with the template's TDB in a derived table.
             //  ptdb should be used for schema-related checks, while ptdbTable should be used
@@ -2452,6 +2479,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
             //  note that we expect all the schema-related properties to match anyways (see asserts below).
             //
             TDB* const ptdbTable = pfucb->u.pfcb->Ptdb();
+            Assert( ptdbTable->FidAutoincrement() != 0 );
 
 #ifdef DEBUG
             Assert( ptdbTable != ptdbNil );
@@ -2459,7 +2487,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
 
             // A template column is a column of a template table OR a column of a derived table that was
             // inherited from the template.
-            const BOOL fTemplateColumn = !fNewColumn && ptdb->FFixedTemplateColumn( ptdb->FidAutoincrement() );
+            const BOOL fTemplateColumn = ptdb->FFixedTemplateColumn( ptdb->FidAutoincrement() );
 
             // A derived column is a column of a derived table that was inherited from the template.
             const BOOL fDerivedColumn = ( ptdbTable != ptdb );
@@ -2467,7 +2495,6 @@ LOCAL ERR ErrRECISetIFixedColumn(
             if ( fDerivedColumn )
             {
                 Assert( fTemplateColumn );
-                Assert( !fNewColumn );
 
                 // Schema should match.
                 Assert( ptdb->FidAutoincrement() != 0 );
@@ -2476,33 +2503,14 @@ LOCAL ERR ErrRECISetIFixedColumn(
                 Assert( !!ptdb->F8BytesAutoInc() == !!ptdbTable->F8BytesAutoInc() );
             }
 
-            if ( fNewColumn )
-            {
-                Assert( !fTemplateColumn );
-                Assert( !fDerivedColumn );
-
-                // Uninitialized state.
-                Assert( ptdb->FidAutoincrement() == 0 );
-                Assert( !ptdb->FAutoIncOldFormat() );
-                Assert( ptdb->QwAutoincrement() == 0 );
-                Assert( ptdb->QwGetAllocatedAutoIncMax() == 0 );
-                Assert( ptdb->DwGetAutoIncBatchSize() == 1 );
-            }
-            else
-            {
-                // Schema.
-                Assert( ptdb->FidAutoincrement() != 0 );
-                Assert( ptdbTable->FidAutoincrement() != 0 );
-
-                // State must be initialized and valid.
-                // Unfortunately, nothing can be asserted w.r.t. the column in the template
-                // table (ptdb) because data may or may not be added to the template itself, which means
-                // the data state may or may not be initialized at this point.
-                Assert( ptdbTable->QwAutoincrement() > 0 );
-                Assert( ( !ptdbTable->FAutoIncOldFormat() && ptdbTable->QwGetAllocatedAutoIncMax() > 1 ) ||
-                        ( ptdbTable->FAutoIncOldFormat() && ptdbTable->QwGetAllocatedAutoIncMax() == 0 ) );
-                Assert( ptdbTable->DwGetAutoIncBatchSize() >= 1 );
-            }
+            // State must be initialized and valid.
+            // Unfortunately, nothing can be asserted w.r.t. the column in the template
+            // table (ptdb) because data may or may not be added to the template itself, which means
+            // the data state may or may not be initialized at this point.
+            Assert( ptdbTable->QwAutoincrement() > 0 );
+            Assert( ( !ptdbTable->FAutoIncOldFormat() && ptdbTable->QwGetAllocatedAutoIncMax() > 1 ) ||
+                    ( ptdbTable->FAutoIncOldFormat() && ptdbTable->QwGetAllocatedAutoIncMax() == 0 ) );
+            Assert( ptdbTable->DwGetAutoIncBatchSize() >= 1 );
 #endif  // DEBUG
 
             const QWORD qwDataValue = ptdb->F8BytesAutoInc() ?
@@ -2514,16 +2522,11 @@ LOCAL ERR ErrRECISetIFixedColumn(
             //
             if ( qwDataValue == 0 )
             {
-                Assert( FFUCBMustSetAutoIncPrepared( pfucb ) );
                 return ErrERRCheck( JET_errInvalidParameter );
             }
-            else if ( !fNewColumn )
+            else if ( qwDataValue >= ptdbTable->QwAutoincrement() )
             {
-                if ( qwDataValue >= ptdbTable->QwAutoincrement() )
-                {
-                    Assert( FFUCBMustSetAutoIncPrepared( pfucb ) );
-                    return ErrERRCheck( JET_errSetAutoIncrementTooHigh );
-                }
+                return ErrERRCheck( JET_errSetAutoIncrementTooHigh );
             }
         }
 
