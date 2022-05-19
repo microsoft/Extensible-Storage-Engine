@@ -569,6 +569,7 @@ class THashedLRUKCache
                         m_errVisitSlots( JET_errSuccess )
                 {
                     m_arrayCachedBlockUpdate.SetCapacityGrowth( CCachedBlockChunk::Ccbl() );
+                    m_arrayClusterSwap.SetCapacityGrowth( CCachedBlockChunk::Ccbl() );
                 }
 
                 size_t Ccbu() const { return m_arrayCachedBlockUpdate.Size(); }
@@ -588,6 +589,17 @@ class THashedLRUKCache
                     //  check that we visited all slots successfully
 
                     Call( m_errVisitSlots );
+
+                    //  check that we have no unmatched cluster swaps
+
+                    for ( int i = 0; i < m_arrayClusterSwap.Size(); i++ )
+                    {
+                        if (    m_arrayClusterSwap[ i ].ClnoA() != clnoInvalid &&
+                                m_arrayClusterSwap[ i ].ClnoB() != clnoInvalid )
+                        {
+                            Error( m_pc->ErrBlockCacheInternalError( "MismatchedClusterSwaps" ) );
+                        }
+                    }
 
                 HandleError:
                     return err;
@@ -637,6 +649,30 @@ class THashedLRUKCache
                         if ( slotAccepted.Clno() == slotstCurrent.Clno() )
                         {
                             Error( m_pc->ErrBlockCacheInternalError( "ClusterMustBeSwappedOnEvictOrInvalidate" ) );
+                        }
+                    }
+
+                    //  accumulate any cluster swaps made for this slot
+
+                    if ( slotAccepted.Clno() != slotstCurrent.Clno() )
+                    {
+                        BOOL fMatched = fFalse;
+
+                        for ( int i = 0; !fMatched && i < m_arrayClusterSwap.Size(); i++ )
+                        {
+                            if (    slotstCurrent.Clno() == m_arrayClusterSwap[ i ].ClnoA() &&
+                                    slotAccepted.Clno() == m_arrayClusterSwap[ i ].ClnoB() )
+                            {
+                                Call( ErrToErr<CArray<CClusterSwap>>( m_arrayClusterSwap.ErrSetEntry( i, CClusterSwap() ) ) );
+                                fMatched = fTrue;
+                            }
+                        }
+
+                        if ( !fMatched )
+                        {
+                            Call( ErrToErr<CArray<CClusterSwap>>( m_arrayClusterSwap.ErrSetEntry(   m_arrayClusterSwap.Size(),
+                                                                                                    CClusterSwap(   slotAccepted.Clno(),
+                                                                                                                    slotstCurrent.Clno() ) ) ) );
                         }
                     }
 
@@ -724,12 +760,48 @@ class THashedLRUKCache
 
             private:
 
+                class CClusterSwap
+                {
+                    public:
+
+                        CClusterSwap()
+                            :   m_clnoA( clnoInvalid ),
+                                m_clnoB( clnoInvalid )
+                        {
+                        }
+
+                        CClusterSwap( _In_ const ClusterNumber clnoA, _In_ const ClusterNumber clnoB )
+                            :   m_clnoA( clnoA ),
+                                m_clnoB( clnoB )
+                        {
+                        }
+
+                        ClusterNumber ClnoA() const { return m_clnoA; }
+                        ClusterNumber ClnoB() const { return m_clnoB; }
+
+                        CClusterSwap& operator=( _In_ const CClusterSwap& other )
+                        {
+                            this->m_clnoA = other.m_clnoA;
+                            this->m_clnoB = other.m_clnoB;
+
+                            return *this;
+                        }
+
+                    private:
+
+                        ClusterNumber               m_clnoA;
+                        ClusterNumber               m_clnoB;
+                };
+
+            private:
+
                 static const size_t         s_cvc                       = 2;
 
                 THashedLRUKCache<I>* const  m_pc;
                 CVisitContext               m_rgvc[ s_cvc ];
                 ERR                         m_errVisitSlots;
                 CArray<CCachedBlockUpdate>  m_arrayCachedBlockUpdate;
+                CArray<CClusterSwap>        m_arrayClusterSwap;
         };
 
         //  Cached Block Slab Visitor
@@ -816,12 +888,12 @@ class THashedLRUKCache
         {
             public:
 
-                static ERR ErrExecute(  _In_ THashedLRUKCache<I>* const                 pc,
-                                        _In_ ICachedBlockSlab* const                    pcbs,
-                                        _In_ CHashedLRUKCachedFileTableEntry<I>* const  pcfte,
-                                        _In_ const COffsets                             offsets )
+                static ERR ErrExecute(  _In_    THashedLRUKCache<I>* const                  pc,
+                                        _Inout_ ICachedBlockSlab** const                    ppcbs,
+                                        _In_    CHashedLRUKCachedFileTableEntry<I>* const   pcfte,
+                                        _In_    const COffsets                              offsets )
                 {
-                    return CInvalidateSlabVisitor( pc, pcbs, pcfte, offsets ).ErrInvalidateSlots();
+                    return CInvalidateSlabVisitor( pc, ppcbs, pcfte, offsets ).ErrInvalidateSlots();
                 }
 
                 ~CInvalidateSlabVisitor()
@@ -831,13 +903,13 @@ class THashedLRUKCache
 
             protected:
 
-                CInvalidateSlabVisitor( _In_ THashedLRUKCache<I>* const                 pc,
-                                        _In_ ICachedBlockSlab* const                    pcbs,
-                                        _In_ CHashedLRUKCachedFileTableEntry<I>* const  pcfte,
-                                        _In_ const COffsets                             offsets )
-                    :   CCachedBlockSlabVisitor( pcbs ),
+                CInvalidateSlabVisitor( _In_    THashedLRUKCache<I>* const                  pc,
+                                        _Inout_ ICachedBlockSlab** const                    ppcbs,
+                                        _In_    CHashedLRUKCachedFileTableEntry<I>* const   pcfte,
+                                        _In_    const COffsets                              offsets )
+                    :   CCachedBlockSlabVisitor( *ppcbs ),
                         m_pc( pc ),
-                        m_pcbs( pcbs ),
+                        m_pcbs( *ppcbs ),
                         m_pcfte( pcfte ),
                         m_offsets( offsets ),
                         m_pcbsJournal( NULL )
@@ -870,12 +942,8 @@ class THashedLRUKCache
 
                     //  update the affected slabs
 
-                    Call( ErrUpdateSlabs() );
-
-                    //  release the journal slab indicating if an error occurred
-
                 HandleError:
-                    m_pc->ReleaseSlab( err, &m_pcbsJournal );
+                    err = ErrAccumulateError( err, ErrUpdateSlabs() );
                     return err;
                 }
 
@@ -887,7 +955,6 @@ class THashedLRUKCache
                     const CCachedBlockId&   cbid                = slotstCurrent.Cbid();
                     const QWORD             ibCachedBlock       = (QWORD)cbid.Cbno() * cbCachedBlock;
                     const COffsets          offsetsCachedBlock  = COffsets( ibCachedBlock, ibCachedBlock + cbCachedBlock - 1 );
-                    CCachedBlockSlot        slotNewSwapped;
 
                     //  ignore any slot that is not for the target file
 
@@ -911,13 +978,9 @@ class THashedLRUKCache
                         Error( JET_errSuccess );
                     }
 
-                    //  get a fresh journal cluster for the slot we are invalidating
-
-                    Call( m_pc->ErrGetJournalCluster( slotNew, &m_pcbsJournal, &slotNewSwapped ) );
-
                     //  invalidate the slot
 
-                    Call( pcbs->ErrUpdateSlot( slotNewSwapped ) );
+                    Call( m_pc->ErrInvalidateSlot( pcbs, slotNew, &m_pcbsJournal ) );
 
                 HandleError:
                     return err;
@@ -932,17 +995,20 @@ class THashedLRUKCache
 
                     if ( m_pcbsJournal && m_pcbsJournal->FUpdated() )
                     {
-                        Call( m_pc->ErrUpdateSlabs( m_pcbs, m_pcbsJournal ) );
+                        Call( m_pc->ErrUpdateSlabs( &m_pcbs, &m_pcbsJournal ) );
                     }
 
+                    //  release our journal slab
+
                 HandleError:
+                    m_pc->ReleaseSlab( err, &m_pcbsJournal );
                     return err;
                 }
 
             private:
 
                 THashedLRUKCache<I>* const                  m_pc;
-                ICachedBlockSlab* const                     m_pcbs;
+                ICachedBlockSlab*&                          m_pcbs;
                 CHashedLRUKCachedFileTableEntry<I>* const   m_pcfte;
                 const COffsets                              m_offsets;
                 ICachedBlockSlab*                           m_pcbsJournal;
@@ -956,13 +1022,17 @@ class THashedLRUKCache
 
                 static ERR ErrExecute(  _In_    THashedLRUKCache<I>* const  pc, 
                                         _In_    CRequest* const             prequest,
-                                        _In_    ICachedBlockSlab* const     pcbs,
+                                        _Inout_ ICachedBlockSlab** const    ppcbs,
                                         _In_    const BOOL                  fRead,
                                         _In_    const QWORD                 cbRequested,
-                                        _Out_   QWORD* const                pcbProduced )
+                                        _Out_   QWORD* const                pcbProduced,
+                                        _Out_   QWORD* const                pcbWriteBackFailed )
                 {
                     ERR                 err = JET_errSuccess;
-                    CInspectSlabVisitor isv( pcbs );
+                    CInspectSlabVisitor isv( *ppcbs );
+
+                    *pcbProduced = 0;
+                    *pcbWriteBackFailed = 0;
 
                     //  determine the amount of the slab that is part of the read cache and write cache
 
@@ -973,16 +1043,18 @@ class THashedLRUKCache
                     //  those as well.
 
                     {
-                        CCleanSlabVisitor csv( pc, prequest, pcbs, fRead, cbRequested, isv.CbTotal(), isv.CbWriteCache(), isv.CbReadCache() );
+                        CCleanSlabVisitor csv( pc, prequest, ppcbs, fRead, cbRequested, isv.CbTotal(), isv.CbWriteCache(), isv.CbReadCache() );
                         Call( csv.ErrTryCleanSlots() );
 
                         *pcbProduced = csv.CbProduced();
+                        *pcbWriteBackFailed = csv.CbWriteBackFailed();
                     }
 
                 HandleError:
                     if ( err < JET_errSuccess )
                     {
                         *pcbProduced = 0;
+                        *pcbWriteBackFailed = 0;
                     }
                     return err;
                 }
@@ -996,18 +1068,18 @@ class THashedLRUKCache
 
             protected:
 
-                CCleanSlabVisitor(  _In_ THashedLRUKCache<I>* const pc,
-                                    _In_ CRequest* const            prequest,
-                                    _In_ ICachedBlockSlab* const    pcbs,
-                                    _In_ const BOOL                 fRead,
-                                    _In_ const QWORD                cbRequested,
-                                    _In_ const QWORD                cbTotal,
-                                    _In_ const QWORD                cbWriteCache,
-                                    _In_ const QWORD                cbReadCache )
-                    :   CCachedBlockSlabVisitor( pcbs ),
+                CCleanSlabVisitor(  _In_    THashedLRUKCache<I>* const  pc,
+                                    _In_    CRequest* const             prequest,
+                                    _Inout_ ICachedBlockSlab** const    ppcbs,
+                                    _In_    const BOOL                  fRead,
+                                    _In_    const QWORD                 cbRequested,
+                                    _In_    const QWORD                 cbTotal,
+                                    _In_    const QWORD                 cbWriteCache,
+                                    _In_    const QWORD                 cbReadCache )
+                    :   CCachedBlockSlabVisitor( *ppcbs ),
                         m_pc( pc ),
                         m_prequest( prequest ),
-                        m_pcbs( pcbs ),
+                        m_pcbs( *ppcbs ),
                         m_fRead( fRead ),
                         m_cbRequested( cbRequested ),
                         m_cbTotal( cbTotal ),
@@ -1024,6 +1096,7 @@ class THashedLRUKCache
                         m_cbInvalid( 0 ),
                         m_cbIORangeLocked( 0 ),
                         m_cbWriteBackPending( 0 ),
+                        m_cbWriteBackFailed( 0 ),
                         m_cbEvicted( 0 ),
                         m_cbInvalidatePending( 0 ),
                         m_pcbsJournal( NULL )
@@ -1050,7 +1123,7 @@ class THashedLRUKCache
                 {
                     ERR err = JET_errSuccess;
 
-                    //  perform any work necessary to ensure we have enough available space
+                    //  perform any evictions required to ensure we have enough available space
 
                     Call( ErrVisitSlots() );
 
@@ -1064,35 +1137,31 @@ class THashedLRUKCache
 
                     //  update the affected slabs
 
-                    Call( ErrUpdateSlabs() );
-
-                    //  trace our results
-
+                HandleError:
+                    err = ErrAccumulateError( err, ErrUpdateSlabs() );
                     OSTrace(    JET_tracetagBlockCacheOperations,
-                                OSFormat(   "C=%s R=0x%016I64x Clean cbRequested=%llu cbProduced=%llu (cbInvalid=%llu cbWriteBack=%llu cbEvicted=%llu cbInvalidated=%llu)",
+                                OSFormat(   "C=%s R=0x%016I64x Clean cbRequested=%llu cbProduced=%llu (cbInvalid=%llu cbWriteBack=%llu cbEvicted=%llu cbInvalidated=%llu) err=%d",
                                             OSFormatFileId( m_pc ),
                                             QWORD( m_prequest ),
                                             m_cbRequested,
                                             CbProduced(),
                                             m_cbInvalid,
-                                            m_cbWriteBackPending,
+                                            m_cbWriteBackPending - m_cbWriteBackFailed,
                                             m_cbEvicted,
-                                            m_cbInvalidatePending ) );
-
-                    //  release the journal slab indicating if an error occurred
-
-                HandleError:
-                    m_pc->ReleaseSlab( err, &m_pcbsJournal );
+                                            m_cbInvalidatePending,
+                                            err ) );
                     return err;
                 }
 
                 QWORD CbProduced() const
                 {
                     return  m_cbInvalid +
-                            m_cbWriteBackPending + 
+                            ( m_cbWriteBackPending - m_cbWriteBackFailed ) + 
                             m_cbEvicted + 
                             m_cbInvalidatePending;
                 }
+
+                QWORD CbWriteBackFailed() const { return m_cbWriteBackFailed; }
 
                 ERR ErrTryCleanSlot(    _In_ ICachedBlockSlab* const        pcbs,
                                         _In_ const CCachedBlockSlotState&   slotstCurrent,
@@ -1102,6 +1171,7 @@ class THashedLRUKCache
                     const CCachedBlockId&               cbid                = slotstCurrent.Cbid();
                     const QWORD                         ibCachedBlock       = (QWORD)cbid.Cbno() * cbCachedBlock;
                     const COffsets                      offsets             = COffsets( ibCachedBlock, ibCachedBlock - 1 + cbCachedBlock );
+                    BOOL                                fFileNoLongerExists = fFalse;
                     CHashedLRUKCachedFileTableEntry<I>* pcfte               = NULL;
                     BOOL                                fIORangeLocked      = fFalse;
                     BOOL                                fWriteBackRequired  = fFalse;
@@ -1154,7 +1224,7 @@ class THashedLRUKCache
 
                     //  try to obtain the cached file handle associated with the slot for internal use
 
-                    Call( ErrTryGetCachedFile( cbid, &pcfte ) );
+                    Call( ErrTryGetCachedFile( cbid, &fFileNoLongerExists, &pcfte ) );
 
                     //  try to get the IO range lock
 
@@ -1164,10 +1234,10 @@ class THashedLRUKCache
                     //  obsolete image of the data then try to write back its data to the cached file.  we will mark it
                     //  as written back after completion
 
-                    fWriteBackRequired =    slotstCurrent.FValid() &&
-                                            pcfte &&
-                                            !slotstCurrent.FPinned() &&
+                    fWriteBackRequired =    !fFileNoLongerExists &&
+                                            slotstCurrent.FValid() &&
                                             slotstCurrent.FDirty() &&
+                                            !slotstCurrent.FPinned() &&
                                             !slotstCurrent.FSuperceded();
 
                     if ( fWriteBackRequired && fIORangeLocked )
@@ -1205,7 +1275,7 @@ class THashedLRUKCache
                     //  if the slot couldn't be written back or evicted because it belongs to a cached file that no
                     //  longer exists then we will invalidate it
 
-                    if ( !pcfte )
+                    if ( fFileNoLongerExists )
                     {
                         m_cbInvalidatePending += cbCachedBlock;
 
@@ -1290,7 +1360,7 @@ class THashedLRUKCache
                     return err;
                 }
 
-                ERR ErrTryEvictSlot(    _In_        ICachedBlockSlab* const                     pcbsEvict,
+                ERR ErrTryEvictSlot(    _In_        ICachedBlockSlab* const                     pcbs,
                                         _In_        const CCachedBlockSlotState&                slotstCurrent,
                                         _In_        const CCachedBlockSlot&                     slotNew,
                                         _In_opt_    CHashedLRUKCachedFileTableEntry<I>* const   pcfte,
@@ -1298,9 +1368,8 @@ class THashedLRUKCache
                                         _In_        const BOOL                                  fIORangeLocked,
                                         _Out_       BOOL* const                                 pfEvicted )
                 {
-                    ERR                 err             = JET_errSuccess;
-                    BOOL                fEvicted        = fFalse;
-                    CCachedBlockSlot    slotNewSwapped;
+                    ERR     err         = JET_errSuccess;
+                    BOOL    fEvicted    = fFalse;
 
                     *pfEvicted = fFalse;
 
@@ -1326,13 +1395,9 @@ class THashedLRUKCache
                         Error( JET_errSuccess );
                     }
 
-                    //  get a fresh journal cluster for the slot we are evicting
+                    //  evict the slot
 
-                    Call( m_pc->ErrGetJournalCluster( slotNew, &m_pcbsJournal, &slotNewSwapped ) );
-
-                    //  update the evict slot to swap its cluster with the journal slot and to cause the eviction
-
-                    Call( pcbsEvict->ErrUpdateSlot( slotNewSwapped ) );
+                    Call( m_pc->ErrEvictSlot( pcbs, slotNew, &m_pcbsJournal ) );
 
                     //  emit telemetry
 
@@ -1369,7 +1434,7 @@ class THashedLRUKCache
 
                     for ( CWriteBack* pwb = m_ilWriteBack.PrevMost(); pwb; pwb = m_ilWriteBack.Next( pwb ) )
                     {
-                        Call( pwb->ErrRead() );
+                        pwb->StartRead();
                     }
 
                     Call( m_pc->PffCaching()->ErrIOIssue() );
@@ -1378,7 +1443,7 @@ class THashedLRUKCache
 
                     for ( CWriteBack* pwb = m_ilWriteBack.PrevMost(); pwb; pwb = m_ilWriteBack.Next( pwb ) )
                     {
-                        Call( pwb->ErrWrite() );
+                        pwb->StartWrite();
 
                         if ( pwb == m_ilWriteBack.NextMost() || pwb->Pcfte() != m_ilWriteBack.Next( pwb )->Pcfte() )
                         {
@@ -1390,25 +1455,41 @@ class THashedLRUKCache
                         }
                     }
 
-                    //  wait for the writes to succeed and flush the storage
+                    //  wait for the writes to succeed and then flush the cached file and record the result
 
                     for ( CWriteBack* pwb = m_ilWriteBack.PrevMost(); pwb; pwb = m_ilWriteBack.Next( pwb ) )
                     {
-                        Call( pwb->ErrComplete() );
+                        pwb->WaitForWriteCompletion();
 
                         if ( pwb == m_ilWriteBack.NextMost() || pwb->Pcfte() != m_ilWriteBack.Next( pwb )->Pcfte() )
                         {
-                            Call( pwb->Pcfte()->Pff()->ErrFlush( iofrBlockCache, iomCacheWriteThrough ) );
+                            const ERR errFlush = pwb->Pcfte()->Pff()->ErrFlush( iofrBlockCache, iomCacheWriteThrough );
+                            for (   CWriteBack* pwbT = pwb;
+                                    pwbT && pwbT->Pcfte() == pwb->Pcfte();
+                                    pwbT = m_ilWriteBack.Prev( pwbT ) )
+                            {
+                                pwbT->CompleteFlush( errFlush );
+                            }
                         }
                     }
 
-                    //  mark all the slots we just wrote back as clean
+                    //  mark all the slots we just successfully wrote back as clean
 
                     Call( CCleanSlotsSlabVisitor::ErrExecute( m_pcbs, &m_ilWriteBack ) );
 
-                    //  evict all the slots that we just wrote back
+                    //  evict all the slots that we just marked as clean
 
                     Call( CEvictCleanedSlotsSlabVisitor::ErrExecute( m_pc, m_pcbs, &m_ilWriteBack, &m_pcbsJournal ) );
+
+                    //  count how many write backs failed
+
+                    for ( CWriteBack* pwb = m_ilWriteBack.PrevMost(); pwb; pwb = m_ilWriteBack.Next( pwb ) )
+                    {
+                        if ( !pwb->FCompleted() )
+                        {
+                            m_cbWriteBackFailed += cbCachedBlock;
+                        }
+                    }
 
                 HandleError:
                     return err;
@@ -1444,27 +1525,33 @@ class THashedLRUKCache
                     {
                         //  update both slabs atomically
 
-                        Call( m_pc->ErrUpdateSlabs( m_pcbs, m_pcbsJournal ) );
+                        Call( m_pc->ErrUpdateSlabs( &m_pcbs, &m_pcbsJournal ) );
                     }
 
+                    //  release our journal slab
+
                 HandleError:
+                    m_pc->ReleaseSlab( err, &m_pcbsJournal );
                     return err;
                 }
 
-                ERR ErrTryGetCachedFile(    _In_    const CCachedBlockId&                       cbid, 
+                ERR ErrTryGetCachedFile(    _In_    const CCachedBlockId&                       cbid,
+                                            _Out_   BOOL* const                                 pfFileNoLongerExists,
                                             _Out_   CHashedLRUKCachedFileTableEntry<I>** const  ppcfte )
                 {
-                    return ErrTryGetCachedFile( m_pc, cbid, ppcfte );
+                    return ErrTryGetCachedFile( m_pc, cbid, pfFileNoLongerExists, ppcfte );
                 }
 
                 static ERR ErrTryGetCachedFile( _In_    THashedLRUKCache<I>* const                  pc,
-                                                _In_    const CCachedBlockId&                       cbid, 
+                                                _In_    const CCachedBlockId&                       cbid,
+                                                _Out_   BOOL* const                                 pfFileNoLongerExists, 
                                                 _Out_   CHashedLRUKCachedFileTableEntry<I>** const  ppcfte )
                 {
                     ERR                                 err             = JET_errSuccess;
                     CHashedLRUKCachedFileTableEntry<I>* pcfte           = NULL;
 
                     *ppcfte = NULL;
+                    *pfFileNoLongerExists = fFalse;
 
                     //  try to open the cached file for this cached block id
 
@@ -1474,23 +1561,35 @@ class THashedLRUKCache
                                                 fTrue,
                                                 &pcfte );
 
-                    //  if the file id was invalid then that something bad happened
-
-                    if ( err == JET_errInvalidParameter )
+                    switch ( err )
                     {
-                        Error( pc->ErrBlockCacheInternalError( "CleanSlabVisitorInvalidFileId" ) );
+                        //  if the file id was invalid then that something bad happened
+
+                        case JET_errInvalidParameter:
+                            Error( pc->ErrBlockCacheInternalError( "CleanSlabVisitorInvalidFileId" ) );
+
+                        //  if the file positively no longer exists then indicate that
+                        //
+                        //  NOTE:  this criteria is critical because this enables cached data to be invalidated
+                        //  NOTE:  currently a failure to find a volume even temporarily results in this error
+
+                        case JET_errFileNotFound:
+                            *pfFileNoLongerExists = fTrue;
+                            Error( JET_errSuccess );
+
+                        //  if we cannot access the file then it exists but we cannot access it right now
+
+                        case JET_errFileAccessDenied:
+                        case JET_errFileSystemCorruption:
+                        case JET_errDiskIO:
+                        case JET_errDiskReadVerificationFailure:
+                            Error( JET_errSuccess );
+
+                        //  fail on any other error
+
+                        default:
+                            Call( err );
                     }
-
-                    //  if the file no longer exists then don't return it
-
-                    if ( err == JET_errFileNotFound )
-                    {
-                        Error( JET_errSuccess );
-                    }
-
-                    //  fail on any other error
-
-                    Call( err );
 
                     //  return the cached file
 
@@ -1505,6 +1604,7 @@ class THashedLRUKCache
                         {
                             pc->ReleaseCachedFile( ppcfte );
                         }
+                        *pfFileNoLongerExists = fFalse;
                     }
                     return err;
                 }
@@ -1738,6 +1838,8 @@ class THashedLRUKCache
 
                         ~CWriteBack()
                         {
+                            m_msigRead.Wait();
+                            m_msigWrite.Wait();
                             OSMemoryPageFree( m_rgbData );
                             m_rgbData = NULL;
                             m_pc->ReleaseCachedFile( &m_pcfte );
@@ -1745,8 +1847,9 @@ class THashedLRUKCache
 
                         CHashedLRUKCachedFileTableEntry<I>* Pcfte() const { return m_pcfte; }
 
-                        ERR ErrRead()
+                        void StartRead()
                         {
+                            ERR                 err = JET_errSuccess;
                             TraceContextScope   tc( iorpBlockCache );
 
                             //  read the data from the caching file
@@ -1758,31 +1861,39 @@ class THashedLRUKCache
                                                     OSFormatFileId( m_pcfte->Pff() ),
                                                     OSFormat( m_slot ) ) );
 
-                            return m_pcbs->ErrReadCluster(  m_slot,
+                            Call( m_pcbs->ErrReadCluster(   m_slot,
                                                             m_offsets.Cb(), 
                                                             m_rgbData, 
                                                             ClusterReadComplete_, 
                                                             DWORD_PTR( this ),
-                                                            NULL );
+                                                            ClusterReadHandoff_ ) );
+
+                        HandleError:
+                            if ( err < JET_errSuccess )
+                            {
+                                ClusterReadComplete( err );
+                            }
                         }
 
-                        ERR ErrWrite()
+                        void StartWrite()
                         {
                             ERR                 err = JET_errSuccess;
                             TraceContextScope   tc( iorpBlockCache );
 
                             //  wait for the read to complete
 
-                            m_semRead.Acquire();
+                            m_msigRead.Wait();
                             Call( m_errRead );
 
                             //  verify the read
 
-                            err = m_pcbs->ErrVerifyCluster( m_slot, m_offsets.Cb(), m_rgbData );
-                            if ( err < JET_errSuccess )
+                            m_errVerify = m_pcbs->ErrVerifyCluster( m_slot, m_offsets.Cb(), m_rgbData );
+                            if ( m_errVerify < JET_errSuccess )
                             {
-                                m_errVerify = m_pc->ErrUnexpectedDataReadFailure(   "CCleanSlabVisitor::CWriteBack::ErrRead",
-                                                                                    err, 
+                                m_errVerify = m_pc->ErrUnexpectedDataReadFailure(   m_pcfte,
+                                                                                    m_offsets,
+                                                                                    "CCleanSlabVisitor::CWriteBack::ErrRead",
+                                                                                    m_errVerify, 
                                                                                     ErrERRCheck( JET_errDiskIO ) );
                                 Error( m_errVerify );
                             }
@@ -1809,26 +1920,40 @@ class THashedLRUKCache
                                                             iomCacheWriteThrough,
                                                             WriteComplete_, 
                                                             DWORD_PTR( this ),
-                                                            NULL ) );
+                                                            WriteHandoff_ ) );
 
                         HandleError:
-                            return err;
+                            if ( err < JET_errSuccess )
+                            {
+                                WriteComplete( err );
+                            }
                         }
 
-                        ERR ErrComplete()
+                        void WaitForWriteCompletion()
+                        {
+                            //  wait for the write to complete if started
+
+                            m_msigWrite.Wait();
+                        }
+
+                        void CompleteFlush( _In_ const ERR errFlush )
                         {
                             ERR err = JET_errSuccess;
 
-                            //  wait for the write to complete
+                            m_errFlush = errFlush;
 
-                            m_semWrite.Acquire();
+                            Call( m_errRead );
+                            Call( m_errVerify );
                             Call( m_errWrite );
+                            Call( m_errFlush );
 
                         HandleError:
-                            return err;
+                            m_errComplete = err;
                         }
 
-                        BOOL FAffectedSlot( _In_ const CCachedBlockSlot& slot )
+                        BOOL FCompleted() const { return m_errComplete >= JET_errSuccess; }
+
+                        BOOL FAffectedSlot( _In_ const CCachedBlockSlot& slot ) const
                         {
                             //  if the specified slot isn't the same as our slot then bail
 
@@ -1843,7 +1968,7 @@ class THashedLRUKCache
 
                             //  if we didn't complete the write then it didn't affect the slot
 
-                            if ( m_errWrite < JET_errSuccess )
+                            if ( !FCompleted() )
                             {
                                 return fFalse;
                             }
@@ -1916,27 +2041,41 @@ class THashedLRUKCache
                                 m_offsets( offsets ),
                                 m_rgbData( *prgbData ),
                                 m_errRead( JET_errInternalError ),
-                                m_semRead( CSyncBasicInfo( "THashedLRUKCache<I>::CCleanSlabVisitor::CWriteBack::m_semRead" ) ),
+                                m_msigRead( CSyncBasicInfo( "THashedLRUKCache<I>::CCleanSlabVisitor::CWriteBack::m_msigRead" ) ),
                                 m_errVerify( JET_errInternalError ),
                                 m_errWrite( JET_errInternalError ),
-                                m_semWrite( CSyncBasicInfo( "THashedLRUKCache<I>::CCleanSlabVisitor::CWriteBack::m_semWrite" ) )
+                                m_msigWrite( CSyncBasicInfo( "THashedLRUKCache<I>::CCleanSlabVisitor::CWriteBack::m_msigWrite" ) ),
+                                m_errFlush( JET_errInternalError ),
+                                m_errComplete( JET_errInternalError )
                         {
                             m_pcfte->AddRef();
                             *prgbData = NULL;
+                            m_msigRead.Set();
+                            m_msigWrite.Set();
                         }
 
                     private:
 
+                        void ClusterReadHandoff()
+                        {
+                            m_msigRead.Reset();
+                        }
+
                         void ClusterReadComplete( _In_ const ERR err )
                         {
                             m_errRead = err;
-                            m_semRead.Release();
+                            m_msigRead.Set();
+                        }
+
+                        void WriteHandoff()
+                        {
+                            m_msigWrite.Reset();
                         }
 
                         void WriteComplete( _In_ const ERR err )
                         {
                             m_errWrite = err;
-                            m_semWrite.Release();
+                            m_msigWrite.Set();
                         }
 
                         static void ClusterReadComplete_(   _In_ const ERR          err,
@@ -1947,6 +2086,15 @@ class THashedLRUKCache
 
                             CWriteBack* const pwb = (CWriteBack*)keyClusterRead;
                             pwb->ClusterReadComplete( err );
+                        }
+
+                        static void ClusterReadHandoff_( _In_ const DWORD_PTR keyClusterRead )
+                        {
+                            ICachedBlockSlab::PfnClusterHandoff pfnClusterHandoff = ClusterReadHandoff_;
+                            Unused( pfnClusterHandoff );
+
+                            CWriteBack* const pwb = (CWriteBack*)keyClusterRead;
+                            pwb->ClusterReadHandoff();
                         }
 
                         static void WriteComplete_( _In_                    const ERR               err,
@@ -1965,6 +2113,23 @@ class THashedLRUKCache
                             pwb->WriteComplete( err );
                         }
 
+                        static void WriteHandoff_(  _In_                    const ERR               err,
+                                                    _In_                    IFileAPI* const         pfapi,
+                                                    _In_                    const FullTraceContext& tc,
+                                                    _In_                    const OSFILEQOS         grbitQOS,
+                                                    _In_                    const QWORD             ibOffset,
+                                                    _In_                    const DWORD             cbData,
+                                                    _In_reads_( cbData )    const BYTE* const       pbData,
+                                                    _In_                    const DWORD_PTR         keyIOComplete,
+                                                    _In_                    void* const             pvIOContext )
+                        {
+                            IFileAPI::PfnIOHandoff pfnIOHandoff = WriteHandoff_;
+                            Unused( pfnIOHandoff );
+
+                            CWriteBack* const pwb = (CWriteBack*)keyIOComplete;
+                            pwb->WriteHandoff();
+                        }
+
                     private:
 
                         THashedLRUKCache<I>* const                                  m_pc;
@@ -1976,10 +2141,12 @@ class THashedLRUKCache
                         BYTE*                                                       m_rgbData;
                         typename CInvasiveList<CWriteBack, OffsetOfILE>::CElement   m_ile;
                         ERR                                                         m_errRead;
-                        CSemaphore                                                  m_semRead;
+                        CManualResetSignal                                          m_msigRead;
                         ERR                                                         m_errVerify;
                         ERR                                                         m_errWrite;
-                        CSemaphore                                                  m_semWrite;
+                        CManualResetSignal                                          m_msigWrite;
+                        ERR                                                         m_errFlush;
+                        ERR                                                         m_errComplete;
                 };
 
                 ERR ErrRegisterWriteBack(   _In_ const CCachedBlockSlotState&               slotstCurrent,
@@ -2218,8 +2385,7 @@ class THashedLRUKCache
                                                     _In_ const CCachedBlockSlotState&   slotstCurrent,
                                                     _In_ const CCachedBlockSlot&        slotNew ) override
                         {
-                            ERR                 err             = JET_errSuccess;
-                            CCachedBlockSlot    slotNewSwapped;
+                            ERR err = JET_errSuccess;
 
                             //  ignore any slot that is invalid
 
@@ -2235,13 +2401,9 @@ class THashedLRUKCache
                                 Error( JET_errSuccess );
                             }
 
-                            //  get a fresh journal cluster for the slot we are evicting
-
-                            Call( m_pc->ErrGetJournalCluster( slotNew, m_ppcbsJournal, &slotNewSwapped ) );
-
                             //  evict the slot
 
-                            Call( pcbs->ErrUpdateSlot( slotNewSwapped ) );
+                            Call( m_pc->ErrEvictSlot( pcbs, slotNew, m_ppcbsJournal ) );
 
                         HandleError:
                             return err;
@@ -2286,9 +2448,9 @@ class THashedLRUKCache
                                             _In_ const CCachedBlockSlotState&   slotstCurrent,
                                             _In_ const CCachedBlockSlot&        slotNew ) override
                         {
-                            ERR                                 err             = JET_errSuccess;
-                            CHashedLRUKCachedFileTableEntry<I>* pcfte           = NULL;
-                            CCachedBlockSlot                    slotNewSwapped;
+                            ERR                                 err                 = JET_errSuccess;
+                            BOOL                                fFileNoLongerExists = fFalse;
+                            CHashedLRUKCachedFileTableEntry<I>* pcfte               = NULL;
 
                             //  ignore any slot that is invalid
 
@@ -2299,20 +2461,16 @@ class THashedLRUKCache
 
                             //  ignore any slot containing data for a valid cached file
 
-                            Call( ErrTryGetCachedFile( m_pc, slotstCurrent.Cbid(), &pcfte ) );
+                            Call( ErrTryGetCachedFile( m_pc, slotstCurrent.Cbid(), &fFileNoLongerExists, &pcfte ) );
 
-                            if ( pcfte )
+                            if ( !fFileNoLongerExists )
                             {
                                 Error( JET_errSuccess );
                             }
 
-                            //  get a fresh journal cluster for the slot we are invalidating
-
-                            Call( m_pc->ErrGetJournalCluster( slotNew, m_ppcbsJournal, &slotNewSwapped ) );
-
                             //  invalidate the slot
 
-                            Call( pcbs->ErrUpdateSlot( slotNewSwapped ) );
+                            Call( m_pc->ErrInvalidateSlot( pcbs, slotNew, m_ppcbsJournal ) );
 
                         HandleError:
                             m_pc->ReleaseCachedFile( &pcfte );
@@ -2329,7 +2487,7 @@ class THashedLRUKCache
 
                 THashedLRUKCache<I>* const                              m_pc;
                 CRequest* const                                         m_prequest;
-                ICachedBlockSlab* const                                 m_pcbs;
+                ICachedBlockSlab*&                                      m_pcbs;
                 const BOOL                                              m_fRead;
                 const QWORD                                             m_cbRequested;
                 const QWORD                                             m_cbTotal;
@@ -2346,6 +2504,7 @@ class THashedLRUKCache
                 QWORD                                                   m_cbInvalid;
                 QWORD                                                   m_cbIORangeLocked;
                 QWORD                                                   m_cbWriteBackPending;
+                QWORD                                                   m_cbWriteBackFailed;
                 QWORD                                                   m_cbEvicted;
                 QWORD                                                   m_cbInvalidatePending;
                 ICachedBlockSlab*                                       m_pcbsJournal;
@@ -3231,13 +3390,14 @@ class THashedLRUKCache
                             _Inout_     ICachedBlockSlab** const    ppcbs,
                             _Out_opt_   BOOL* const                 pfChangedSlab = NULL );
 
-        ERR ErrUpdateSlab( _In_opt_ ICachedBlockSlab* const pcbs )
+        ERR ErrUpdateSlab( _Inout_opt_ ICachedBlockSlab** const ppcbs )
         {
-            return ErrUpdateSlabs( pcbs, NULL );
+            ICachedBlockSlab* pcbsEmpty = NULL;
+            return ErrUpdateSlabs( ppcbs, &pcbsEmpty );
         }
 
-        ERR ErrUpdateSlabs( _In_opt_ ICachedBlockSlab* const    pcbsA,
-                            _In_opt_ ICachedBlockSlab* const    pcbsB );
+        ERR ErrUpdateSlabs( _Inout_ ICachedBlockSlab** const    ppcbsA,
+                            _Inout_ ICachedBlockSlab** const    ppcbsB );
 
         ERR ErrScheduleSlabForWriteBack(    _In_opt_    ICachedBlockSlab* const pcbs,
                                             _In_        const JournalPosition   jpos,
@@ -3324,9 +3484,11 @@ class THashedLRUKCache
                             _Inout_ ICachedBlockSlab** const    ppcbs );
         void RequestFinalizeRead(   _In_    CRequest* const             prequestIO,
                                     _Inout_ ICachedBlockSlab** const    ppcbs );
-        ERR ErrUnexpectedDataReadFailure(   _In_ const char* const  szFunction,
-                                            _In_ const ERR          errFromCall,
-                                            _In_ const ERR          errToReturn );
+        ERR ErrUnexpectedDataReadFailure(   _In_ CHashedLRUKCachedFileTableEntry<I>* const  pcfte,
+                                            _In_ const COffsets                             offsets,
+                                            _In_ const char* const                          szFunction,
+                                            _In_ const ERR                                  errFromCall,
+                                            _In_ const ERR                                  errToReturn );
         void RequestWrite(  _In_    CRequest* const             prequest,
                             _In_    const BOOL                  fCachedFile, 
                             _In_    const BOOL                  fCachingFile,
@@ -3334,11 +3496,11 @@ class THashedLRUKCache
         void RequestFinalizeWrite(  _In_    CRequest* const             prequestIO,
                                     _Inout_ ICachedBlockSlab** const    ppcbs );
 
-        ERR ErrCleanSlab(   _In_ CRequest* const            prequest,
-                            _In_ ICachedBlockSlab* const    pcbs,
-                            _In_ const BOOL                 fRead,
-                            _In_    const QWORD             ib,
-                            _Inout_ QWORD* const            pcbClean );
+        ERR ErrCleanSlab(   _In_    CRequest* const             prequest,
+                            _Inout_ ICachedBlockSlab** const    ppcbs,
+                            _In_    const BOOL                  fRead,
+                            _In_    const QWORD                 ib,
+                            _Inout_ QWORD* const                pcbClean );
 
         void FailIO( _In_ CRequest* const prequestIO, _In_ const ERR err );
 
@@ -3416,9 +3578,21 @@ class THashedLRUKCache
         void ReferenceJournalSlab( _In_ const QWORD ibSlab );
         void ReleaseJournalSlab( _In_ const QWORD ibSlab );
 
-        ERR ErrGetJournalCluster(   _In_    const CCachedBlockSlot&     slot,
-                                    _Inout_ ICachedBlockSlab** const    ppcbsJournal,
-                                    _Out_   CCachedBlockSlot*           pslotSwapped );
+        ERR ErrEvictSlot(   _In_    ICachedBlockSlab*           pcbs,
+                            _In_    const CCachedBlockSlot&     slot,
+                            _Inout_ ICachedBlockSlab** const    ppcbsJournal )
+        {
+            return ErrEvictOrInvalidateSlot( pcbs, slot, ppcbsJournal );
+        }
+        ERR ErrInvalidateSlot(  _In_    ICachedBlockSlab*           pcbs,
+                                _In_    const CCachedBlockSlot&     slot,
+                                _Inout_ ICachedBlockSlab** const    ppcbsJournal )
+        {
+            return ErrEvictOrInvalidateSlot( pcbs, slot, ppcbsJournal );
+        }
+        ERR ErrEvictOrInvalidateSlot(   _In_    ICachedBlockSlab*           pcbs,
+                                        _In_    const CCachedBlockSlot&     slot,
+                                        _Inout_ ICachedBlockSlab** const    ppcbsJournal );
 
         ERR ErrStartThreadpool();
         void StopThreadpool();
@@ -4030,16 +4204,12 @@ ERR THashedLRUKCache<I>::ErrInvalidate( _In_ const VolumeId     volumeid,
 
         //  invalidate all matching cached blocks from this slab
 
-        Call( CInvalidateSlabVisitor::ErrExecute( this, pcbs, pcfte, offsets ) );
+        Call( CInvalidateSlabVisitor::ErrExecute( this, &pcbs, pcfte, offsets ) );
 
         //  note that we have invalidated this slab
 
         cSlabInvalidated++;
     }
-
-    //  update the current slab
-
-    Call( ErrUpdateSlab( pcbs ) );
 
 HandleError:
     ReleaseSlab( err, &pcbs );
@@ -5166,7 +5336,7 @@ ERR THashedLRUKCache<I>::ErrChangeSlabs(    _In_        const CCachedBlockId&   
         {
             //  update this slab
 
-            Call( ErrUpdateSlab( pcbs ) );
+            Call( ErrUpdateSlab( &pcbs ) );
 
             //  release this slab
 
@@ -5205,12 +5375,12 @@ HandleError:
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrUpdateSlabs(    _In_opt_ ICachedBlockSlab* const    pcbsA,
-                                            _In_opt_ ICachedBlockSlab* const    pcbsB )
+ERR THashedLRUKCache<I>::ErrUpdateSlabs(    _Inout_ ICachedBlockSlab** const    ppcbsA,
+                                            _Inout_ ICachedBlockSlab** const    ppcbsB )
 {
     ERR                         err             = JET_errSuccess;
     const size_t                cpcbs           = 2;
-    ICachedBlockSlab*           rgpcbs[ cpcbs ] = { pcbsA, pcbsB };
+    ICachedBlockSlab*           rgpcbs[ cpcbs ] = { *ppcbsA, *ppcbsB };
     CUpdateSlabVisitor          usv( this, rgpcbs[ 0 ], rgpcbs[ 1 ] );
     BOOL                        fUpdated        = fFalse;
     CCacheUpdateJournalEntry*   pcuje           = NULL;
@@ -5287,18 +5457,35 @@ ERR THashedLRUKCache<I>::ErrUpdateSlabs(    _In_opt_ ICachedBlockSlab* const    
     }
 
     //  schedule slabs for write back
+    //
+    //  NOTE:  this must succeed to ensure that the state of the journal and slabs cannot diverge (e.g. we cannot allow
+    //  a subsequent call to ICachedBlockSlab::RevertChanges to undo a change we put in the journal)
 
     for ( size_t ipcbs = 0; ipcbs < cpcbs; ipcbs++ )
     {
         if ( rgpcbs[ ipcbs ] && rgpcbs[ ipcbs ]->FUpdated() )
         {
-            Call( ErrScheduleSlabForWriteBack( rgpcbs[ ipcbs ], jpos, jposEnd ) );
+            err = ErrScheduleSlabForWriteBack( rgpcbs[ ipcbs ], jpos, jposEnd );
+            Assert( err >= JET_errSuccess || err == JET_errOutOfMemory );
+            EnforceSz( err >= JET_errSuccess, "UpdateSlabs" );
         }
     }
+
+    //  on failure, release all slabs, reverting all changes, to ensure we never save a partial update
 
 HandleError:
     delete pjeCompressed;
     delete pcuje;
+    if ( err < JET_errSuccess )
+    {
+        for ( size_t ipcbs = 0; ipcbs < cpcbs; ipcbs++ )
+        {
+            ReleaseSlab( err, &rgpcbs[ ipcbs ] );
+        }
+
+        *ppcbsA = NULL;
+        *ppcbsB = NULL;
+    }
     return err;
 }
 
@@ -6593,8 +6780,7 @@ void THashedLRUKCache<I>::RequestFinalizeIO( _In_ CRequest* const prequestIO )
     //  failure to update this particular slab.  this is OK because this means the journal and thus the entire cache
     //  are about to go down
 
-    const ERR err = ErrUpdateSlab( pcbs );
-    ReleaseSlab( err, &pcbs );
+    const ERR err = ErrUpdateSlab( &pcbs );
     if ( err < JET_errSuccess )
     {
         if ( !prequestIO->FRead() )
@@ -6602,6 +6788,10 @@ void THashedLRUKCache<I>::RequestFinalizeIO( _In_ CRequest* const prequestIO )
             FailIO( prequestIO, err );
         }
     }
+
+    //  release the current slab
+
+    ReleaseSlab( err, &pcbs );
 }
 
 template<class I>
@@ -6637,12 +6827,15 @@ void THashedLRUKCache<I>::RequestIO(    _In_    CRequest* const prequestIO,
     //  failure to update this particular slab.  this is OK because this means the journal and thus the entire cache
     //  are about to go down
 
-    const ERR err = ErrUpdateSlab( pcbs );
-    ReleaseSlab( err, &pcbs );
+    const ERR err = ErrUpdateSlab( &pcbs );
     if ( err < JET_errSuccess )
     {
         FailIO( prequestIO, err );
     }
+
+    //  release the current slab
+
+    ReleaseSlab( err, &pcbs );
 }
 
 template<class I>
@@ -6819,7 +7012,9 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
             err = pcbs->ErrVerifyCluster( slot, cbCachedBlock, pbCachedBlock );
             if ( err < JET_errSuccess )
             {
-                Error( ErrUnexpectedDataReadFailure(    "RequestFinalizeRead",
+                Error( ErrUnexpectedDataReadFailure(    prequest->Pcfte(),
+                                                        COffsets( ibCachedBlock, ibCachedBlock + ( cbCachedBlock - 1 ) ),
+                                                        "RequestFinalizeRead",
                                                         err,
                                                         FVerificationError( err ) ?
                                                             err :
@@ -6842,7 +7037,7 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
             //
             //  NOTE:  this can wait on cached file IO if the async clean process has fallen behind
 
-            Call( ErrCleanSlab( prequest, pcbs, fTrue, ibCachedBlock, &cbClean ) );
+            Call( ErrCleanSlab( prequest, &pcbs, fTrue, ibCachedBlock, &cbClean ) );
 
             //  try to get a slot to cache this cluster
 
@@ -6871,16 +7066,33 @@ HandleError:
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrUnexpectedDataReadFailure(  _In_ const char* const  szFunction,
-                                                        _In_ const ERR          errFromCall,
-                                                        _In_ const ERR          errToReturn )
+ERR THashedLRUKCache<I>::ErrUnexpectedDataReadFailure(  _In_ CHashedLRUKCachedFileTableEntry<I>* const  pcfte,
+                                                        _In_ const COffsets                             offsets,
+                                                        _In_ const char* const                          szFunction,
+                                                        _In_ const ERR                                  errFromCall,
+                                                        _In_ const ERR                                  errToReturn )
 {
+    const QWORD ibOffset                                        = rounddn( offsets.IbStart(), pcfte->CbBlockSize() );
+    const DWORD cbLength                                        = pcfte->CbBlockSize();
+    WCHAR       wszCachedFilePath[ IFileSystemAPI::cchPathMax ] = { 0 };
+
+    CallS( pcfte->Pff()->ErrPath( wszCachedFilePath ) );
+
     OSTraceSuspendGC();
     BlockCacheNotableEvent( OSFormat(   "UnexpectedDataReadFailure:%hs:%i:%i", 
                                         szFunction, 
                                         errFromCall, 
                                         errToReturn ) );
     OSTraceResumeGC();
+
+    OSFileIIOReportError(   Pfsconfig(),
+                            wszCachedFilePath,
+                            fFalse,
+                            ibOffset,
+                            cbLength,
+                            errFromCall,
+                            0,
+                            0 );
 
     return errToReturn;
 }
@@ -6980,7 +7192,7 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
 
                 const BOOL fUpdatedBeforeClean = pcbs->FUpdated();
 
-                Call( ErrCleanSlab( prequest, pcbs, fFalse, ibCachedBlock, &cbClean ) );
+                Call( ErrCleanSlab( prequest, &pcbs, fFalse, ibCachedBlock, &cbClean ) );
 
                 if (    fUpdatedBeforeClean &&
                         !pcbs->FUpdated() &&
@@ -7090,11 +7302,11 @@ void THashedLRUKCache<I>::RequestFinalizeWrite( _In_    CRequest* const         
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrCleanSlab(  _In_ CRequest* const            prequest,
-                                        _In_ ICachedBlockSlab* const    pcbs,
-                                        _In_ const BOOL                 fRead,
-                                        _In_    const QWORD             ib,
-                                        _Inout_ QWORD* const            pcbClean )
+ERR THashedLRUKCache<I>::ErrCleanSlab(  _In_    CRequest* const             prequest,
+                                        _Inout_ ICachedBlockSlab** const    ppcbs,
+                                        _In_    const BOOL                  fRead,
+                                        _In_    const QWORD                 ib,
+                                        _Inout_ QWORD* const                pcbClean )
 {
     ERR         err                 = JET_errSuccess;
 
@@ -7110,16 +7322,34 @@ ERR THashedLRUKCache<I>::ErrCleanSlab(  _In_ CRequest* const            prequest
     const QWORD cbCleanSlice        = min( cbBlockSize, cbCachedFilePerSlab - ibSlice );
     const QWORD cbClean             = min( cbCleanBlock, cbCleanSlice );
 
-    //  if we don't already have enough then clean
+    const QWORD cCleanMax           = m_pch->CbCachingFilePerSlab() / cbBlockSize;
 
-    if ( *pcbClean < cbClean )
+    //  if we don't already have enough then clean until we do or we cannot clean any more
+
+    QWORD   cClean                  = 0;
+    QWORD   cbWriteBackFailedPrev   = 0;
+    QWORD   cbWriteBackFailed       = 0;
+
+    while ( cbClean > *pcbClean &&
+            ( cClean == 0 || cbWriteBackFailed > cbWriteBackFailedPrev ) &&
+            cClean < cCleanMax )
     {
-        Call( CCleanSlabVisitor::ErrExecute( this, prequest, pcbs, fRead, cbClean, pcbClean ) );
+        cbWriteBackFailedPrev = cbWriteBackFailed;
+
+        Call( CCleanSlabVisitor::ErrExecute(    this, 
+                                                prequest, 
+                                                ppcbs, 
+                                                fRead, 
+                                                cbClean + cbWriteBackFailedPrev,
+                                                pcbClean, 
+                                                &cbWriteBackFailed ) );
+
+        cClean++;
     }
 
     //  if we failed to clean enough then fail
 
-    if ( *pcbClean < cbClean )
+    if ( cbClean > *pcbClean )
     {
         Error( ErrBlockCacheInternalError( "ErrCleanSlab" ) );
     }
@@ -7692,23 +7922,24 @@ void THashedLRUKCache<I>::ReleaseJournalSlab( _In_ const QWORD ibSlab )
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrGetJournalCluster(  _In_    const CCachedBlockSlot&     slot,
-                                                _Inout_ ICachedBlockSlab** const    ppcbsJournal,
-                                                _Out_   CCachedBlockSlot*           pslotSwapped )
+ERR THashedLRUKCache<I>::ErrEvictOrInvalidateSlot(  _In_    ICachedBlockSlab*           pcbs,
+                                                    _In_    const CCachedBlockSlot&     slot,
+                                                    _Inout_ ICachedBlockSlab** const    ppcbsJournal )
 {
     ERR                 err                 = JET_errSuccess;
+    ICachedBlockSlab*&  pcbsJournal         = *ppcbsJournal;
     CCachedBlockSlot    slotJournal;
     CCachedBlockSlot    slotJournalSwapped;
-
-    new ( pslotSwapped ) CCachedBlockSlot();
+    CCachedBlockSlot    slotSwapped;
+    BOOL                fUpdated            = fFalse;
 
     //  get the journal slab we will use
     //
     //  NOTE:  this may wait for other threads to complete access
 
-    if ( !*ppcbsJournal )
+    if ( !pcbsJournal )
     {
-        Call( ErrGetJournalSlab( ppcbsJournal ) );
+        Call( ErrGetJournalSlab( &pcbsJournal ) );
     }
 
     //  get an available cluster
@@ -7720,7 +7951,7 @@ ERR THashedLRUKCache<I>::ErrGetJournalCluster(  _In_    const CCachedBlockSlot& 
     //  until the journal is flushed.  if there are no slots available then we will flush the journal
     //  and evict all FValid and !FDirty slots and try again
 
-    Call( (*ppcbsJournal)->ErrGetSlotForWrite( s_cbidInvalid, 0, NULL, &slotJournal ) );
+    Call( pcbsJournal->ErrGetSlotForWrite( s_cbidInvalid, 0, NULL, &slotJournal ) );
 
     if ( !slotJournal.FValid() )
     {
@@ -7732,25 +7963,39 @@ ERR THashedLRUKCache<I>::ErrGetJournalCluster(  _In_    const CCachedBlockSlot& 
 
         //  mark all used clusters as free
 
-        Call( CMarkUsedJournalClustersAsFreeSlabVisitor::ErrExecute( (*ppcbsJournal) ) );
+        Call( CMarkUsedJournalClustersAsFreeSlabVisitor::ErrExecute( pcbsJournal ) );
     }
 
-    Call( (*ppcbsJournal)->ErrGetSlotForWrite( s_cbidInvalid, 0, NULL, &slotJournal ) );
+    Call( pcbsJournal->ErrGetSlotForWrite( s_cbidInvalid, 0, NULL, &slotJournal ) );
     Assert( slotJournal.FValid() );
     Assert( slotJournal.FDirty() );
 
     //  swap the clusters backing these slots
 
-    CCachedBlockSlot::SwapClusters( slotJournal, slot, &slotJournalSwapped, pslotSwapped );
+    CCachedBlockSlot::SwapClusters( slot, slotJournal, &slotSwapped, &slotJournalSwapped );
+
+    //  update the evict slot to swap its cluster with the journal slot
+
+    Call( pcbs->ErrUpdateSlot( slotSwapped ) );
+    fUpdated = fTrue;
 
     //  update the journal slot to swap its cluster with the evict slot
 
-    Call( (*ppcbsJournal)->ErrUpdateSlot( slotJournalSwapped ) );
+    Call( pcbsJournal->ErrUpdateSlot( slotJournalSwapped ) );
+
+    //  if we failed partway through the swap then we must back out the swap
+    //
+    //  NOTE:  we cannot ever leave our state such that a partial update has occurred or we might double allocate a
+    //  cluster which would result in continuing corruption
 
 HandleError:
     if ( err < JET_errSuccess )
     {
-        new ( pslotSwapped ) CCachedBlockSlot();
+        if ( fUpdated )
+        {
+            CallS( pcbs->ErrUpdateSlot( slot ) );
+            CallS( pcbsJournal->ErrUpdateSlot( slotJournal ) );
+        }
     }
     return err;
 }

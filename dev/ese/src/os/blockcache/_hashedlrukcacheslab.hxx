@@ -267,6 +267,7 @@ class TCachedBlockSlab  //  cbs
                                 _In_                const DWORD                     dwECCActual );
 
         void RevertUnacceptedUpdates( _In_ const BOOL fPermanently );
+        void RevertUnacceptedUpdate( _In_ CUpdate* const pupdate, _In_ const BOOL fPermanently );
         void RestoreUnacceptedUpdates();
         void InvalidateCachedRead();
 
@@ -722,8 +723,8 @@ class TCachedBlockSlab  //  cbs
         ERR                                             m_errSlab;
         BOOL                                            m_fIgnoreVerificationErrors;
         TouchNumber                                     m_tonoLast;
-        BOOL*                                           m_rgfUpdated;
-        BOOL                                            m_fUpdated;
+        int*                                            m_rgcUpdate;
+        int                                             m_cUpdate;
         BOOL*                                           m_rgfDirty;
         BOOL                                            m_fDirty;
         CInvasiveList<CUpdate, CUpdate::OffsetOfILE>    m_ilUpdate;
@@ -744,7 +745,7 @@ INLINE TCachedBlockSlab<I>::~TCachedBlockSlab()
 {
     RevertUpdates();
     delete[] m_rgfSlotSuperceded;
-    delete[] m_rgfUpdated;
+    delete[] m_rgcUpdate;
     delete[] m_rgfDirty;
     delete[] m_rgerrChunk;
     OSMemoryPageFree( m_rgcbc );
@@ -909,6 +910,8 @@ INLINE ERR TCachedBlockSlab<I>::ErrUpdateSlot( _In_ const CCachedBlockSlot& slot
     const size_t            icbc                = Icbc( slotNew.Chno() );
     const size_t            icbl                = Icbl( slotNew.Slno() );
     CCachedBlockSlotState   slotstCurrent;
+    CUpdate*                pupdateFirst        = NULL;
+    CUpdate*                pupdateLast         = NULL;
     BOOL                    fSupercededCurrent  = fFalse;
     BOOL                    fSupercededNew      = fFalse;
     CCachedBlockSlotState   slotstSuperceded;
@@ -930,12 +933,20 @@ INLINE ERR TCachedBlockSlab<I>::ErrUpdateSlot( _In_ const CCachedBlockSlot& slot
 
     //  lookup the current slot state
 
-    GetSlotState( icbc, icbl, &slotstCurrent );
+    GetSlotState( icbc, icbl, &slotstCurrent, &pupdateFirst, &pupdateLast );
 
     //  if there is no actual change to the state then just succeed immediately
 
     if ( memcmp( &slotstCurrent, &slotNew, sizeof( slotNew ) ) == 0 )
     {
+        Error( JET_errSuccess );
+    }
+
+    //  if this change undoes the last update then revert it and succeed
+
+    if ( pupdateLast && memcmp( &pupdateLast->SlotBefore(), &slotNew, sizeof( slotNew ) ) == 0 )
+    {
+        RevertUnacceptedUpdate( pupdateLast, fTrue );
         Error( JET_errSuccess );
     }
 
@@ -993,13 +1004,13 @@ INLINE ERR TCachedBlockSlab<I>::ErrUpdateSlot( _In_ const CCachedBlockSlot& slot
 
     //  ensure we have our updated and dirty state storage allocated
 
-    if ( !m_rgfUpdated || !m_rgfDirty )
+    if ( !m_rgcUpdate || !m_rgfDirty )
     {
-        Alloc( m_rgfUpdated = m_rgfUpdated ? m_rgfUpdated : new BOOL[ m_ccbc ] );
+        Alloc( m_rgcUpdate = m_rgcUpdate ? m_rgcUpdate : new int[ m_ccbc ] );
         Alloc( m_rgfDirty = m_rgfDirty ? m_rgfDirty : new BOOL[ m_ccbc ] );
         for ( size_t icbcT = 0; icbcT < m_ccbc; icbcT++ )
         {
-            m_rgfUpdated[ icbcT ] = fFalse;
+            m_rgcUpdate[ icbcT ] = 0;
             m_rgfDirty[ icbcT ] = fFalse;
         }
     }
@@ -1022,8 +1033,8 @@ INLINE ERR TCachedBlockSlab<I>::ErrUpdateSlot( _In_ const CCachedBlockSlot& slot
 
     //  remember that we have updated this chunk and the slab
 
-    m_rgfUpdated[ icbc ] = fTrue;
-    m_fUpdated = fTrue;
+    m_rgcUpdate[ icbc ]++;
+    m_cUpdate++;
 
     //  update the superceded state
 
@@ -1416,7 +1427,7 @@ HandleError:
 template< class I  >
 INLINE BOOL TCachedBlockSlab<I>::FUpdated()
 {
-    return m_fUpdated;
+    return m_cUpdate > 0;
 }
 
 template< class I  >
@@ -1462,12 +1473,12 @@ INLINE ERR TCachedBlockSlab<I>::ErrAcceptUpdates()
 
     for ( size_t icbc = 0; icbc < m_ccbc && m_rgfDirty; icbc++ )
     {
-        m_rgfDirty[ icbc ] = m_rgfDirty[ icbc ] || m_rgfUpdated[ icbc ];
-        m_rgfUpdated[ icbc ] = fFalse;
+        m_rgfDirty[ icbc ] = m_rgfDirty[ icbc ] || m_rgcUpdate[ icbc ] > 0;
+        m_rgcUpdate[ icbc ] = 0;
     }
 
-    m_fDirty = m_fDirty || m_fUpdated;
-    m_fUpdated = fFalse;
+    m_fDirty = m_fDirty || m_cUpdate > 0;
+    m_cUpdate = 0;
 
 HandleError:
     return err;
@@ -1482,12 +1493,12 @@ INLINE void TCachedBlockSlab<I>::RevertUpdates()
 
     //  reset our updated chunk / slab status
 
-    for ( size_t icbc = 0; icbc < m_ccbc && m_rgfUpdated; icbc++ )
+    for ( size_t icbc = 0; icbc < m_ccbc && m_rgcUpdate; icbc++ )
     {
-        m_rgfUpdated[ icbc ] = fFalse;
+        m_rgcUpdate[ icbc ] = 0;
     }
 
-    m_fUpdated = fFalse;
+    m_cUpdate = 0;
 }
 
 template< class I  >
@@ -1595,8 +1606,8 @@ INLINE TCachedBlockSlab<I>::TCachedBlockSlab(   _In_    IFileFilter* const      
         m_errSlab( JET_errSuccess ),
         m_fIgnoreVerificationErrors( fFalse  ),
         m_tonoLast( tonoInvalid ),
-        m_rgfUpdated( NULL ),
-        m_fUpdated( fFalse ),
+        m_rgcUpdate( NULL ),
+        m_cUpdate( 0 ),
         m_rgfDirty( NULL ),
         m_fDirty( fFalse ),
         m_rgfSlotSuperceded( NULL ),
@@ -2665,27 +2676,36 @@ INLINE void TCachedBlockSlab<I>::RevertUnacceptedUpdates( _In_ const BOOL fPerma
     CUpdate* pupdatePrev = NULL;
     for ( CUpdate* pupdate = m_ilUpdate.NextMost(); pupdate; pupdate = pupdatePrev )
     {
-        const size_t                icbc = Icbc( pupdate->SlotBefore().Chno() );
-        CCachedBlockChunk* const    pcbc = Pcbc( icbc );
-        const size_t                icbl = Icbl( pupdate->SlotBefore().Slno() );
-        CCachedBlock* const         pcbl = pcbc->Pcbl( icbl );
-
-        UtilMemCpy( pcbl, &pupdate->SlotBefore(), sizeof( *pcbl ) );
-
-        m_rgfSlotSuperceded[ (size_t)Islot( icbc, icbl ) ] = pupdate->FSupercededBefore();
-
-        if ( pupdate->ChnoSuperceded() != chnoInvalid )
-        {
-            m_rgfSlotSuperceded[ (size_t)Islot( Icbc( pupdate->ChnoSuperceded() ), Icbl( pupdate->SlnoSuperceded() ) ) ] = fFalse;
-        }
-
         pupdatePrev = m_ilUpdate.Prev( pupdate );
 
-        if ( fPermanently )
-        {
-            m_ilUpdate.Remove( pupdate );
-            delete pupdate;
-        }
+        RevertUnacceptedUpdate( pupdate, fPermanently );
+    }
+}
+
+template<class I>
+INLINE void TCachedBlockSlab<I>::RevertUnacceptedUpdate( _In_ CUpdate* const pupdate, _In_ const BOOL fPermanently )
+{
+    const size_t                icbc = Icbc( pupdate->SlotBefore().Chno() );
+    CCachedBlockChunk* const    pcbc = Pcbc( icbc );
+    const size_t                icbl = Icbl( pupdate->SlotBefore().Slno() );
+    CCachedBlock* const         pcbl = pcbc->Pcbl( icbl );
+
+    UtilMemCpy( pcbl, &pupdate->SlotBefore(), sizeof( *pcbl ) );
+
+    m_rgfSlotSuperceded[ (size_t)Islot( icbc, icbl ) ] = pupdate->FSupercededBefore();
+
+    if ( pupdate->ChnoSuperceded() != chnoInvalid )
+    {
+        m_rgfSlotSuperceded[ (size_t)Islot( Icbc( pupdate->ChnoSuperceded() ), Icbl( pupdate->SlnoSuperceded() ) ) ] = fFalse;
+    }
+
+    m_rgcUpdate[ icbc ]--;
+    m_cUpdate--;
+
+    if ( fPermanently )
+    {
+        m_ilUpdate.Remove( pupdate );
+        delete pupdate;
     }
 
     InvalidateCachedRead();
@@ -2709,6 +2729,9 @@ INLINE void TCachedBlockSlab<I>::RestoreUnacceptedUpdates()
         {
             m_rgfSlotSuperceded[ (size_t)Islot( Icbc( pupdate->ChnoSuperceded() ), Icbl( pupdate->SlnoSuperceded() ) ) ] = fTrue;
         }
+
+        m_rgcUpdate[ icbc ]++;
+        m_cUpdate++;
     }
 
     InvalidateCachedRead();

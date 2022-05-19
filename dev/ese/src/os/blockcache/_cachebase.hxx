@@ -411,6 +411,17 @@ class TCacheBase  //  c
 
                 void Complete()
                 {
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s R=0x%016I64x F=%s Request %s %s ib=%llu cb=%llu Complete %d",
+                                            OSFormatFileId( Pc() ),
+                                            QWORD( this ),
+                                            OSFormatFileId( Pcfte()->Pff() ),
+                                            FSync() ? "Sync" : "Async",
+                                            FRead() ? "Read" : "Write",
+                                            Offsets().IbStart(),
+                                            Offsets().Cb(),
+                                            m_err ) );
+
                     const VolumeId      volumeid    = m_pcfte->Volumeid();
                     const FileId        fileid      = m_pcfte->Fileid();
                     const FileSerial    fileserial  = m_pcfte->Fileserial();
@@ -430,17 +441,6 @@ class TCacheBase  //  c
                                         m_pbData,
                                         m_keyComplete );
                     }
-
-                    OSTrace(    JET_tracetagBlockCacheOperations,
-                                OSFormat(   "C=%s R=0x%016I64x F=%s Request %s %s ib=%llu cb=%llu Complete %d",
-                                            OSFormatFileId( Pc() ),
-                                            QWORD( this ),
-                                            OSFormat( volumeid, fileid, fileserial ),
-                                            FSync() ? "Sync" : "Async",
-                                            FRead() ? "Read" : "Write",
-                                            Offsets().IbStart(),
-                                            Offsets().Cb(),
-                                            m_err ) );
 
                     Release();
                 }

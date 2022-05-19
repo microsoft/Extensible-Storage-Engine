@@ -590,6 +590,16 @@ VOID OSFileIIOReportError(
     const DWORD errSystem,
     const QWORD cmsecIOElapsed );
 
+VOID OSFileIIOReportError(
+    _In_ IFileSystemConfiguration* const    pfsconfig,
+    _In_ const WCHAR* const                 wszAbsPath,
+    _In_ const BOOL                         fWrite,
+    _In_ const QWORD                        ibOffset,
+    _In_ const DWORD                        cbLength,
+    _In_ const ERR                          err,
+    _In_ const DWORD                        errSystem,
+    _In_ const QWORD                        cmsecIOElapsed );
+
 #endif  //  __OSFILE_HXX_INCLUDED
 
 
