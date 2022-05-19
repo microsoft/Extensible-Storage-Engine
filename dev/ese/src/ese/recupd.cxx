@@ -1714,13 +1714,38 @@ LOCAL ERR ErrRECIInsert(
     {
         const BOOL      fTemplateColumn = ptdb->FFixedTemplateColumn( ptdb->FidAutoincrement() );
         const COLUMNID  columnidT       = ColumnidOfFid( ptdb->FidAutoincrement(), fTemplateColumn );
+        DATA            dataT;
+
+        //  Just retrieve column, even if we don't have versioned access to it.
+        //
+        CallSx( ErrRECIRetrieveFixedColumn(
+                pfcbNil,
+                ptdb,
+                columnidT,
+                pfucb->dataWorkBuf,
+                &dataT ), JET_wrnColumnNull );
 
         //  AutoInc column id not set in JET_prepInsertCopyReplaceOriginal.
         //  FFUCBUpdateForInsertCopyDeleteOriginalPrepared is set both for this grbit and also for JET_prepInsertCopyReplaceOriginal.
         //
         Assert( FFUCBColumnSet( pfucb, FidOfColumnid( columnidT ) ) || FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) );
-        Assert( !( pfcbTable->FTypeSort()
-                || pfcbTable->FTypeTemporaryTable() ) );    // Don't currently support autoinc with sorts/temp. tables
+
+        //  Don't currently support autoinc with sorts/temp. tables
+        //
+        Assert( !( pfcbTable->FTypeSort() || pfcbTable->FTypeTemporaryTable() ) );
+
+        Assert( ptdb->QwAutoincrement() > 1 );
+        Assert( !dataT.FNull() );
+        if ( ptdb->F8BytesAutoInc() )
+        {
+            Assert( dataT.Cb() == sizeof(QWORD) );
+            Assert( *(UnalignedLittleEndian< QWORD > *)dataT.Pv() < ptdb->QwAutoincrement() );
+        }
+        else
+        {
+            Assert( dataT.Cb() == sizeof(ULONG) );
+            Assert( *(UnalignedLittleEndian< ULONG > *)dataT.Pv() < (ULONG)ptdb->QwAutoincrement() );
+        }
     }
 #endif
 
