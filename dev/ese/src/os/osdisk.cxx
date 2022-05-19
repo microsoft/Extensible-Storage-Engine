@@ -8592,15 +8592,37 @@ VOID OSFileIIOReportError(
     const DWORD     errSystem,
     const QWORD     cmsecIOElapsed )
 {
+    WCHAR           wszAbsPath[ IFileSystemAPI::cchPathMax ];
+
+    CallS( posf->ErrPath( wszAbsPath ) );
+
+    OSFileIIOReportError(   posf->Pfsconfig(),
+                            wszAbsPath,
+                            fWrite,
+                            ibOffset,
+                            cbLength,
+                            err,
+                            errSystem,
+                            cmsecIOElapsed );
+}
+
+VOID OSFileIIOReportError(
+    _In_ IFileSystemConfiguration* const    pfsconfig,
+    _In_ const WCHAR* const                 wszAbsPath,
+    _In_ const BOOL                         fWrite,
+    _In_ const QWORD                        ibOffset,
+    _In_ const DWORD                        cbLength,
+    _In_ const ERR                          err,
+    _In_ const DWORD                        errSystem,
+    _In_ const QWORD                        cmsecIOElapsed )
+{
     const ULONG     cwsz         = 7;
     const WCHAR *   rgpwsz[ cwsz ];
     DWORD           irgpwsz                      = 0;
-    WCHAR           wszAbsPath[ IFileSystemAPI::cchPathMax ];
     WCHAR           wszOffset[ 64 ];
     WCHAR           wszLength[ 64 ];
     WCHAR           wszTimeElapsed[ 64 ];
 
-    CallS( posf->ErrPath( wszAbsPath ) );
     OSStrCbFormatW( wszOffset, sizeof( wszOffset ), L"%I64i (0x%016I64x)", ibOffset, ibOffset );
     OSStrCbFormatW( wszLength, sizeof( wszLength ), L"%u (0x%08x)", cbLength, cbLength );
     OSStrCbFormatW( wszTimeElapsed, sizeof( wszTimeElapsed ), L"%I64u.%03I64u", cmsecIOElapsed / 1000, cmsecIOElapsed % 1000 );
@@ -8633,23 +8655,23 @@ VOID OSFileIIOReportError(
     rgpwsz[ irgpwsz++ ] = wszTimeElapsed;
 
     Assert( irgpwsz <= cwsz );
-    posf->Pfsconfig()->EmitEvent(   eventError,
-                                    GENERAL_CATEGORY,
-                                    fWrite ? OSFILE_WRITE_ERROR_ID : OSFILE_READ_ERROR_ID,
-                                    irgpwsz,
-                                    rgpwsz,
-                                    JET_EventLoggingLevelMin );
+    pfsconfig->EmitEvent(   eventError,
+                            GENERAL_CATEGORY,
+                            fWrite ? OSFILE_WRITE_ERROR_ID : OSFILE_READ_ERROR_ID,
+                            irgpwsz,
+                            rgpwsz,
+                            JET_EventLoggingLevelMin );
 
 #if defined( USE_HAPUBLISH_API )
-    posf->Pfsconfig()->EmitEvent(   OSDiskIIOHaTagOfErr( err, fWrite ),
-                                    Ese2HaId( GENERAL_CATEGORY ),
-                                    Ese2HaId( fWrite ? OSFILE_WRITE_ERROR_ID : OSFILE_READ_ERROR_ID ),
-                                    irgpwsz,
-                                    rgpwsz,
-                                    fWrite ? HaDbIoErrorWrite : HaDbIoErrorRead,
-                                    wszAbsPath,
-                                    ibOffset, 
-                                    cbLength );
+    pfsconfig->EmitEvent(   OSDiskIIOHaTagOfErr( err, fWrite ),
+                            Ese2HaId( GENERAL_CATEGORY ),
+                            Ese2HaId( fWrite ? OSFILE_WRITE_ERROR_ID : OSFILE_READ_ERROR_ID ),
+                            irgpwsz,
+                            rgpwsz,
+                            fWrite ? HaDbIoErrorWrite : HaDbIoErrorRead,
+                            wszAbsPath,
+                            ibOffset, 
+                            cbLength );
 #endif
 
     if ( fWrite )
