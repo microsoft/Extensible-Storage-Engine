@@ -1835,7 +1835,6 @@ ReportCorruption:
 
         // SOFT_HARD: related with the check for it above
         Assert( !m_pLog->FHardRestore() );
-        Assert( fCreatedLogReader );
 
         OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRecoveryRedoLogCorruption, L"3aa8328c-8b3d-45a1-93c5-4ea6bea70ad4" );
         Call( ErrERRCheck_( JET_errLogFileCorrupt, __FILE__, lLine ) );
