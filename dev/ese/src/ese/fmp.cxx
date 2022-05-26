@@ -1271,56 +1271,102 @@ ERR FMP::ErrNewAndWriteLatch(
 
     //  We did not find a match when searching for it, so now find a usable FMP (preferring
     //  ones with no unattached cache, and lower ifmps over higher ones)...
-
-    OnDebug( BOOL fDidCanabalizeUnattachedCachesPass = fFalse );
-#pragma warning(suppress: 6293)
-    for ( BOOL fPreserveUnattachedCaches = fTrue; fPreserveUnattachedCaches != 0xFFFFFFFF; fPreserveUnattachedCaches-- )
+    ULONG cFmpsEvaluated = 0;
+    ULONG cFmpsInUse = 0;
+    ULONG cFmpsRedoMapNotEmpty = 0;
+    ULONG cPreservedCaches = 0;
+    for ( int iPreserveUnattachedCaches = 1; iPreserveUnattachedCaches >= 0; iPreserveUnattachedCaches-- )
     {
-
-        ULONG cFmpsEvaluated = 0;
-        ULONG cPreservedCaches = 0;
+        const BOOL fPreserveUnattachedCaches = ( iPreserveUnattachedCaches != 0 );
+        cFmpsEvaluated = 0;
+        cFmpsInUse = 0;
+        cFmpsRedoMapNotEmpty = 0;
+        cPreservedCaches = 0;
 
         //  First we try to search something in the Min-Mac range to keep the IFMP range tight
         for ( ifmp = IfmpMinInUse(); ifmp <= IfmpMacInUse(); ifmp++ )
         {
             cFmpsEvaluated++;
+
             if ( g_rgfmp[ifmp].FInUse() )
+            {
+                cFmpsInUse++;
                 continue;
+            }
+
+            if ( !g_rgfmp[ifmp].FRedoMapsEmpty() )
+            {
+                cFmpsRedoMapNotEmpty++;
+                continue;
+            }
+
             if ( fPreserveUnattachedCaches && !g_rgfmp[ifmp].DataHeaderSignature().FNull() )
             {
                 cPreservedCaches++;
                 continue;
             }
+
             goto SelectedIfmp;
         }
+
         //  Next we try to utilize FMPs on the lower side of Min/Mac range to keep ourselves from wasting g_rgfmp memory
         for ( ifmp = IfmpMinInUse() - 1; IfmpMacInUse() != 0 && ifmp >= cfmpReserved && ifmp < IfmpMinInUse() /* note using/catch UINT wrap-around */; ifmp-- )
         {
             Assert( NULL == g_rgfmp[ifmp].WszDatabaseName() ); // == Assert( !g_rgfmp[ifmp].FInUse() ); // that would be weird, as it's outside the min/mac range
 
             cFmpsEvaluated++;
+
+            if ( !g_rgfmp[ifmp].FRedoMapsEmpty() )
+            {
+                cFmpsRedoMapNotEmpty++;
+                continue;
+            }
+
             if ( fPreserveUnattachedCaches && !g_rgfmp[ifmp].DataHeaderSignature().FNull() )
             {
                 cPreservedCaches++;
                 continue;
             }
+
             goto SelectedIfmp;
         }
+
         //  We might have previously grown, but then shrunk, so see if that is available.
         for ( ifmp = IfmpMacInUse() + 1; ifmp < g_ifmpMax && FMP::FAllocatedFmp( ifmp ); ifmp++ )
         {
             Assert( NULL == g_rgfmp[ifmp].WszDatabaseName() ); // == Assert( !g_rgfmp[ifmp].FInUse() ); // that would be weird, as it's outside the min/mac range
 
             cFmpsEvaluated++;
+
+            if ( !g_rgfmp[ifmp].FRedoMapsEmpty() )
+            {
+                cFmpsRedoMapNotEmpty++;
+                continue;
+            }
+
             if ( fPreserveUnattachedCaches && !g_rgfmp[ifmp].DataHeaderSignature().FNull() )
             {
                 cPreservedCaches++;
                 continue;
             }
+
             goto SelectedIfmp;
         }
 
         Assert( cFmpsEvaluated == ( s_ifmpMacCommitted - cfmpReserved ) );
+        Assert( cFmpsInUse <= cFmpsEvaluated );
+        Assert( cFmpsRedoMapNotEmpty <= cFmpsEvaluated );
+        Assert( cPreservedCaches <= cFmpsEvaluated );
+        Assert( cPreservedCaches == 0 || fPreserveUnattachedCaches );
+        Assert( ( cFmpsInUse + cFmpsRedoMapNotEmpty + cPreservedCaches ) == cFmpsEvaluated );
+
+        if ( fPreserveUnattachedCaches && cPreservedCaches == 0 )
+        {
+            // We are trying to preserve caches, but we ended up not selecting any IFMP
+            // for reasons other than preserving the IFMPs' caches, so it's pointless
+            // to retry.
+            break;
+        }
 
 #ifdef DEBUG
         const ULONG cMinimumPreservedCaches = ( ( rand() % 2 ) == 0 ) ? 2 : g_ifmpMax;
@@ -1332,7 +1378,7 @@ ERR FMP::ErrNewAndWriteLatch(
 
         if ( fPreserveUnattachedCaches &&
                 cPreservedCaches <= cMinimumPreservedCaches &&  // we don't have enough preserved caches
-                cFmpsEvaluated < ( g_ifmpMax - 1 ) )              // we have room to grow the FMP pool
+                cFmpsEvaluated < ( g_ifmpMax - 1 ) )            // we have room to grow the FMP pool
         {
             //  We found only preserved caches (or we would've bailed to SelectedIfmp by now), so we could
             //  go back through with (fPreserveUnattachedCaches == fFalse this time) and select one of them 
@@ -1341,21 +1387,19 @@ ERR FMP::ErrNewAndWriteLatch(
             //  instead ...
             break;
         }
-        if ( !fPreserveUnattachedCaches )
-        {
-            OnDebug( fDidCanabalizeUnattachedCachesPass = fTrue );
-        }
     }
 
     //  Finally fall back to potentially actually growing the FMP array to new memory ...
 
-    //  We fell off the end of the last loop, even with fPreserveUnattachedCaches false, have we
-    //  just hit the maximum DBs attached?
+    //  We fell off the end of the last loop, have we just hit the maximum DBs attached?
     if ( ifmp >= g_ifmpMax )
     {
-        ; // double checking we did everything to find a slot before bailing
-        Assert( fDidCanabalizeUnattachedCachesPass );
-        err = ErrERRCheck( JET_errTooManyAttachedDatabases );
+        Assert( ifmp == g_ifmpMax );
+        Assert( ifmp > cfmpReserved );
+        Assert( ( ifmp - cfmpReserved ) == cFmpsEvaluated );
+        Assert( cPreservedCaches == 0 );
+        Assert( ( cFmpsInUse + cFmpsRedoMapNotEmpty ) == cFmpsEvaluated );
+        Error( ErrERRCheck( JET_errTooManyAttachedDatabases ) );
     }
 
     //  We are here because we couldn't find an allocated IFMP or an allocated and no unattached-cache IFMP ...
@@ -1425,6 +1469,10 @@ SelectedIfmp:
 
     if ( !fFoundMatchingFmp )
     {
+        // We can't reuse an FMP with pending redo map entries because we would lose
+        // track of unresolved entries, which could cause us to succeed in recovering
+        // a database which could be potentially corrupted. However, this is already being
+        // prevented above, as we always skip picking an FMP with a non-empty redo map.
         DBEnforceSz(
             ifmp,
             g_rgfmp[ifmp].FRedoMapsEmpty(),
