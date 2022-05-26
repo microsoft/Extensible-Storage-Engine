@@ -4001,7 +4001,7 @@ typedef enum
 // end_PubEsent
 
 #if ( JET_VERSION >= 0x0A01 )
-
+#define JET_paramFlight_RBSDbScanRaiseCorruptionRevertedFDP     74  // Dbscan normally should redelete reverted FDPs which have the delete flag set. But, we don't expect that unless we delete logs and mount that copy and for automated testing, we don't delete logs. So for the automated testing cases, we will raise a corruption instead, which should avoid any real corruption due to bugs.
 #define JET_paramFlight_RBSForceRollIntervalSec                 80  // Time after which we should force roll into new revert snapshot by raising failure item and letting HA remount. This is temporary till we have live roll.
 
 #define JET_paramFlight_NewQueueOptions                         84  //  Controls options for new Meted IO Queue
@@ -6621,6 +6621,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errRBSRevertableDeleteNotPossible -1944  /* The table being deleted with revertable delete flag is not possible as this table was previously deleted with non-revertable flag and partially reverted by RBS. */
 #define errRBSDeleteTableTooSoonTimeNull     -1945  /* The time the table was created or the time since the root page of table was last moved is not set and hence a non-revertable delete cannot be attempted right now. */
 #define errRBSCorruptUninitializedRBSRemoved -1946  /* The RBS being loaded is either missing or corrupt and uninitialized, so it has been removed. */
+#define JET_errRBSRedeleteFDPUnexpected     -1947  /* Indicates that the reverted table marked with delete flag is unexpected. */
 // begin_PubEsent
 
 #define JET_wrnDefragAlreadyRunning          2000 /* Online defrag already running on specified database */
