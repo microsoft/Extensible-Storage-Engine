@@ -4130,6 +4130,13 @@ VOID DBMScanObserverCleanup::RedeleteRevertedFDP_( CSR* const pcsr, DBMObjectCac
         err = JET_errSuccess;
         goto HandleError;
     }
+    else if ( err >= JET_errSuccess && BoolParam( PinstFromPpib( m_ppib ), JET_paramFlight_RBSDbScanRaiseCorruptionRevertedFDP ) )
+    {
+        err = ErrERRCheck( JET_errRBSRedeleteFDPUnexpected );
+        goto HandleError;
+    }
+
+    Call( err );
 
     // Re-deleting table.
     const JET_SESID sesid = (JET_SESID) m_ppib;
@@ -4157,17 +4164,38 @@ HandleError:
             wszPgnoTable,
             wszObjidTable,
             wszErr
-        }; 
+        };
 
-        UtilReportEvent(
-            fSuccess ? eventInformation : eventError,
-            GENERAL_CATEGORY,
-            fSuccess ? DBSCAN_REDELETE_REVERTED_TABLE_SUCCESS : DBSCAN_REDELETE_REVERTED_TABLE_FAILURE,
-            3,
-            rgcwsz,
-            0,
-            NULL,
-            m_ppib->m_pinst );
+        // Raise corruption event and fail the attempt to redelete reverted FDP.
+        if ( err == JET_errRBSRedeleteFDPUnexpected )
+        {
+            UtilReportEvent(
+                eventError,
+                GENERAL_CATEGORY,
+                DBSCAN_REDELETE_REVERTED_TABLE_UNEXPECTED,
+                2,
+                rgcwsz,
+                0,
+                NULL,
+                PinstFromPpib( m_ppib ) );
+
+            OSUHAPublishEvent(
+                HaDbFailureTagCorruption, PinstFromPpib( m_ppib ), HA_DATABASE_CORRUPTION_CATEGORY,
+                HaDbIoErrorNone, g_rgfmp[ m_ifmp ].WszDatabaseName(), 0, 0,
+                HA_DBSCAN_REDELETE_REVERTED_TABLE_UNEXPECTED, 2, rgcwsz );
+        }
+        else
+        {
+            UtilReportEvent(
+                fSuccess ? eventInformation : eventError,
+                GENERAL_CATEGORY,
+                fSuccess ? DBSCAN_REDELETE_REVERTED_TABLE_SUCCESS : DBSCAN_REDELETE_REVERTED_TABLE_FAILURE,
+                3,
+                rgcwsz,
+                0,
+                NULL,
+                PinstFromPpib( m_ppib ) );
+        }
     }
 
     if( fInTransaction )

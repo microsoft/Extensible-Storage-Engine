@@ -1683,6 +1683,12 @@ Language=English
 %1 (%2) %3An illegal operation is being performed on root page %4 of table (%5) with objid %6 on database %7 which was reverted by RBS. Only delete operation should be performed on such a table.
 .
 
+MessageId=569
+SymbolicName=DBSCAN_REDELETE_REVERTED_TABLE_UNEXPECTED
+Language=English
+%1 (%2) %3Db scan encountered root page %4 with objid %5 which was unexpectedly marked for delete by revert operation.
+.
+
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 

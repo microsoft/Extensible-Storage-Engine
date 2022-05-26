@@ -150,6 +150,7 @@ MSINTERNAL enum class MJET_PARAM
     RecordUpgradeDirtyLevel = 78, // how aggresively should pages with their record format converted be flushed (0-3)
     RecoveryCurrentLogfile = 79, // which generation is currently being replayed (read only)
     OSSnapshotTimeout = 82, // timeout for the freeze period in msec
+    Flight_RBSDbScanRaiseCorruptionRevertedFDP = 74, // Dbscan normally should redelete reverted FDPs which have the delete flag set. But, we don't expect that unless we delete logs and mount that copy and for automated testing, we don't delete logs. So for the automated testing cases, we will raise a corruption instead, which should avoid any real corruption due to bugs.
     Flight_RBSForceRollIntervalSec = 80, // Time after which we should force roll into new revert snapshot by raising failure item and letting HA remount. This is temporary till we have live roll.
     Flight_NewQueueOptions = 84, // Controls options for new Meted IO Queue
     Flight_ConcurrentMetedOps = 85, // Controls how many IOs we leave out at once for the new Meted IO Queue.
