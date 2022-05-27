@@ -11373,9 +11373,6 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed )
             // Capture all freed but non-revertable extent pages as if they need to be reverted to empty pages when RBS is applied with special flag fRBSFDPDeleted.
             // If we already captured a preimage for one of those pages in the extent, the revert to an empty page will be ignored for that page when we apply the snapshot.
             CallR( g_rgfmp[ ifmp ].PRBS()->ErrCaptureEmptyPages( g_rgfmp[ ifmp ].Dbid(), pgnoFirst, cpgExtent, fRBSFDPNonRevertableDelete ) );
-
-            // We need to make sure we flush our snapshot records else we might go out of required range without flushing and fail to snapshot them as empty pages.
-            CallR( g_rgfmp[ ifmp ].PRBS()->ErrFlushAll() );
         }
     }
     else 
