@@ -15414,7 +15414,7 @@ ERR ErrSPGetInfo(
                 fSPExtents |= fSPAvailExtent;
             }
 
-            fSetCachedValue = fTrue;
+            fSetCachedValue = !g_rgfmp[ ifmp ].FReadOnlyAttach();
 
             // Now go read the slow way.
             break;

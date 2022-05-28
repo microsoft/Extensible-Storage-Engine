@@ -1530,7 +1530,7 @@ ERR ErrFILEIOpenTable(
                             // Trying to delete without stating you are OK with a sensitive table delete.
                             return ErrERRCheck( JET_errCannotDeleteSystemTable );
 
-                        case 0:
+                        case JET_bitNil:
                             // Trying to just open the table, allowing updates.
                             return ErrERRCheck( JET_errTableLocked );
 
