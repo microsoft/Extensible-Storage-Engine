@@ -3115,7 +3115,7 @@ VOID DBISetHeaderAfterAttach(
 }
 
 //  ================================================================
-ERR ErrDBTryCreateSystemTable(
+ERR ErrDBProbeOrCreateSystemTable(
     _In_ PIB * const ppib,
     const IFMP ifmp,
     const CHAR * const szTableName,
@@ -3135,81 +3135,65 @@ ERR ErrDBTryCreateSystemTable(
     Assert( ifmpNil != ifmp );
     Assert( szTableName );
 
-    ERR         err             = JET_errSuccess;
-    WCHAR * const wszDatabaseName   = g_rgfmp[ifmp].WszDatabaseName();
-    IFMP        ifmpT;
+    ERR             err             = JET_errSuccess;
+    WCHAR * const   wszDatabaseName = g_rgfmp[ifmp].WszDatabaseName();
+    BOOL            fTryCreate      = ( ( grbit & JET_bitDbReadOnly ) == 0 ) && ( NULL != pfnCreate );
+    IFMP            ifmpT;
 
-    if( grbit & JET_bitDbReadOnly || g_fRepair )
+    if ( NULL != ppgnoFDP )
     {
-        //  no-one will be modifying the database so it doesn't matter if the table
-        //  repair doesn't want these tables created
+        *ppgnoFDP = pgnoNull;
+    }
+    if ( NULL != pobjidFDP )
+    {
+        *pobjidFDP = objidNil;
+    }
+
+    if ( g_fRepair )
+    {
         return JET_errSuccess;
     }
 
-    Call( ErrDBOpenDatabase( ppib, wszDatabaseName, &ifmpT, NO_GRBIT ) );
+    Call( ErrDBOpenDatabase( ppib, wszDatabaseName, &ifmpT, JET_bitNil ) );
     Assert( ifmp == ifmpT );
 
-    if( JET_wrnFileOpenReadOnly == err )
+    if ( JET_wrnFileOpenReadOnly == err )
     {
         //  we have attached to a read-only file, but JET_bitDbReadOnly was not specified
-        //  no-one will be modifying the database so it doesn't matter if the table exists or not
         err = JET_errSuccess;
-        if ( NULL != ppgnoFDP )
-        {
-            *ppgnoFDP  = pgnoNull;
-        }
-        if (NULL != pobjidFDP )
-        {
-            *pobjidFDP = objidNil;
-        }
+        fTryCreate = fFalse;
     }
-    else
-    {
-        //  look for the table. we used to simply create the table and look for
-        //  JET_errTableDuplicate but that led to nullified RCE's filling the
-        //  version store when a process did a lot of attaches
 
-        err = ErrCATSeekTable( ppib, ifmpT, szTableName, ppgnoFDP, pobjidFDP );
-        if( err < JET_errSuccess )
+    //  look for the table. we used to simply create the table and look for
+    //  JET_errTableDuplicate but that led to nullified RCE's filling the
+    //  version store when a process did a lot of attaches
+    err = ErrCATSeekTable( ppib, ifmpT, szTableName, ppgnoFDP, pobjidFDP );
+    if ( JET_errObjectNotFound == err )
+    {
+        if ( fTryCreate )
         {
-            if( JET_errObjectNotFound == err )
-            {
-                if ( NULL != pfnCreate )
-                {
-                    err = (*pfnCreate)( ppib, ifmp, ppgnoFDP, pobjidFDP );
+            err = (*pfnCreate)( ppib, ifmp, ppgnoFDP, pobjidFDP );
 
 #ifdef DEBUG
-                    if ( JET_errSuccess == err )
-                    {
-                        PGNO  pgno;
-                        OBJID objid;
-                        const ERR errT = ErrCATSeekTable( ppib, ifmpT, szTableName, &pgno, &objid );
-                        AssertSz( JET_errSuccess == errT, "ErrDBTryCreateSystemTable didn't create the specified table" );
-                        Assert( NULL == ppgnoFDP || pgno == *ppgnoFDP );
-                        Assert( NULL == pobjidFDP || objid == *pobjidFDP );
-                    }
-#endif
-                }
-                else
-                {
-                    // No creation function, so caller was only checking if the table existed.
-                    // It doesn't, so we signify that by returning success and setting the out params
-                    // to appropriate NULLs.
-                    err = JET_errSuccess;
-                    if ( NULL != ppgnoFDP )
-                    {
-                        *ppgnoFDP  = pgnoNull;
-                    }
-                    if (NULL != pobjidFDP )
-                    {
-                        *pobjidFDP = objidNil;
-                    }
-                }
+            if ( JET_errSuccess == err )
+            {
+                PGNO  pgno;
+                OBJID objid;
+                const ERR errT = ErrCATSeekTable( ppib, ifmpT, szTableName, &pgno, &objid );
+                AssertSz( JET_errSuccess == errT, "ErrDBProbeOrCreateSystemTable didn't create the specified table" );
+                Assert( NULL == ppgnoFDP || pgno == *ppgnoFDP );
+                Assert( NULL == pobjidFDP || objid == *pobjidFDP );
             }
+#endif
+        }
+        else
+        {
+            // No creation function or R/O attach, so caller was only checking if the table existed.
+            err = JET_errSuccess;
         }
     }
 
-    CallS( ErrDBCloseDatabase( ppib, ifmpT, 0 ) );
+    CallS( ErrDBCloseDatabase( ppib, ifmpT, JET_bitNil ) );
 
     Call( err );
 
@@ -4351,7 +4335,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             // creation function to this call, it only looks up the table if it's there; it
             // doesn't create it and doesn't error if it's not there, just sets pgnoFDP and
             // objidFDP to nulls.
-            CallJ( ErrDBTryCreateSystemTable(
+            CallJ( ErrDBProbeOrCreateSystemTable(
                        ppib,
                        ifmp,
                        szMSExtentPageCountCache,
@@ -4701,26 +4685,26 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     //  preread the first 16 pages of the database
     BFPrereadPageRange( ifmp, 1, 16, bfprfDefault, ppib->BfpriPriority( ifmp ), *tcScope );
 
+    // Look up the ExtentPageCountCache table before we do anything that might affect
+    // ExtentPageCountCache values. This sets up bookkeeping so any changes to space
+    // made by Update and Shrink are correctly tracked.  Since we're not providing a
+    // creation function to this call, it only looks up the table if it's there; it
+    // doesn't create it and doesn't error if it's not there, just sets pgnoFDP and
+    // objidFDP to nulls.
+    CallJ( ErrDBProbeOrCreateSystemTable(
+               ppib,
+               ifmp,
+               szMSExtentPageCountCache,
+               NULL,
+               NO_GRBIT,
+               &pgnoFDP,
+               &objidFDP ),
+           MoreAttachedThanDetached );
+    g_rgfmp[ ifmp ].SetExtentPageCountCacheTableInfo( pgnoFDP, objidFDP );
+    pfmp->m_isdlAttach.Trigger( eAttachCheckForExtentPageCountCacheDone );
+
     if ( !pfmp->FReadOnlyAttach() && !g_fRepair )
     {
-        // Look up the ExtentPageCountCache table before we do anything that might affect
-        // ExtentPageCountCache values. This sets up bookkeeping so any changes to space
-        // made by Update and Shrink are correctly tracked.  Since we're not providing a
-        // creation function to this call, it only looks up the table if it's there; it
-        // doesn't create it and doesn't error if it's not there, just sets pgnoFDP and
-        // objidFDP to nulls.
-        CallJ( ErrDBTryCreateSystemTable(
-                   ppib,
-                   ifmp,
-                   szMSExtentPageCountCache,
-                   NULL,
-                   NO_GRBIT,
-                   &pgnoFDP,
-                   &objidFDP ),
-               MoreAttachedThanDetached );
-        g_rgfmp[ ifmp ].SetExtentPageCountCacheTableInfo( pgnoFDP, objidFDP );
-        pfmp->m_isdlAttach.Trigger( eAttachCheckForExtentPageCountCacheDone );
-
         //  Upgrade the DB Version if necessary
         CallJ( ErrDBUpdateAndFlushVersion(
                     pinst,
@@ -4803,7 +4787,7 @@ PostAttachTasks:
 
         // Create this *before* creating the other system tables (such as
         // MSysLocales) so that MSObjids contains entries for those tables.
-        CallJ( ErrDBTryCreateSystemTable( ppib, ifmp, szMSObjids, ErrCATCreateMSObjids, grbit ), Detach );
+        CallJ( ErrDBProbeOrCreateSystemTable( ppib, ifmp, szMSObjids, ErrCATCreateMSObjids, grbit ), Detach );
         CallJ( ErrCATPopulateMSObjids( ppib, ifmp ), Detach );
         g_rgfmp[ ifmp ].SetFMaintainMSObjids();
     }
@@ -4843,7 +4827,7 @@ PostAttachTasks:
         const WCHAR * rgwsz[] = { pfmp->WszDatabaseName(), NULL };
 
         // See if the table is there or not.
-        CallJ( ErrDBTryCreateSystemTable(
+        CallJ( ErrDBProbeOrCreateSystemTable(
                    ppib,
                    ifmp,
                    szMSExtentPageCountCache,
@@ -4928,7 +4912,7 @@ PostAttachTasks:
             case fc::Enable:
                 Assert( objidNil == objidFDP );
                 CallJ(
-                    ErrDBTryCreateSystemTable(
+                    ErrDBProbeOrCreateSystemTable(
                         ppib,
                         ifmp,
                         szMSExtentPageCountCache,
