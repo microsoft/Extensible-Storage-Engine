@@ -11558,7 +11558,7 @@ DEBUG_EXT( EDBGTid2PIB )
                 }
 
                 // Note this doesn't get the whole TLS, just the OS layer portion, but that is all we need.
-                _TLS* ptlsDebuggee = (_TLS*)ppib->ptlsTrxBeginLast;
+                _TLS* ptlsDebuggee = CONTAINING_RECORD( ppib->ptlsTrxBeginLast, _TLS, rgUserTLS );
 
                 if ( ptlsDebuggee )
                 {
