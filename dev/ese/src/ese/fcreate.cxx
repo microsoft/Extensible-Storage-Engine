@@ -5016,7 +5016,7 @@ ERR ErrFILEBuildAllIndexes(
                   (BYTE *)&cpgFreeTempDb,
                   sizeof(cpgFreeTempDb),
                   fSPAvailExtent,
-                  gci::Forbid ) ); // gci::Allow doesn't necessarily include pages in split buffers.
+                  gci::Forbid ) );
         
         cbFreeTempDisk += ( cpgFreeTempDb * g_cbPage );
 

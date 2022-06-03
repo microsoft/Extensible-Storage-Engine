@@ -1063,44 +1063,66 @@ HandleError:
 
 
 //  ================================================================
-LOCAL ERR ErrInfoGetTableAvailSpace(
+LOCAL ERR ErrINFOIGetCalculatedSpace(
     PIB * const ppib,
     FUCB * const pfucb,
     void * const pvResult,
-    const ULONG cbMax )
+    const ULONG cbMax,
+    const ULONG fSPExtent )
 //  ================================================================
 //
-//  Count the number of available pages in a table, its indexes and its
-//  LV tree
-//
+//  Calculate the number of available pages.
+//  Stored values for OE are inclusive of child objects, stored values of AE are exclusive of
+//  child objects.
+//  For fSPAvailExtent, calculate the inclusive sum from the table and its indices and LV tree.
+//  For fSPOwnExtent, calculate the exclusive difference from the table and its indices and LV tree.
 //-
 {
     ERR         err         = JET_errSuccess;
     CPG* const  pcpg        = (CPG *)pvResult;
     CPG         cpgT        = 0;
     BOOL        fLeaveDML   = fFalse;
-    FCB*        pfcbT       = pfcbNil;
+    FCB         *pfcbT      = pfcbNil;
     BOOL        fUnpinFCB   = fFalse;
-    FUCB*       pfucbT      = pfucbNil;
-    
+    FUCB        *pfucbT     = pfucbNil;
+    INT         iFactor; // +1 if we're summing, -1 if we're getting the difference
+
     if ( sizeof( CPG ) != cbMax )
     {
         return ErrERRCheck( JET_errInvalidBufferSize );
     }
     *pcpg = 0;
 
+    Assert( FSPOwnedExtent( fSPExtent ) || FSPAvailExtent( fSPExtent ) );
+    if ( FSPOwnedExtent( fSPExtent ) )
+    {
+        iFactor = -1;
+    }
+    else
+    {
+        iFactor = 1;
+    }
+
     //  first, the table
     //
     Call( ErrSPGetInfo(
-              ppib, pfucb->ifmp,
+              ppib,
+              pfucb->ifmp,
               pfucb,
               (BYTE *)&cpgT,
               sizeof( cpgT ),
-              fSPAvailExtent,
+              fSPExtent,
               gci::Allow ) );
-              
+
     *pcpg += cpgT;
-    
+
+    if ( !( pfucb->u.pfcb->FTypeTable() || pfucb->u.pfcb->FTypeTemporaryTable() || pfucb->u.pfcb->FTypeSort() ) )
+    {
+        // Not an FCB type with 2ndary indices or LV trees, so nothing more to do.
+        err = JET_errSuccess;
+        goto HandleError;
+    }
+
     //  then, the secondary indices of the table
     //
     pfucb->u.pfcb->EnterDML();
@@ -1111,72 +1133,92 @@ LOCAL ERR ErrInfoGetTableAvailSpace(
         //
         Assert( !pfcbT->Pidb()->FPrimary() );
         err = ErrFILEIAccessIndex( pfucb->ppib, pfucb->u.pfcb, pfcbT );
-        if ( err != JET_errIndexNotFound )
-        {
-            Call( err );
-        }
-        
-        //  skip indices that are not visible to us
-        //
-        if ( err != JET_errIndexNotFound )
-        {
-            //  pin the index so it won't be deleted while we are outside the DML lock
-            //
-            if ( !pfcbT->Pidb()->FTemplateIndex() )
-            {
-                pfcbT->Pidb()->IncrementCurrentIndex();
-                fUnpinFCB = fTrue;
-            }
-            pfucb->u.pfcb->LeaveDML();
-            fLeaveDML = fFalse;
 
-            //  open the index and get its space info
+        switch ( min( err, JET_errSuccess ) ) // Ignore warnings
+        {
+            case JET_errSuccess:
+                Expected( JET_errSuccess == err ); // But don't expect warnings.
+                err = JET_errSuccess;
+            
+                //  pin the index so it won't be deleted while we are outside the DML lock
+                //
+                if ( !pfcbT->Pidb()->FTemplateIndex() )
+                {
+                    pfcbT->Pidb()->IncrementCurrentIndex();
+                    fUnpinFCB = fTrue;
+                }
+                pfucb->u.pfcb->LeaveDML();
+                fLeaveDML = fFalse;
+
+                //  open the index and get its space info
+                //
+                Call( ErrDIROpen( ppib, pfcbT, &pfucbT ) );
+                Call( ErrSPGetInfo(
+                          ppib,
+                          pfucbT->ifmp,
+                          pfucbT,
+                          (BYTE *)&cpgT,
+                          sizeof( cpgT ),
+                          fSPExtent,
+                          gci::Allow ) );
+                *pcpg += (iFactor * cpgT);
+                DIRClose( pfucbT );
+                pfucbT = pfucbNil;
+
+                //  unpin the index
+                //
+                pfucb->u.pfcb->EnterDML();
+                fLeaveDML = fTrue;
+                if ( fUnpinFCB )
+                {
+                    pfcbT->Pidb()->DecrementCurrentIndex();
+                    fUnpinFCB = fFalse;
+                }
+                break;
+
+            case JET_errIndexNotFound:
+                err = JET_errSuccess;
+                //  skip indices that are not visible to us
+                break;
+
+            default:
+                Call( err );
+                break;
+        }
+    }
+
+    pfucb->u.pfcb->LeaveDML();
+    fLeaveDML = fFalse;
+
+    //  finally, the LV tree
+    //
+    Call( ErrFILEOpenLVRoot( pfucb, &pfucbT, fFalse ) );
+
+    switch ( err )
+    {
+        case JET_errSuccess:
+            //  the LV tree exists
             //
-            Call( ErrDIROpen( ppib, pfcbT, &pfucbT ) );
             Call( ErrSPGetInfo(
                       ppib,
                       pfucbT->ifmp,
                       pfucbT,
                       (BYTE *)&cpgT,
                       sizeof( cpgT ),
-                      fSPAvailExtent,
+                      fSPExtent,
                       gci::Allow ) );
-            *pcpg += cpgT;
+            *pcpg += (iFactor * cpgT);
             DIRClose( pfucbT );
             pfucbT = pfucbNil;
+            break;
 
-            //  unpin the index
-            //
-            pfucb->u.pfcb->EnterDML();
-            fLeaveDML = fTrue;
-            if ( fUnpinFCB )
-            {
-                pfcbT->Pidb()->DecrementCurrentIndex();
-                fUnpinFCB = fFalse;
-            }
-        }
-    }
-    pfucb->u.pfcb->LeaveDML();
-    fLeaveDML = fFalse;
+        case wrnLVNoLongValues:
+            // the LV tree doesn't exist.
+            break;
 
-    //  finally, the LV tree
-    //
-    Call( ErrFILEOpenLVRoot( pfucb, &pfucbT, fFalse ) )
-    if ( JET_errSuccess == err )
-    {
-        //  the LV tree exists
-        //
-        Call( ErrSPGetInfo(
-                  ppib,
-                  pfucbT->ifmp,
-                  pfucbT,
-                  (BYTE *)&cpgT,
-                  sizeof( cpgT ),
-                  fSPAvailExtent,
-                  gci::Allow ) );
-        *pcpg += cpgT;
-        DIRClose( pfucbT );
-        pfucbT = pfucbNil;
+        default:
+            ExpectedSz( fFalse, "Unexpected warning, skipping LV values." );
+            break;
     }
 
     //  don't want to return wrnLVNoLongValues
@@ -1261,6 +1303,55 @@ INLINE LOCAL VOID INFOGetTableName(
     Assert( strlen( pfucb->u.pfcb->Ptdb()->SzTableName() ) <= JET_cbNameMost );
     OSStrCbCopyA( szTableName, cbTableName, pfucb->u.pfcb->Ptdb()->SzTableName() );
     pfucb->u.pfcb->LeaveDML();
+}
+
+// Helper routine used by ErrIsamGetTableInfo
+INLINE LOCAL ERR ErrINFOGetLVSpaceUsage(
+    FUCB *pfucb,
+    ULONG fSPExtent,
+    void *pvResult,
+    ULONG cbMax
+    )
+{
+    ERR err;
+    FUCB *pfucbT = pfucbNil;
+
+    Call( ErrFILEOpenLVRoot( pfucb, &pfucbT, fFalse ) );
+    switch ( err )
+    {
+        case JET_errSuccess:
+            Call( ErrSPGetInfo(
+                      pfucbT->ppib,
+                      pfucbT->ifmp,
+                      pfucbT,
+                      static_cast<BYTE *>( pvResult ),
+                      cbMax,
+                      fSPExtent,
+                      gci::Allow ) );
+            break;
+
+        case wrnLVNoLongValues:
+            if ( cbMax < sizeof(CPG) )
+            {
+                AssertSz( fFalse, "Called without the necessary buffer allocated for extents." );
+                Error( ErrERRCheck( JET_errBufferTooSmall ) );
+            }
+
+            *( static_cast<CPG *>( pvResult ) ) = 0;
+            err = JET_errSuccess;
+            break;
+
+        default:
+            ExpectedSz( fFalse, "Unexpected warning" );
+            Error( ErrERRCheck( JET_errInternalError ) );
+    }
+
+HandleError:
+    if ( pfucbNil != pfucbT )
+    {
+        DIRClose( pfucbT );
+    }
+    return err;
 }
 
 ERR VTAPI ErrIsamGetTableInfo(
@@ -1444,6 +1535,9 @@ ERR VTAPI ErrIsamGetTableInfo(
 
         case JET_TblInfoSpaceUsage:
         {
+            // Note that this is not actually equivalent to (JET_TblInfoSpaceOwned, JET_TblInfoSpaceAvailable).
+            // For the space available, we're only returning available space in the tree itself, not
+            // space in the indices or LV tree, both of which are included in JET_TblInfoSpaceAvailable.
             BYTE    fSPExtents = fSPOwnedExtent | fSPAvailExtent;
 
             if ( cbMax > 2 * sizeof(CPG) )
@@ -1461,6 +1555,10 @@ ERR VTAPI ErrIsamGetTableInfo(
         }
 
         case JET_TblInfoSpaceOwned:
+            // OE trees associated with an FCB cover OE trees of child trees.  For example,
+            // the OE tree for a table includes the extents owned by 2ndary indices.  That's
+            // why we can simply call ErrSPGetInfo rather than needing something like
+            // ErrINFOIGetCalculatedSpace().
             Call( ErrSPGetInfo(
                       ppib,
                       pfucb->ifmp,
@@ -1471,23 +1569,21 @@ ERR VTAPI ErrIsamGetTableInfo(
                       gci::Allow ) );
             break;
 
+        case JET_TblInfoSpaceOwnedLV:
+            Call( ErrINFOGetLVSpaceUsage( pfucb, fSPOwnedExtent, pvResult, cbMax ) );
+            break;
+
+        case JET_TblInfoSpaceAvailableLV:
+            Call( ErrINFOGetLVSpaceUsage( pfucb, fSPAvailExtent, pvResult, cbMax ) );
+            break;
+
         case JET_TblInfoSpaceAvailable:
-            Call( ErrInfoGetTableAvailSpace(
+            Call( ErrINFOIGetCalculatedSpace(
                       ppib,
                       pfucb,
                       pvResult,
-                      cbMax ) );
-            break;
-
-        case JET_TblInfoSplitBuffers:
-            Call( ErrSPGetInfo(
-                      ppib,
-                      pfucb->ifmp,
-                      pfucb,
-                      static_cast<BYTE *>( pvResult ),
                       cbMax,
-                      fSPSplitBuffers,
-                      gci::Forbid ) );
+                      fSPAvailExtent ) );
             break;
 
         case JET_TblInfoLVChunkMax:
@@ -2376,6 +2472,106 @@ ErrIsamGetTableIndexInfo(
     return ErrINFOGetTableIndexInfo( (PIB*)vsesid, (FUCB*)vtid, ifmpNil, objidNil, szIndex, pb, cbMax, lInfoLevel, fUnicodeNames );
 }
 
+// Helper routine used by ErrINFOGetTableIndexInfo
+LOCAL ERR ErrINFOIGetIndexSpaceUsage(
+    FUCB *pfucbTable,
+    CHAR *szIndexName,
+    ULONG fSPExtent,
+    void *pvResult,
+    ULONG cbMax )
+{
+    ERR         err       = JET_errSuccess;
+    BOOL        fLeaveDML = fFalse;
+    FCB * const pfcbTable = pfucbTable->u.pfcb;
+    PIB * const ppibTable = pfucbTable->ppib;
+    FCB         *pfcbT    = pfcbNil;
+    FUCB        *pfucbT   = pfucbNil;
+
+    // Find the index by name.  We expect to be called with an actual table, the only FCB type that has
+    // 2ndary indices.
+    Assert( pfcbTable->FTypeTable() ); // What about template tables?
+
+    pfcbTable->EnterDML();
+    fLeaveDML = fTrue;
+
+    // First pass of the loop is the primary index, done without entering EnterDML(). Subsequent passes
+    // are 2ndary indices, and we've entered DML for that.
+    for ( pfcbT = pfcbTable;
+          pfcbT != pfcbNil;
+          pfcbT = pfcbT->PfcbNextIndex() )
+    {
+        err = ErrFILEIAccessIndexByName(
+            ppibTable,
+            pfcbTable,
+            pfcbT,
+            szIndexName );
+
+        switch ( min( err, JET_errSuccess ) ) // Ignore warnings.
+        {
+            case JET_errSuccess:
+                Expected( JET_errSuccess == err ); // But don't expect warnings.
+                err = JET_errSuccess;
+
+                pfcbTable->LeaveDML();
+                fLeaveDML = fFalse;
+
+                Call( ErrDIROpen( ppibTable, pfcbT, &pfucbT ) );
+
+                // Get the exclusive values, that is, pages owned or availble that are
+                // directly associated with the index.  Just calling ErrSPGetInfo on
+                // OwnedExtent would get the stored value, which is inclusive (e.g.
+                // inclusive on the primary index (i.e. the table) includes pages owned
+                // by 2ndary indices and the LV table).  You can get the inclusive value
+                // for the table via JetGetTableInfo().
+
+                if ( FSPOwnedExtent( fSPExtent ) )
+                {
+                    Call( ErrINFOIGetCalculatedSpace(
+                              ppibTable,
+                              pfucbT,
+                              static_cast<BYTE *>( pvResult ),
+                              cbMax,
+                              fSPExtent ) );
+                }
+                else
+                {
+                    Call( ErrSPGetInfo(
+                              ppibTable,
+                              pfucbT->ifmp,
+                              pfucbT,
+                              static_cast<BYTE *>( pvResult ),
+                              cbMax,
+                              fSPExtent,
+                              gci::Allow
+                              ) );
+                }
+                goto HandleError;
+
+            case JET_errIndexNotFound:
+                err = JET_errSuccess;
+                break;
+
+            default:
+                Call( err );
+                break;
+        }
+    }
+
+HandleError:
+    if ( pfucbNil != pfucbT )
+    {
+        DIRClose( pfucbT );
+    }
+
+    if ( fLeaveDML )
+    {
+        pfcbTable->LeaveDML();
+    }
+
+    return err;
+}
+
+
 ERR ErrINFOGetTableIndexInfo(
     PIB             *ppib,
     FUCB            *pfucb,
@@ -2433,150 +2629,158 @@ ERR ErrINFOGetTableIndexInfo(
     // Note that this relies on cbMax already being checked in JetGetTableIndexInfoEx and JetGetIndexInfoEx
     switch ( lInfoLevel )
     {
-    case JET_IdxInfo:
-    case JET_IdxInfoList:
-        Call( ErrINFOGetTableIndexInfo( ppib, pfucb, szIndexName, pb, cbMax, fUnicodeNames ) );
-        break;
+        case JET_IdxInfo:
+        case JET_IdxInfoList:
+            Call( ErrINFOGetTableIndexInfo( ppib, pfucb, szIndexName, pb, cbMax, fUnicodeNames ) );
+            break;
         
-    case JET_IdxInfoIndexId:
-        Assert( sizeof(JET_INDEXID) <= cbMax );
-        Call( ErrINFOGetTableIndexIdInfo( ppib, pfucb, szIndexName, (INDEXID *)pb ) );
-        break;
+        case JET_IdxInfoIndexId:
+            Assert( sizeof(JET_INDEXID) <= cbMax );
+            Call( ErrINFOGetTableIndexIdInfo( ppib, pfucb, szIndexName, (INDEXID *)pb ) );
+            break;
         
-    case JET_IdxInfoSpaceAlloc:
-        Assert( sizeof(ULONG) == cbMax );
-        Call( ErrCATGetIndexAllocInfo(
-                  ppib,
-                  ifmp,
-                  objidTable,
-                  szIndexName,
-                  (ULONG *)pb ) );
-        break;
+        case JET_IdxInfoSpaceAlloc:
+            Assert( sizeof(ULONG) == cbMax );
+            Call( ErrCATGetIndexAllocInfo(
+                      ppib,
+                      ifmp,
+                      objidTable,
+                      szIndexName,
+                      (ULONG *)pb ) );
+            break;
 
-    case JET_IdxInfoLCID:
-        Assert( sizeof(LANGID) == cbMax || sizeof(LCID) == cbMax );
-        lcid    = lcidNone;
-        Call( ErrCATGetIndexLcid(
-                  ppib,
-                  ifmp,
-                  objidTable,
-                  szIndexName,
-                  &lcid ) );
-        if ( cbMax < sizeof(LCID) )
-        {
-            *(LANGID *)pb = LangidFromLcid( lcid );
-        }
-        else
-        {
-            *(LCID *)pb = lcid;
-        }
-        break;
-
-    case JET_IdxInfoLocaleName:
-        Call( ErrCATGetIndexLocaleName(
-                  ppib,
-                  ifmp,
-                  objidTable,
-                  szIndexName,
-                  (WCHAR*) pb,
-                  cbMax ) );
-        break;
-
-    case JET_IdxInfoSortVersion:
-        Assert( sizeof( DWORD ) <= cbMax );
-        Call( ErrCATGetIndexSortVersion(
-                  ppib,
-                  ifmp,
-                  objidTable,
-                  szIndexName,
-                  (DWORD*) pb ) );
-        break;
-
-    case JET_IdxInfoDefinedSortVersion:
-        Assert( sizeof( DWORD ) <= cbMax );
-        Call( ErrCATGetIndexDefinedSortVersion(
-                  ppib,
-                  ifmp,
-                  objidTable,
-                  szIndexName,
-                  (DWORD*) pb ) );
-        break;
-
-    case JET_IdxInfoSortId:
-        Assert( sizeof( SORTID ) <= cbMax );
-        Call( ErrCATGetIndexSortid(
-                  ppib,
-                  ifmp,
-                  objidTable,
-                  szIndexName,
-                  (SORTID*) pb ) );
-        break;
-
-    case JET_IdxInfoVarSegMac:
-        Assert( sizeof(USHORT) == cbMax );
-        Call( ErrCATGetIndexVarSegMac(
-                  ppib,
-                  ifmp,
-                  objidTable,
-                  szIndexName,
-                  (USHORT *)pb ) );
-        break;
-
-    case JET_IdxInfoKeyMost:
-        Assert( sizeof(USHORT) == cbMax );
-        Call( ErrCATGetIndexKeyMost(
-                  ppib,
-                  ifmp,
-                  objidTable,
-                  szIndexName,
-                  (USHORT *)pb ) );
-        break;
-        
-    case JET_IdxInfoCount:
-        Assert( sizeof(INT) == cbMax );
-        cIndexes = 1;       // the first index is the primary/sequential index
-        
-        pfucb->u.pfcb->EnterDML();
-        for ( pfcbT = pfucb->u.pfcb->PfcbNextIndex();
-                pfcbT != pfcbNil;
-              pfcbT = pfcbT->PfcbNextIndex() )
-        {
-            err = ErrFILEIAccessIndex( pfucb->ppib, pfucb->u.pfcb, pfcbT );
-            switch ( min( err, JET_errSuccess ) ) // Ignore warnings.
+        case JET_IdxInfoLCID:
+            Assert( sizeof(LANGID) == cbMax || sizeof(LCID) == cbMax );
+            lcid    = lcidNone;
+            Call( ErrCATGetIndexLcid(
+                      ppib,
+                      ifmp,
+                      objidTable,
+                      szIndexName,
+                      &lcid ) );
+            if ( cbMax < sizeof(LCID) )
             {
-            case JET_errSuccess:
-                Expected( JET_errSuccess == err ); // But don't expect warnings.
-                cIndexes++;
-                break;
-
-            case JET_errIndexNotFound:
-                // Ignore indices we can't see.
-                err = JET_errSuccess;
-                break;
-
-            default:
-                pfucb->u.pfcb->LeaveDML();
-                Call( err );
+                *(LANGID *)pb = LangidFromLcid( lcid );
             }
-        }
-        pfucb->u.pfcb->LeaveDML();
+            else
+            {
+                *(LCID *)pb = lcid;
+            }
+            break;
+
+        case JET_IdxInfoLocaleName:
+            Call( ErrCATGetIndexLocaleName(
+                      ppib,
+                      ifmp,
+                      objidTable,
+                      szIndexName,
+                      (WCHAR*) pb,
+                      cbMax ) );
+            break;
+
+        case JET_IdxInfoSortVersion:
+            Assert( sizeof( DWORD ) <= cbMax );
+            Call( ErrCATGetIndexSortVersion(
+                      ppib,
+                      ifmp,
+                      objidTable,
+                      szIndexName,
+                      (DWORD*) pb ) );
+            break;
+
+        case JET_IdxInfoDefinedSortVersion:
+            Assert( sizeof( DWORD ) <= cbMax );
+            Call( ErrCATGetIndexDefinedSortVersion(
+                      ppib,
+                      ifmp,
+                      objidTable,
+                      szIndexName,
+                      (DWORD*) pb ) );
+            break;
+
+        case JET_IdxInfoSortId:
+            Assert( sizeof( SORTID ) <= cbMax );
+            Call( ErrCATGetIndexSortid(
+                      ppib,
+                      ifmp,
+                      objidTable,
+                      szIndexName,
+                      (SORTID*) pb ) );
+            break;
+
+        case JET_IdxInfoVarSegMac:
+            Assert( sizeof(USHORT) == cbMax );
+            Call( ErrCATGetIndexVarSegMac(
+                      ppib,
+                      ifmp,
+                      objidTable,
+                      szIndexName,
+                      (USHORT *)pb ) );
+            break;
+
+        case JET_IdxInfoKeyMost:
+            Assert( sizeof(USHORT) == cbMax );
+            Call( ErrCATGetIndexKeyMost(
+                      ppib,
+                      ifmp,
+                      objidTable,
+                      szIndexName,
+                      (USHORT *)pb ) );
+            break;
         
-        *( (INT *)pb ) = cIndexes;
-        break;
+        case JET_IdxInfoCount:
+            Assert( sizeof(INT) == cbMax );
+            cIndexes = 1;       // the first index is the primary/sequential index
 
-    case JET_IdxInfoCreateIndex:
-    case JET_IdxInfoCreateIndex2:
-    case JET_IdxInfoCreateIndex3:
-        Call( ErrINFOGetTableIndexInfoForCreateIndex( ppib, pfucb, szIndexName, pb, cbMax, fUnicodeNames, lInfoLevel ) );
-        break;
+            pfucb->u.pfcb->EnterDML();
+            for ( pfcbT = pfucb->u.pfcb->PfcbNextIndex();
+                  pfcbT != pfcbNil;
+                  pfcbT = pfcbT->PfcbNextIndex() )
+            {
+                err = ErrFILEIAccessIndex( pfucb->ppib, pfucb->u.pfcb, pfcbT );
+                switch ( min( err, JET_errSuccess ) ) // Ignore warnings.
+                {
+                    case JET_errSuccess:
+                        Expected( JET_errSuccess == err ); // But don't expect warnings.
+                        cIndexes++;
+                        break;
 
-    case JET_IdxInfoSysTabCursor:
-    case JET_IdxInfoOLC:
-    case JET_IdxInfoResetOLC:
-    default:
-        Assert( fFalse );       // should be impossible (filtered out by JetGetTableIndexInfo())
-        err = ErrERRCheck( JET_errInvalidParameter );
-        break;
+                    case JET_errIndexNotFound:
+                        // Ignore indices we can't see.
+                        err = JET_errSuccess;
+                        break;
+
+                    default:
+                        pfucb->u.pfcb->LeaveDML();
+                        Call( err );
+                }
+            }
+            pfucb->u.pfcb->LeaveDML();
+        
+            *( (INT *)pb ) = cIndexes;
+            break;
+
+        case JET_IdxInfoSpaceOwned:
+            Call( ErrINFOIGetIndexSpaceUsage( pfucb, szIndexName, fSPOwnedExtent, pb, cbMax ) );
+            break;
+
+        case JET_IdxInfoSpaceAvailable:
+            Call( ErrINFOIGetIndexSpaceUsage( pfucb, szIndexName, fSPAvailExtent, pb, cbMax ) );
+            break;
+
+        case JET_IdxInfoCreateIndex:
+        case JET_IdxInfoCreateIndex2:
+        case JET_IdxInfoCreateIndex3:
+            Call( ErrINFOGetTableIndexInfoForCreateIndex( ppib, pfucb, szIndexName, pb, cbMax, fUnicodeNames, lInfoLevel ) );
+            break;
+
+        case JET_IdxInfoSysTabCursor:
+        case JET_IdxInfoOLC:
+        case JET_IdxInfoResetOLC:
+        default:
+            Assert( fFalse );       // should be impossible (filtered out by JetGetTableIndexInfo())
+            err = ErrERRCheck( JET_errInvalidParameter );
+            break;
     }
 
 HandleError:
