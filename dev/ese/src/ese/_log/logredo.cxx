@@ -2199,6 +2199,121 @@ HandleError:
     return err;
 }
 
+LOCAL ERR ErrLGRIClearRedoMapDbtimeRevert( PIB* ppib, const LR* const plr, const DBTIME dbtime, const IFMP ifmp )
+{
+    Assert( ifmp != ifmpNil );
+
+    // It is possible the database was never attached.
+    if ( ifmp >= g_ifmpMax )
+    {
+        return JET_errSuccess;
+    }
+
+    // If there is a macro going, we will clear it as part of macro commit.
+    BOOL fMacroGoing                = ppib->FMacroGoing( dbtime );
+    CLogRedoMap* pLogRedoMapToClear = g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert();
+    ERR err                         = JET_errSuccess;
+
+    if ( !pLogRedoMapToClear || !pLogRedoMapToClear->FAnyPgnoSet() )
+    {
+        return JET_errSuccess;
+    }
+
+    switch ( plr->lrtyp )
+    {
+        case lrtypPageMove:
+        {
+            const LRPAGEMOVE* const plrpagemove = LRPAGEMOVE::PlrpagemoveFromLr( plr );
+
+            // If we have a macro, insert into the list of page to be freed during macro commit.
+            // If not, clear it from redomapDbTimeRevert.
+            if ( fMacroGoing )
+            {
+                CallR( ppib->ErrInsertPgnoFreed( dbtime, ifmp, plrpagemove->PgnoSource() ) );
+            }
+            else
+            {
+                pLogRedoMapToClear->ClearPgno( plrpagemove->PgnoSource() );
+            }
+            break;
+        }
+        case lrtypEmptyTree:
+        {
+            const LREMPTYTREE* const    plremptytree    = (LREMPTYTREE*)plr;
+            const EMPTYPAGE* const      rgemptypage     = (EMPTYPAGE*)plremptytree->rgb;
+            const CPG                   cpgToFree       = plremptytree->CbEmptyPageList() / sizeof( EMPTYPAGE );
+
+            for ( INT i = 0; i < cpgToFree; i++ )
+            {
+                // If we have a macro, insert into the list of page to be freed during macro commit.
+                // If not, clear the page from dbtimerevert redo map since the page is being freed.
+                // Any future operation on this page should be a new page operation and we shouldn't have to worry about dbtime.
+                //
+                if ( fMacroGoing )
+                {
+                    CallR( ppib->ErrInsertPgnoFreed( dbtime, ifmp, rgemptypage[ i ].pgno ) );
+                }
+                else
+                {
+                    pLogRedoMapToClear->ClearPgno( rgemptypage[ i ].pgno );
+                }
+            }
+
+            break;
+        }
+        case lrtypMerge:
+        case lrtypMerge2:
+        {
+            const LRMERGE_* const plrmerge = (LRMERGE_*)plr;
+
+            // Merge is always done inside a Macro
+            Assert( fMacroGoing );
+
+            // Add it to the list of pages freed, if empty.
+            if ( plrmerge->FEmptyPage() )
+            {
+                CallR( ppib->ErrInsertPgnoFreed( dbtime, ifmp, plrmerge->le_pgno ) );
+            }
+            break;
+        }
+    }
+
+    return JET_errSuccess;
+}
+
+LOCAL ERR ErrLGRIMacroClearRedoMapDbtimeRevert( PIB* const ppib, const DBTIME dbtime )
+{
+    Assert( ppib );
+
+    if ( !ppib->FMacroGoing( dbtime ) )
+    {
+        return JET_errSuccess;
+    }
+
+    CArray< CFMPPage >* prgfmppgnoFreed     = NULL;
+    ERR err                                 = JET_errSuccess;
+
+    CallR( ppib->ErrMacroPgnoFreed( dbtime, &prgfmppgnoFreed ) );
+
+    // It is possible that no pages were freed as part of this macro in which case the array might not have been initialized.
+    if ( prgfmppgnoFreed )
+    {
+        size_t  cfmppgnofreed = prgfmppgnoFreed->Size();
+
+        for ( int i = 0; i < cfmppgnofreed; ++i )
+        {
+            CFMPPage fmppage = prgfmppgnoFreed->Entry( i );
+
+            if ( g_rgfmp[ fmppage.Ifmp() ].PLogRedoMapDbtimeRevert() )
+            {
+                g_rgfmp[ fmppage.Ifmp() ].PLogRedoMapDbtimeRevert()->ClearPgno( fmppage.PgNo() );
+            }
+        }
+    }
+
+    return JET_errSuccess;
+}
+
 // Terminate each session in the global session list
 ERR LOG::ErrLGRIEndEverySession()
 {
@@ -6844,6 +6959,19 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
             default:
                 Assert( JET_errSuccess == err );
         }
+
+        // If it is an empty tree LR, we will clear the pages from redo map dbtime revert.
+        // The operation is being performed here so that we can clear it from redo map even if
+        // redo of LR is skipped due to beginTrx being outside the checkpoint.
+        if ( plr->lrtyp == lrtypEmptyTree && ( err == JET_errSuccess || err == errSkipLogRedoOperation ) )
+        {
+            const LREMPTYTREE* const plremptytree = (LREMPTYTREE*)plr;
+            PIB* ppib;
+            CallR( ErrLGRIPpibFromProcid( plremptytree->le_procid, &ppib ) );
+
+            const IFMP ifmp = PinstFromPpib( ppib )->m_mpdbidifmp[ plremptytree->dbid ];
+            CallR( ErrLGRIClearRedoMapDbtimeRevert( ppib, plremptytree, plremptytree->le_dbtime, ifmp ) );
+        }
         
         CallR( err );
         break;
@@ -7085,6 +7213,13 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         }
 
         CallR( ErrLGRIPpibFromProcid( procid, &ppib ) );
+
+        // The operation is being performed here so that we can clear it from redo map even if
+        // redo of LR is skipped due to beginTrx being outside the checkpoint.
+        // For macro operations, we will add it to list of pages freed in the macro 
+        // and remove from redomap during macro commit operation.
+        const IFMP ifmp = PinstFromPpib( ppib )->m_mpdbidifmp[ dbid ];
+        CallR( ErrLGRIClearRedoMapDbtimeRevert( ppib, plr, dbtime, ifmp ) );
 
         if ( !ppib->FAfterFirstBT() )
         {
@@ -8913,27 +9048,6 @@ HandleError:
     return err;
 }
 
-//  Clears the redo map storing the dbtimerevert pages for the empty merged pages which were skipped from redo operations earlier in the required range.
-//
-LOCAL VOID LGIRedoMergeClearRedoMapDbtimeRevert( const MERGEPATH* const pmergePathTip, const IFMP ifmp )
-{
-    // There is no redomap dbtimerevert. So nothing needs to be cleared.
-    if ( !g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() )
-    {
-        return;
-    }
-
-    for ( const MERGEPATH *pmergePath = pmergePathTip; pmergePath != NULL; pmergePath = pmergePath->pmergePathParent )
-    {
-        Assert( pmergePath->csr.Pgno() != pgnoNull );
-
-        if ( pmergePath->fEmptyPage )
-        {
-            g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( pmergePath->csr.Pgno() );
-        }
-    }
-}
-
 //  ================================================================
 ERR LOG::ErrLGRIRedoNewPage( const LRNEWPAGE * const plrnewpage )
 //  ================================================================
@@ -9155,12 +9269,6 @@ ERR LOG::ErrLGRIIRedoPageMove( _In_ PIB * const ppib, const LRPAGEMOVE * const p
     LGIRedoMergeUpdateDbtime( pmergePath, plrpagemove->DbtimeAfter() );
     BTPerformPageMove( pmergePath );
 
-    // Remove the source page from dbtimerevert redo map as it is freed now.
-    if ( g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() )
-    {
-        g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( plrpagemove->PgnoSource() );
-    }
-
 HandleError:
 
     BTIReleaseMergePaths( pmergePath );
@@ -9190,6 +9298,14 @@ ERR LOG::ErrLGRIRedoPageMove( const LRPAGEMOVE * const plrpagemove )
     {
         Call( ErrLGRIIRedoPageMove( ppib, plrpagemove ) );
     }
+
+    const IFMP ifmp = PinstFromPpib( ppib )->m_mpdbidifmp[ plrpagemove->Dbid() ];
+
+    // Remove the source page from dbtimerevert redo map as it is freed now.
+    // We will remove it from redo map even if skip is set.
+    // This is because if BeginTrx is outside checkpoint we might skip clearing redomap.
+    // For macro cases, we will do it during macro commit.
+    Call( ErrLGRIClearRedoMapDbtimeRevert( ppib, plrpagemove, plrpagemove->DbtimeAfter(), ifmp ) );
 
 HandleError:
     return err;
@@ -9989,10 +10105,6 @@ ERR LOG::ErrLGRIRedoMerge( PIB *ppib, DBTIME dbtime )
     //
     BTIPerformMerge( pfucb, pmergePathLeaf );
 
-    //  removes page with db time dbtimerevert from dbtimerevert redomap if page is empty.
-    //
-    LGIRedoMergeClearRedoMapDbtimeRevert( pmergePathLeaf, m_pinst->m_mpdbidifmp[ dbid ] );
-
 HandleError:
     AssertSz( errSkipLogRedoOperation != err, "%s() got errSkipLogRedoOperation from ErrLGRICheckRedoCondition(dbtime=%d=%#x).\n",
               __FUNCTION__, dbtime, dbtime );
@@ -10356,12 +10468,6 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                 {
                     Assert( ( pcsrNew->PagetrimState() == pagetrimTrimmed ) ||
                             ( pcsrNew->Latch() == latchRIW ) );
-                }
-
-                // Remove the source page from dbtimerevert redo map as it is freed now.
-                if ( g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() )
-                {
-                    g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( plrpm->PgnoSource() );
                 }
             }
 
@@ -12395,9 +12501,30 @@ ProcessNextRec:
                 //  if it is commit, redo all the recorded log records,
                 //  otherwise, throw away the logs
                 //
-                if ( lrtypMacroCommit == plr->lrtyp && ppib->FAfterFirstBT() )
+                if ( lrtypMacroCommit == plr->lrtyp )
                 {
-                    Call( ErrLGRIRedoMacroOperation( ppib, dbtime ) );
+                    if ( ppib->FAfterFirstBT() )
+                    {
+                        Call( ErrLGRIRedoMacroOperation( ppib, dbtime ) );
+                    }
+
+                    // Even if BeginTrx is outside the checkpoint, we might still have to clear some pages in the redomap dbtimeRevert.
+                    // For example, in the below scenario, if the MergePage frees the page and there is a new page outside the required range of the RBS,
+                    // RBS will capture new page record and when reverting, it will revert it back to new page state with dbtimeRevert.
+                    // When we replay the required range, the redo map will have the page added since trx2 is editing the page.
+                    // This should be reconciled when we do MergePage but since BeginTrx might be outside the checkpoint we would skip redo'ing the LR and thereby
+                    // end up in a state where the page is not removed from the redo map causing recovery failure.
+                    //      BeginTrx( trx1 )
+                    //      <--checkpoint-->
+                    //      BeginTrx( trx2 )
+                    //      EditPage( trx2 )
+                    //      MergePage( trx1 )
+                    //      CommitTrx( trx1 )
+                    //      CommitTrx( trx2 )
+                    //      < --End of required range-- >
+                    //      NewPage()
+                    //
+                    CallR( ErrLGRIMacroClearRedoMapDbtimeRevert( ppib, dbtime ) );
                 }
 
                 //  disable MacroGoing
