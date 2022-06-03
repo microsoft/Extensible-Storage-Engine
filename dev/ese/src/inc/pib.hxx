@@ -99,6 +99,32 @@ public:
     {}
 };
 
+//  this class stores the pgno and the corresponding FMP.
+class CFMPPage
+{
+public:
+    CFMPPage() : CFMPPage( ifmpNil, 0 ) {}
+
+    CFMPPage( IFMP ifmp, PGNO pgno ) :
+        m_ifmp( ifmp ),
+        m_pgno( pgno ) {}
+    ~CFMPPage() {}
+
+    CFMPPage& operator=( const CFMPPage& fmppage )
+    {
+        m_ifmp = fmppage.m_ifmp;
+        m_pgno = fmppage.m_pgno;
+        return *this;
+    }
+
+    const IFMP Ifmp() const { return m_ifmp; }
+    const PGNO PgNo() const { return m_pgno; }
+
+private:
+    IFMP m_ifmp;
+    PGNO m_pgno;
+};
+
 //
 // Process Information Block
 //
@@ -109,11 +135,12 @@ private:
     class MACRO
     {
         private:
-            DBTIME      m_dbtime;
-            BYTE        *m_rgbLogrec;
-            size_t      m_cbLogrecMac;
-            size_t      m_ibLogrecAvail;
-            MACRO       *m_pMacroNext;
+            DBTIME              m_dbtime;
+            BYTE                *m_rgbLogrec;
+            size_t              m_cbLogrecMac;
+            size_t              m_ibLogrecAvail;
+            MACRO               *m_pMacroNext;
+            CArray< CFMPPage >  *m_rgfmppgnoFreed;
 
         public:
             DBTIME      Dbtime()        const           { return m_dbtime; }
@@ -127,6 +154,9 @@ private:
             VOID        ReleaseBuffer();
             VOID        *PvLogrec()     const           { return m_rgbLogrec; }
             size_t      CbSizeLogrec()  const           { return m_ibLogrecAvail; }
+
+            CArray< CFMPPage > *PrgfmppgnoFreed() const        { return m_rgfmppgnoFreed; }
+            ERR                 ErrInsertPgnoFreed( IFMP ifmp, const PGNO pgnoFreed );
     };
 
 public:
@@ -386,6 +416,8 @@ public:
     ERR                 ErrInsertLogrec( DBTIME dbtime, const VOID * pv, const ULONG cb );
     VOID                *PvLogrec( DBTIME dbtime )      const;
     SIZE_T              CbSizeLogrec( DBTIME dbtime )   const;
+    ERR                 ErrInsertPgnoFreed( const DBTIME dbtime, IFMP ifmp, const PGNO pgnoFreed );
+    ERR                 ErrMacroPgnoFreed( const DBTIME dbtime, CArray< CFMPPage > **rgfmppgnoFreed );
 
     RCE                 * PrceOldest();
 
@@ -685,6 +717,12 @@ INLINE VOID PIB::ResetMacroGoing( DBTIME dbtime )
 INLINE VOID PIB::MACRO::ResetBuffer()
 {
     m_ibLogrecAvail = 0;
+
+    if ( NULL != m_rgfmppgnoFreed )
+    {
+        delete m_rgfmppgnoFreed;
+        m_rgfmppgnoFreed = NULL;
+    }
 }
 
 INLINE VOID PIB::MACRO::ReleaseBuffer()
@@ -695,6 +733,12 @@ INLINE VOID PIB::MACRO::ReleaseBuffer()
         m_rgbLogrec = NULL;
         m_ibLogrecAvail = 0;
         m_cbLogrecMac = 0;
+    }
+
+    if ( NULL != m_rgfmppgnoFreed )
+    {
+        delete m_rgfmppgnoFreed;
+        m_rgfmppgnoFreed = NULL;
     }
 }
 
@@ -801,6 +845,44 @@ INLINE VOID PIB::SetErrRollbackFailure( const ERR err )
     m_errRollbackFailure = err;
 }
 
+INLINE ERR PIB::MACRO::ErrInsertPgnoFreed( IFMP ifmp, const PGNO pgnoFreed )
+{
+    ERR err = JET_errSuccess;
+    CArray< CFMPPage >::ERR errArray = CArray< CFMPPage >::ERR::errSuccess;
+    CFMPPage fmppage( ifmp, pgnoFreed );
+
+    if ( m_rgfmppgnoFreed == NULL )
+    {
+        Alloc( m_rgfmppgnoFreed = new CArray< CFMPPage >() );
+    }
+
+    errArray = m_rgfmppgnoFreed->ErrSetEntry( m_rgfmppgnoFreed->Size(), fmppage );
+
+    if ( errArray != CArray< CFMPPage >::ERR::errSuccess )
+    {
+        Assert( errArray == CArray< CFMPPage >::ERR::errOutOfMemory );
+        return ErrERRCheck( JET_errOutOfMemory );
+    }
+
+HandleError:
+    return err;
+}
+
+INLINE ERR PIB::ErrInsertPgnoFreed( const DBTIME dbtime, IFMP ifmp, const PGNO pgnoFreed )
+{
+    ASSERT_VALID( this );
+
+    for ( MACRO* pMacro = m_pMacroNext; pMacro != NULL; pMacro = pMacro->PMacroNext() )
+    {
+        if ( pMacro->Dbtime() == dbtime )
+        {
+            return pMacro->ErrInsertPgnoFreed( ifmp, pgnoFreed );
+        }
+    }
+
+    Assert( fFalse );
+    return ErrERRCheck( JET_errInvalidSesid );
+}
 
 //  ================================================================
 INLINE ERR PIB::ErrAllocPvRecordFormatConversionBuffer()
