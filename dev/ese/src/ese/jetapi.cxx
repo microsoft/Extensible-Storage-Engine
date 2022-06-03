@@ -8936,6 +8936,8 @@ LOCAL JET_ERR JetGetTableIndexInfoEx(
         case JET_IdxInfoList:
             cbMin = sizeof(JET_INDEXLIST) - cbIDXLISTNewMembersSinceOriginalFormat;
             break;
+        case JET_IdxInfoSpaceOwned:
+        case JET_IdxInfoSpaceAvailable:
         case JET_IdxInfoSpaceAlloc:
         case JET_IdxInfoCount:
             cbMin = sizeof(ULONG);
@@ -9083,6 +9085,8 @@ LOCAL JET_ERR JetGetIndexInfoEx(
         case JET_IdxInfoList:
             cbMin = sizeof(JET_INDEXLIST) - cbIDXLISTNewMembersSinceOriginalFormat;
             break;
+        case JET_IdxInfoSpaceOwned:
+        case JET_IdxInfoSpaceAvailable:
         case JET_IdxInfoSpaceAlloc:
         case JET_IdxInfoCount:
             cbMin = sizeof(ULONG);
