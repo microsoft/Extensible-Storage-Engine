@@ -2214,7 +2214,11 @@ LOCAL ERR ErrLGRIClearRedoMapDbtimeRevert( PIB* ppib, const LR* const plr, const
     CLogRedoMap* pLogRedoMapToClear = g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert();
     ERR err                         = JET_errSuccess;
 
-    if ( !pLogRedoMapToClear || !pLogRedoMapToClear->FAnyPgnoSet() )
+    // Redomaps get allocated only after first attempt to check if redo for a page is needed.
+    // For macros, since we add it to the list even before actual redo on the page,
+    // it is possible that the redomap has not yet been allocated. So for macros, since we don't need
+    // the redomap yet, we will continue and add the page to the freed list if needed.
+    if ( !pLogRedoMapToClear && !fMacroGoing )
     {
         return JET_errSuccess;
     }
