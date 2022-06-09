@@ -4699,6 +4699,15 @@ ERR CPAGE::ErrCheckPage(
                     Error( ErrCaptureCorruptedPageInfo( mode, L"TagcbSuffixTooLarge" ) );
                 }
 
+                if ( kdf.key.prefix.Cb() == 0 && kdf.key.suffix.Cb() == 0 &&
+                     ( FLeafPage() || itag < ppghdr->itagMicFree - 1 ) && // last key in non-leaf pages is empty
+                     !g_fRepair )
+                {
+                    (*pcprintf)( "page corruption (%d): TAG %d both prefix/suffix are zero length\r\n",
+                                    m_pgno, itag );
+                    Error( ErrCaptureCorruptedPageInfo( mode, L"TagZeroLengthKey" ) );
+                }
+
                 //  if the data portion of this node is larger than the node (according to the tag 
                 //  array size), then we have a problem ...
 
