@@ -4346,19 +4346,36 @@ ERR ErrRECSetCurrentIndex(
         if ( pfcbNil == pfcbSecondary )
         {
             pfcbTable->LeaveDML();
-            Call( ErrERRCheck( JET_errIndexNotFound ) );
+            Error( ErrERRCheck( JET_errIndexNotFound ) );
         }
-
-        else if ( pfcbSecondary->Pidb()->FTemplateIndex() )
+        else if ( pfcbSecondary->Pidb()->FDeferredPopulate() )
         {
-            // Don't need refcount on template indexes, since we
-            // know they'll never go away.
-            Assert( pfcbSecondary->Pidb()->CrefCurrentIndex() == 0 );
+            // Can't set to an index that is not completely populated.
+            pfcbTable->LeaveDML();
+            Error( ErrERRCheck( JET_errCantUseDeferredPopulateIndex ) );
+        }
+        else if ( pfcbSecondary->Pidb()->FDeferredPopulateCompleted() &&
+                  ( TrxCmp( pfucb->ppib->trxBegin0, pfcbSecondary->Pidb()->TrxDeferredPopulateMinTrx() ) < 0 ) )
+        {
+            // The index was recently completed after my transaction begain.  I won't have
+            // a complete view of the index, so I can't use it.
+            pfcbTable->LeaveDML();
+            Error( ErrERRCheck( JET_errCantUseDeferredPopulateIndex ) );
         }
         else
         {
-            pfcbSecondary->Pidb()->IncrementCurrentIndex();
-            fIncrementedRefCount = fTrue;
+            // Good index
+            if ( pfcbSecondary->Pidb()->FTemplateIndex() )
+            {
+                // Don't need refcount on template indexes, since we
+                // know they'll never go away.
+                Assert( pfcbSecondary->Pidb()->CrefCurrentIndex() == 0 );
+            }
+            else
+            {
+                pfcbSecondary->Pidb()->IncrementCurrentIndex();
+                fIncrementedRefCount = fTrue;
+            }
         }
 
         pfcbTable->LeaveDML();

@@ -673,6 +673,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
                                                                     //      flag. The next 4 bits are left unused (for now) and the lower 2 bits are used for ScanCheckSource.
 #define JET_efvExtentFreed2                                 9500    //  Adds support for ExtentFreed2 LR which adds dbtime of the database to the existing ExtentFreed LR.
 #define JET_efvKVPStoreV2                                   9520    //  Allows upgrade of KVP stores to version 1.0.2
+#define JET_efvIndexDeferredPopulate                        9540    //  Adds support for deferred population of indices.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -750,7 +751,8 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_cbtypOnlineDefragProgress           0x00002000  /* online defragmentation has made progress */
 //  callback for JetDefragment2 actions (testing only)
 //  pvArg1 is ptr to table name, pvArg2 is ptr to action code JET_bitOld2Start, etc...
-#define JET_cbtypOld2Action          0x00004000
+#define JET_cbtypOld2Action                     0x00004000
+#define JET_cbtypIndexDeferredPopulateThrottle  0x00008000
 
 // begin_PubEsent
 
@@ -4215,9 +4217,14 @@ typedef enum
 #define JET_paramEnableBlockCache               218 //  Indicates that the ESE Block Cache is enabled.  This is sufficient to access files previously attached to the ESE Block Cache but not to attach new files.
 
 #endif // JET_VERSION >= 0x0A01
+// end_PubEsent
 
+#define JET_paramDeferredIndexPopulateRowsPerTransaction 219 // Number of primary index rows to process in a single transaction when processing
+                                                             // a delayed-populate index
 
-#define JET_paramMaxValueInvalid                219 //  This is not a valid parameter. It can change from release to release!
+// begin_PubEsent
+
+#define JET_paramMaxValueInvalid                220 //  This is not a valid parameter. It can change from release to release!
 
 // end_PubEsent
 #if ( JET_VERSION >= 0x0A01 )
@@ -4685,8 +4692,12 @@ typedef struct
 #if ( JET_VERSION >= 0x0A00 )
 #define JET_bitIndexImmutableStructure  0x00080000  // Do not write to the input structures during a JetCreateIndexN call.
 #endif // JET_VERSION >= 0x0A00
-
 // end_PubEsent
+#if ( JET_VERSION >= 0x0A00 )
+#define JET_bitIndexDeferredPopulateCreate  0x00100000  // Only create the index, don't actually populate it.
+#define JET_bitIndexDeferredPopulateProcess 0x00200000  // Populate an index that was previously created with JET_bitIndexDeferredPopulateCreate
+#endif // JET_VERSION >= 0x0A00
+
 // These are not persisted anywhere. These are bits used by the 'Isam layer', a simpler C#-based
 // interface to access ESE databases.
 //
@@ -6095,6 +6106,9 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define errRECColumnNotFound                -429  /* Column value not found in record */
 #define errRECNoCurrentColumnValue          -430  /* No current column value in record */
 #define JET_errCompressionIntegrityCheckFailed  -431  /* A compression integrity check failed. Decompressing data failed the integrity checksum indicating a data corruption in the compress/decompress pipeline. */
+#define JET_wrnIndexDeferredPopulateIncomplete   432  /* Populating a deferred populate index did not complete. */
+#define JET_wrnIndexDeferredPopulateHalted   433  /* Populating a deferred populate index was unexpectedly halted. */
+#define JET_errIndexDeferredPopulateCurrentlyUnavailable -434 /* Populating a deferred populate index is not allowed at this time. */
 // begin_PubEsent
 
 /*  LOGGING/RECOVERY errors
@@ -6483,6 +6497,9 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errInvalidIndexId               -1416 /* Illegal index id */
 #define JET_wrnPrimaryIndexOutOfDate         1417 /* The Primary index is created with an incompatible OS sort version. The table can not be safely modified. */
 #define JET_wrnSecondaryIndexOutOfDate       1418 /* One or more Secondary index is created with an incompatible OS sort version. Any index over Unicode text should be deleted. */
+// end_PubEsent
+#define JET_errCantUseDeferredPopulateIndex -1419 /* A deferred population index may not be used until completely populated */
+// begin_PubEsent
 
 #define JET_errIndexTuplesSecondaryIndexOnly        -1430   //  tuple index can only be on a secondary index
 #define JET_errIndexTuplesTooManyColumns            -1431   //  tuple index may only have eleven columns in the index

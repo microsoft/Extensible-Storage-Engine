@@ -1176,6 +1176,30 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamIndexDeferredPopulateCurrentlyUnavailableException : public IsamStateException
+    {
+    public:
+        IsamIndexDeferredPopulateCurrentlyUnavailableException() : IsamStateException( "Populating a deferred populate index is not allowed at this time.", JET_errIndexDeferredPopulateCurrentlyUnavailable)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamIndexDeferredPopulateCurrentlyUnavailableException( String ^ description, Exception^ innerException ) :
+            IsamStateException( description, innerException )
+        {
+        }
+
+        IsamIndexDeferredPopulateCurrentlyUnavailableException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamStateException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamLogFileCorruptException : public IsamCorruptionException
     {
     public:
@@ -6480,6 +6504,30 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamCantUseDeferredPopulateIndexException : public IsamUsageException
+    {
+    public:
+        IsamCantUseDeferredPopulateIndexException() : IsamUsageException( "A deferred population index may not be used until completely populated", JET_errCantUseDeferredPopulateIndex)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamCantUseDeferredPopulateIndexException( String ^ description, Exception^ innerException ) :
+            IsamUsageException( description, innerException )
+        {
+        }
+
+        IsamCantUseDeferredPopulateIndexException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamUsageException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamIndexTuplesSecondaryIndexOnlyException : public IsamUsageException
     {
     public:
@@ -9113,6 +9161,8 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamStaleColumnReferenceException;
         case JET_errCompressionIntegrityCheckFailed:
             return gcnew IsamCompressionIntegrityCheckFailedException;
+        case JET_errIndexDeferredPopulateCurrentlyUnavailable:
+            return gcnew IsamIndexDeferredPopulateCurrentlyUnavailableException;
         case JET_errLogFileCorrupt:
             return gcnew IsamLogFileCorruptException;
         case JET_errNoBackupDirectory:
@@ -9555,6 +9605,8 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamSecondaryIndexCorruptedException;
         case JET_errInvalidIndexId:
             return gcnew IsamInvalidIndexIdException;
+        case JET_errCantUseDeferredPopulateIndex:
+            return gcnew IsamCantUseDeferredPopulateIndexException;
         case JET_errIndexTuplesSecondaryIndexOnly:
             return gcnew IsamIndexTuplesSecondaryIndexOnlyException;
         case JET_errIndexTuplesNonUniqueOnly:

@@ -3967,6 +3967,9 @@ ERR ErrCATDeleteTableIndex(
 
     CATResetExtentPageCounts( ppib, ifmp, objidIndex );
 
+    // Best effort.  Downside is leaking a single row in the DeferredPopulateKey store.
+    (VOID)ErrCATSetDeferredPopulateKey( ifmp, objidIndex, NULL, 0 );
+
     return JET_errSuccess;
 }
 
@@ -6812,6 +6815,7 @@ INLINE ERR ErrCATIInitTDB(
                         MSysDBM::FIsSystemTable( szTableName ) ||
                         FSCANSystemTable( szTableName ) ||
                         FCATObjidsTable( szTableName ) ||
+                        FCATDeferredPopulateKeysTable( szTableName ) ||
                         FCATLocalesTable( szTableName ) );
 
     Call( ErrTDBCreate( pinst, pfucbCatalog->ifmp, &ptdb, &tcib, fSystemTable, pfcbTemplateTable, fTrue ) );
@@ -11055,6 +11059,85 @@ HandleError:
     {
         CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
     }
+    return err;
+}
+
+ERR ErrCATGetDeferredPopulateKey(
+    const IFMP          ifmp,
+    const OBJID         objidIndex,
+    BYTE                *pbDeferredPopulateKey,
+    const ULONG         cbDeferredPopulateKeyMax,
+    ULONG               *pcbDeferredPopulateKeyActual)
+{
+    ERR   err             = JET_errSuccess;
+    WCHAR wszEntryKey[9];
+
+    AssertSz( NULL != g_rgfmp[ifmp].PkvpsMSysDeferredPopulateKeys(), "FMP should have this store by the time you're here" );
+    C_ASSERT( 4 == sizeof( objidIndex ) );
+    OSStrCbFormatW( wszEntryKey, sizeof( wszEntryKey ), L"%08X", objidIndex );
+
+    err = g_rgfmp[ifmp].PkvpsMSysDeferredPopulateKeys()->ErrKVPGetValue(
+        wszEntryKey,
+        pbDeferredPopulateKey,
+        cbDeferredPopulateKeyMax,
+        pcbDeferredPopulateKeyActual);
+
+    switch ( err)
+    {
+        case JET_errSuccess:
+            break;
+
+        case JET_errRecordNotFound:
+            *pcbDeferredPopulateKeyActual = 0;
+            err = JET_errSuccess;
+            break;
+
+        default:
+            Call( err );
+            break;
+    }
+
+HandleError:
+
+    return err;
+}
+
+ERR ErrCATSetDeferredPopulateKey(
+    const IFMP          ifmp,
+    const OBJID         objidIndex,
+    const BYTE          *pbDeferredPopulateKey,
+    const ULONG         cbDeferredPopulateKey )
+{
+    ERR  err             = JET_errSuccess;
+    WCHAR wszEntryKey[9];
+
+    if ( NULL == g_rgfmp[ifmp].PkvpsMSysDeferredPopulateKeys() )
+    {
+        // If we don't have a KVP store for deferred populate keys for this FMP,
+        // then we should only be trying to set a 0 length value (i.e. deleting
+        // any existing values.  We should have successfully created the KVP store
+        // before we did anything that may need to set actual bytes.
+        AssertTrack( 0 == cbDeferredPopulateKey, "No table, should not be trying to set a value" );
+        goto HandleError;
+    }
+
+    C_ASSERT( 4 == sizeof( objidIndex ) );
+    OSStrCbFormatW( wszEntryKey, sizeof( wszEntryKey ), L"%08X", objidIndex );
+
+    if ( cbDeferredPopulateKey )
+    {
+        Call( g_rgfmp[ifmp].PkvpsMSysDeferredPopulateKeys()->ErrKVPSetValue(
+                  wszEntryKey,
+                  pbDeferredPopulateKey,
+                  cbDeferredPopulateKey ) );
+    }
+    else
+    {
+        Call( g_rgfmp[ifmp].PkvpsMSysDeferredPopulateKeys()->ErrKVPDeleteKey( wszEntryKey ) );
+    }
+
+HandleError:
+
     return err;
 }
 
@@ -15876,6 +15959,7 @@ PERSISTED const QWORD g_qwUpgradedLocalesTable = 0xFFFFFFFFFFFFFFFF;
 //  Major Version of the MSysLocales KVP-Store ...
 
 PERSISTED const ULONG g_dwMSLocalesMajorVersions = 1;   // endianness taken care of by KVPStore
+PERSISTED const ULONG g_dwMSDeferredPopulateKeysVersions = 1;
 
 //  The key format we use for the MSysLocales KVP-Store ... old lcid based format "LCID=%d,Ver=%I64x";
 
@@ -15914,6 +15998,53 @@ JETUNITTEST( CATMSysLocales, TestFCATIsMSLocalesConsistencyMarker )
     CHECK( fFalse == FCATIIsMSLocalesConsistencyMarker( g_wszMSLocalesConsistencyMarkerKey, g_cMSLocalesConsistencyMarkerValue + 1 ) );
     CHECK( fFalse == FCATIIsMSLocalesConsistencyMarker( NULL, g_cMSLocalesConsistencyMarkerValue ) );
     CHECK( fFalse == FCATIIsMSLocalesConsistencyMarker( L"NotAGoodMarker", g_cMSLocalesConsistencyMarkerValue ) );
+}
+
+//  Inits MSDeferredPopulateKeys facility (and creates the table if allowed and necessary).
+
+ERR ErrCATIInitMSDeferredPopulateKeys(
+    _In_ PIB * const ppib,
+    const IFMP ifmp,
+    BOOL fAllowCreation )
+{
+    ERR err = JET_errSuccess;
+    CKVPStore * pkvps = NULL;
+    IFMP ifmpOpen = ifmpNil;
+
+    Assert( ppib != ppibNil );  //  This function assumes a valid session.
+
+    Call( ErrDBOpenDatabase( ppib, g_rgfmp[ifmp].WszDatabaseName(), &ifmpOpen, NO_GRBIT ) );
+    Assert( ifmpOpen == ifmp );
+
+    Assert( fAllowCreation ? ( JET_wrnFileOpenReadOnly != err ) : fTrue );
+    // We shouldn't be RO if caller is allowing creation.  We MIGHT be RO if, for example,
+    // we're being run under eseutil, in which case we need to try to open the KVP store
+    // to read the progress key to do a proper integrity check.
+    
+    Alloc( pkvps = new CKVPStore( ifmp, wszMSDeferredPopulateKeys ) );
+
+    Call( pkvps->ErrKVPInitStore( ppib, CKVPStore::eReadWrite, 2, fAllowCreation ) );
+
+    //  set the MSysDeferredPopulateKeys store value in the FMP
+
+    g_rgfmp[ ifmp ].SetKVPMSysDeferredPopulateKeys( pkvps );
+    pkvps = NULL;   // owned by FMP now ...
+    Assert( g_rgfmp[ ifmp ].PkvpsMSysDeferredPopulateKeys() );
+
+HandleError:
+
+    Assert( g_rgfmp[ ifmp ].PkvpsMSysDeferredPopulateKeys() != NULL || err < JET_errSuccess );
+
+    //  do not need to KVPTermStore() because we used an external PIB / IFMP ...
+
+    delete pkvps;
+
+    if ( ifmpOpen != ifmpNil )
+    {
+        CallS( ErrDBCloseDatabase( ppib, ifmpOpen, 0 ) );
+    }
+
+    return err;
 }
 
 //  Init's MSLocales facility (and creates the table if necessary).
@@ -16027,6 +16158,67 @@ HandleError:
     return err;
 }
 
+//  Deletes the MSysDeferredPopulateKeys table.
+
+//  ================================================================
+ERR ErrCATDeleteMSDeferredPopulateKeys(
+        _In_ PIB * const ppibProvided,
+        _In_ const IFMP ifmp )
+//  ================================================================
+{
+    ERR     err             = JET_errSuccess;
+    BOOL    fDatabaseOpen   = fFalse;
+    BOOL    fInTransaction  = fFalse;
+    PIB *   ppib            = NULL;
+    IFMP    ifmpT           = ifmpNil;
+
+    if ( NULL == ppibProvided )
+    {
+        Call( ErrPIBBeginSession( PinstFromIfmp( ifmp ), &ppib, procidNil, fFalse ) );
+    }
+    else
+    {
+        ppib = ppibProvided;
+    }
+
+    Call( ErrDBOpenDatabase( ppib, g_rgfmp[ifmp].WszDatabaseName(), &ifmpT, NO_GRBIT ) );
+    Assert( ifmp == ifmpT );
+    fDatabaseOpen = fTrue;
+
+    Assert( !fInTransaction );
+    Call( ErrDIRBeginTransaction( ppib, 33607, NO_GRBIT ) );
+    fInTransaction = fTrue;
+
+    //  Now delete the actual table.
+    Call( ErrIsamDeleteTable( (JET_SESID)ppib, (JET_DBID)ifmp, szMSDeferredPopulateKeys ) )
+
+    Assert( fInTransaction );
+    Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    fInTransaction = fFalse;
+
+HandleError:
+    if( fInTransaction )
+    {
+        (void)ErrDIRRollback( ppib );
+        fInTransaction = fFalse;
+    }
+
+    if( fDatabaseOpen )
+    {
+        Assert( ifmpNil != ifmpT );
+        CallS( ErrDBCloseDatabase( ppib, ifmpT, NO_GRBIT ) );
+    }
+
+    if ( NULL == ppibProvided )
+    {
+        PIBEndSession( ppib );
+    }
+
+    Assert( !fInTransaction );
+
+    return err;
+}
+
 //  Stamps the consistency marker to the MSysLocales table.
 
 //  ================================================================
@@ -16133,6 +16325,19 @@ VOID CATTermMSLocales( FMP * const pfmp )
     {
         CKVPStore * pkvps = pfmp->PkvpsMSysLocales();
         pfmp->SetKVPMSysLocales( NULL );
+        pkvps->KVPTermStore();
+        delete pkvps;
+    }
+}
+
+//  Terms's MSDeferredPopulateKeys facility (must be done before tearing down PIBs and FUCBs).
+
+VOID CATTermMSDeferredPopulateKeys( FMP * const pfmp )
+{
+    if ( pfmp->PkvpsMSysDeferredPopulateKeys() )
+    {
+        CKVPStore * pkvps = pfmp->PkvpsMSysDeferredPopulateKeys();
+        pfmp->SetKVPMSysDeferredPopulateKeys( NULL );
         pkvps->KVPTermStore();
         delete pkvps;
     }
@@ -16366,6 +16571,33 @@ HandleError:
     Assert( !Pcsr( pfucbCatalog )->FLatched() );
 
     CallS( ErrCATClose( ppib, pfucbCatalog ) );
+
+    return err;
+}
+
+//  ================================================================
+ERR ErrCATInitMSDeferredPopulateKeys(
+        _In_ PIB * const ppib,
+        const IFMP ifmp,
+        BOOL fAllowCreation )
+{
+    ERR err = JET_errSuccess;
+    FMP * const pfmp = &g_rgfmp[ifmp];
+
+    if ( !pfmp->FEfvSupported( JET_efvIndexDeferredPopulate ) )
+    {
+        Assert( NULL == pfmp->PkvpsMSysDeferredPopulateKeys() );
+        Error( ErrERRCheck( JET_errEngineFormatVersionParamTooLowForRequestedFeature ) );
+    }
+
+    if( NULL == pfmp->PkvpsMSysDeferredPopulateKeys() )
+    {
+        // No KVPStore has been located or created yet.  Try now.
+        Call( ErrCATIInitMSDeferredPopulateKeys( ppib, ifmp, fAllowCreation ) );
+    }
+    Assert( pfmp->PkvpsMSysDeferredPopulateKeys() );
+
+HandleError:
 
     return err;
 }

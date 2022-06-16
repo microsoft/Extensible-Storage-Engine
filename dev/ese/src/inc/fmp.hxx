@@ -427,6 +427,19 @@ class FMP
         //  KVPStore of index locales/LCIDs
         CKVPStore *         m_pkvpsMSysLocales;
         
+        //  KVPStore of keys used by deferred-populate indices.  The store is created on-demand
+        //  the first time a deferred-populate index is created, so this may be NULL, even if
+        //  we're running at an EFV that supports deferred-populate indices.
+        CKVPStore *         m_pkvpsMSysDeferredPopulateKeys;
+
+        // Static member function to initialize the KVP store for MSysDeferredPopulateKeys
+        // Needs to be declared early so we can use it in a template used to create a member variable
+        // in this "private" section.
+        // Use a static function to avoid the need to specialize CInitOnce<> for pointer-to-member types,
+        // or to use a functor.  In practice, the passed FMP * as the first parameter is an ersatz "this" pointer.
+        static ERR ErrInitMSysDeferredPopulateKeys_( FMP * pfmp, PIB * const ppib, BOOL );
+        CInitOnce< ERR, decltype(&FMP::ErrInitMSysDeferredPopulateKeys_), FMP *, PIB * const, BOOL> m_initOnceMSysDeferredPopulateKeys;
+
         // a count of asynch IO that are pending to this ifmp without taking a BF lock (ViewCache case)
         volatile LONG       m_cAsyncIOForViewCachePending;
 
@@ -496,6 +509,8 @@ class FMP
         DWORD                m_cBFContextPinned;
 
     public:
+        ERR ErrInitMSysDeferredPopulateKeys( PIB * const ppib, BOOL fAllowCreation );
+
         //  timing sequence for create, attach, and detach
         //
         CIsamSequenceDiagLog    m_isdlCreate;
@@ -697,6 +712,8 @@ public:
 
         CKVPStore * PkvpsMSysLocales() const;
 
+        CKVPStore * PkvpsMSysDeferredPopulateKeys() const;
+
         CFlushMapForAttachedDb * PFlushMap() const;
     
         LIDMAP * Plidmap() const;
@@ -816,6 +833,7 @@ public:
         VOID SetDataHeaderSignature( DBFILEHDR_FIX* const pdbhdrsig, const ULONG cbdbhdrsig );
         VOID SetLGenMaxCommittedAttachedDuringRecovery( const LONG lGenMaxCommittedAttachedDuringRecovery );
         VOID SetKVPMSysLocales( CKVPStore * const pkvpsMSysLocales );
+        VOID SetKVPMSysDeferredPopulateKeys( CKVPStore * const pkvpsMSysDeferredPopulateKeys );
         VOID UpdatePgnoHighestWriteLatched( const PGNO pgnoHighestCandidate );
         VOID UpdatePgnoDirtiedMax( const PGNO pgnoHighestCandidate );
         VOID UpdatePgnoWriteLatchedNonScanMax( const PGNO pgnoHighestCandidate );
@@ -1495,6 +1513,8 @@ INLINE LONG FMP::LGenMaxCommittedAttachedDuringRecovery() const { return m_lGenM
 
 INLINE CKVPStore * FMP::PkvpsMSysLocales() const { return m_pkvpsMSysLocales; }
 
+INLINE CKVPStore * FMP::PkvpsMSysDeferredPopulateKeys() const { return m_pkvpsMSysDeferredPopulateKeys; }
+
 INLINE CFlushMapForAttachedDb * FMP::PFlushMap() const  { return m_pflushmap; }
 
 inline IFileAPI::FileModeFlags FMP::FmfDbDefault() const
@@ -1845,6 +1865,12 @@ INLINE VOID FMP::SetKVPMSysLocales( CKVPStore * const pkvpsMSysLocales )
 {
     Assert( NULL == m_pkvpsMSysLocales || NULL == pkvpsMSysLocales );
     m_pkvpsMSysLocales = pkvpsMSysLocales;
+}
+
+INLINE VOID FMP::SetKVPMSysDeferredPopulateKeys( CKVPStore * const pkvpsMSysDeferredPopulateKeys )
+{
+    Assert( NULL == m_pkvpsMSysDeferredPopulateKeys || NULL == pkvpsMSysDeferredPopulateKeys );
+    m_pkvpsMSysDeferredPopulateKeys = pkvpsMSysDeferredPopulateKeys;
 }
 
 INLINE VOID FMP::SetLidmap( LIDMAP * const plidmap )

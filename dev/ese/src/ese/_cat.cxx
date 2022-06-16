@@ -18,6 +18,9 @@ const CHAR  szMSExtentPageCountCache[] = "MSysExtentPageCountCache";
 const CHAR  szMSLocales[]           = "MSysLocales";
 const WCHAR wszMSLocales[]          = L"MSysLocales";   // MUST match
 
+const CHAR  szMSDeferredPopulateKeys[]  = "MSysDeferredPopulateKeys";
+const WCHAR wszMSDeferredPopulateKeys[] = L"MSysDeferredPopulateKeys";
+
 const CHAR  szLVRoot[]              = "LV";
 const ULONG cbLVRoot                = sizeof(szLVRoot) - 1;
 

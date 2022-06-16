@@ -41,6 +41,7 @@ const IDBFLAG   fidbTuples                  = 0x0800;   // indexed over substrin
 const IDBFLAG   fidbBadSortVersion          = 0x0010;   // index was built with bad sort version
 const IDBFLAG   fidbOwnedByFcb              = 0x0020;   // index was owned by FCB
 const IDBFLAG   fidbOutOfDateSortVersion    = 0x0040;   // index was built with out-of-date sort version
+const IDBFLAG   fidbDeferredPopulateCompleted = 0x0080; // index was deferred populate, but was completed.
 
 INLINE BOOL FIDBUnique( const IDBFLAG idbflag )                 { return ( idbflag & fidbUnique ); }
 INLINE BOOL FIDBAllowAllNulls( const IDBFLAG idbflag )          { return ( idbflag & fidbAllowAllNulls ); }
@@ -67,8 +68,9 @@ typedef USHORT  IDXFLAG;
 //  fIDXExtendedColumns is special.  It is set on all catalogs, but not in IDBs, and is consumed only in cat.cxx
 //  It may not be set in the IDB for an index that has this value set in the indexes catalog entry.
 //
-const IDXFLAG   fIDXExtendedColumns = 0x0001;   // IDXSEGs are comprised of JET_COLUMNIDs, not FIDs
-const IDXFLAG   fIDXDotNetGuid      = 0x0002;   // GUIDs sort according to .Net rules
+const IDXFLAG   fIDXExtendedColumns  = 0x0001;   // IDXSEGs are comprised of JET_COLUMNIDs, not FIDs
+const IDXFLAG   fIDXDotNetGuid       = 0x0002;   // GUIDs sort according to .Net rules
+const IDXFLAG   fIDXDeferredPopulate = 0x0004;   // Index is not completely populated and so is not normally usable.
 
 INLINE BOOL FIDXExtendedColumns( const IDXFLAG idxflag )        { return ( idxflag & fIDXExtendedColumns ); }
 INLINE BOOL FIDXDotNetGUID( const IDXFLAG idxflag )     { return ( idxflag & fIDXDotNetGuid ); }
@@ -133,6 +135,11 @@ struct LE_TUPLELIMITS
 
 class IDB
 {
+#ifdef AMD64
+    private:
+        static VOID VerifyOptimalPacking();    // Just a bunch of static_asserts to verify optimality.     
+#endif
+
     public:
         IDB( INST* const pinst )
             :   m_pinst( pinst )
@@ -144,6 +151,8 @@ class IDB
             m_nlv.m_dwDefinedNlsVersion = 0;
             SetWszLocaleName( wszLocaleNameNone );
             ResetSortidCustomSortVersion();
+
+            m_trxDeferredPopulateMinTrx = trxMin;
         }
         ~IDB()      {}
 
@@ -170,8 +179,8 @@ class IDB
 
     private:
         LONG        m_crefCurrentIndex;         //  for secondary indexes only, number of cursors with SetCurrentIndex on this IDB
-//  0x4 bytes. m_crefVersionCheck must be on an atomically-modifiable alignment..
         USHORT      m_crefVersionCheck;         //  number of cursors consulting catalog for versioned index info
+                                                //  NOTE: m_crefVersionCheck must be on an atomically-modifiable alignment..
         IDBFLAG     m_fidbPersisted;            //  persisted index flags
         IDXFLAG     m_fidxPersisted;            //  additional persisted flags
         IDBFLAG     m_fidbNonPersisted;         //  non-persisted index flags
@@ -180,8 +189,11 @@ class IDB
         USHORT      m_cbKeyMost;                //  maximum key size
         BYTE        m_cidxseg;                  //  number of columns in index (<=12)
         BYTE        m_cidxsegConditional;       //  number of conditional columns (<=12)
-
-//  0x14 bytes
+        TRX         m_trxDeferredPopulateMinTrx;  // Minimum trx for deferred populate processing to be allowed.
+        USHORT      m_ichTuplesToIndexMax;
+        USHORT      m_cchTuplesIncrement;
+        USHORT      m_ichTuplesStart;
+        BYTE        m_rgbPadding1[2];
 
     public:
 //      union
@@ -190,7 +202,6 @@ class IDB
 //          USHORT  itagrgidxseg;               //  if m_cidxseg > cIDBIdxSegMax, then rgidxseg
 //                                              //      will be stored in byte pool at this itag
 //          };
-//  0x2c bytes
 
 //      union
 //          {
@@ -198,43 +209,23 @@ class IDB
 //          USHORT  itagrgidxsegConditional;    //  if m_cidxsegConditional > cIDBIdxSegConditionalMax,
 //          };                                  //      then rgidxseg will be stored in byte pool at this itag
 
-//  0x34 bytes
             NORM_LOCALE_VER m_nlv;
-//  0xfc bytes
+
             USHORT      m_cchTuplesLengthMin;
             USHORT      m_cchTuplesLengthMax;
 
-//  0x100 bytes
-    public:
+            BYTE        m_rgbPadding2[4];
+
         union
         {
-            INST*   m_pinst;                    //  INST
-            BYTE    m_rgbAlign[8];              //  forces alignment on all platforms
+            INST*     m_pinst;                  //  INST
+            ULONGLONG m_ullAlign;               //  forces alignment on all platforms
         };
-//
-//
-//  0x108 bytes
-
 
     private:
         BYTE        m_rgbitIdx[32];             //  bit array for index columns
-//
-//
-//  0x108 bytes
 
-
-        USHORT      m_ichTuplesToIndexMax;
-        USHORT      m_cchTuplesIncrement;
-        USHORT      m_ichTuplesStart;
-//
-//
-//  0x12e bytes
-
-
-        USHORT      m_usReserved2[1];
-//
-//
-//  0x130 bytes (AMD64 aligned)
+        BYTE        rgbPadding3[8];
 
     public:
         INLINE VOID InitRefcounts()
@@ -332,6 +323,15 @@ class IDB
         INLINE USHORT CbVarSegMac() const                   { return m_cbVarSegMac; }
         INLINE VOID SetCbVarSegMac( const USHORT cb )       { m_cbVarSegMac = cb; }
 
+        INLINE TRX TrxDeferredPopulateMinTrx() const
+        {
+            return m_trxDeferredPopulateMinTrx;
+        }
+
+        INLINE VOID SetTrxDeferredPopulateMinTrx( const TRX trxDeferredPopulateMinTrx )
+        {
+            m_trxDeferredPopulateMinTrx = trxDeferredPopulateMinTrx;
+        }
         INLINE USHORT CbKeyMost() const
         {
             Assert( m_cbKeyMost > 0 );
@@ -541,12 +541,16 @@ class IDB
         INLINE VOID SetFBadSortVersion()                { m_fidbNonPersisted |= fidbBadSortVersion; }
         INLINE VOID ResetFBadSortVersion()              { m_fidbNonPersisted &= ~fidbBadSortVersion; }
 
-        INLINE BOOL FOutOfDateSortVersion() const             { return ( m_fidbNonPersisted & fidbOutOfDateSortVersion ); }
-        INLINE VOID SetFOutOfDateSortVersion()                { m_fidbNonPersisted |= fidbOutOfDateSortVersion; }
-        INLINE VOID ResetFOutOfDateSortVersion()              { m_fidbNonPersisted &= ~fidbOutOfDateSortVersion; }
+        INLINE BOOL FOutOfDateSortVersion() const       { return ( m_fidbNonPersisted & fidbOutOfDateSortVersion ); }
+        INLINE VOID SetFOutOfDateSortVersion()          { m_fidbNonPersisted |= fidbOutOfDateSortVersion; }
+        INLINE VOID ResetFOutOfDateSortVersion()        { m_fidbNonPersisted &= ~fidbOutOfDateSortVersion; }
 
         INLINE BOOL FPrimary() const                    { return ( m_fidbPersisted & fidbPrimary ); }
         INLINE VOID SetFPrimary()                       { m_fidbPersisted |= fidbPrimary; }
+
+        INLINE BOOL FDeferredPopulate() const           { return ( m_fidxPersisted & fIDXDeferredPopulate ); }
+        INLINE VOID SetFDeferredPopulate()              { m_fidxPersisted |= fIDXDeferredPopulate; }
+        INLINE VOID ResetFDeferredPopulate()            { m_fidxPersisted &= ~fIDXDeferredPopulate; }
 
         // Whether the user specified a locale when creating the index. The default locale may
         // still be used and persisted, but FLocaleSet() will be false in that case.
@@ -584,26 +588,30 @@ class IDB
         INLINE VOID SetFVersionedCreate()               { m_fidbNonPersisted |= fidbVersionedCreate; }
         INLINE VOID ResetFVersionedCreate()             { m_fidbNonPersisted &= ~fidbVersionedCreate; }
 
-        INLINE BOOL FCrossProduct() const           { return ( m_fidbPersisted & fidbCrossProduct ); }
-        INLINE VOID SetFCrossProduct()              { m_fidbPersisted |= fidbCrossProduct; }
+        INLINE BOOL FCrossProduct() const               { return ( m_fidbPersisted & fidbCrossProduct ); }
+        INLINE VOID SetFCrossProduct()                  { m_fidbPersisted |= fidbCrossProduct; }
         INLINE VOID ResetFCrossProduct()                { m_fidbPersisted &= ~fidbCrossProduct; }
 
-        INLINE BOOL FNestedTable() const            { return ( m_fidbPersisted & fidbNestedTable ); }
-        INLINE VOID SetFNestedTable()               { m_fidbPersisted |= fidbNestedTable; }
-        INLINE VOID ResetFNestedTable()             { m_fidbPersisted &= ~fidbNestedTable; }
+        INLINE BOOL FNestedTable() const                { return ( m_fidbPersisted & fidbNestedTable ); }
+        INLINE VOID SetFNestedTable()                   { m_fidbPersisted |= fidbNestedTable; }
+        INLINE VOID ResetFNestedTable()                 { m_fidbPersisted &= ~fidbNestedTable; }
 
         INLINE BOOL FDisallowTruncation() const         { return ( m_fidbPersisted & fidbDisallowTruncation ); }
-        INLINE VOID SetFDisallowTruncation()                { m_fidbPersisted |= fidbDisallowTruncation; }
-        INLINE VOID ResetFDisallowTruncation()              { m_fidbPersisted &= ~fidbDisallowTruncation; }
+        INLINE VOID SetFDisallowTruncation()            { m_fidbPersisted |= fidbDisallowTruncation; }
+        INLINE VOID ResetFDisallowTruncation()          { m_fidbPersisted &= ~fidbDisallowTruncation; }
 
-        INLINE BOOL FDotNetGuid() const         { return ( m_fidxPersisted & fIDXDotNetGuid ); }
-        INLINE VOID SetFDotNetGuid()                { m_fidxPersisted |= fIDXDotNetGuid; }
-        INLINE VOID ResetFDotNetGuid()              { m_fidxPersisted &= ~fIDXDotNetGuid; }
+        INLINE BOOL FDotNetGuid() const                 { return ( m_fidxPersisted & fIDXDotNetGuid ); }
+        INLINE VOID SetFDotNetGuid()                    { m_fidxPersisted |= fIDXDotNetGuid; }
+        INLINE VOID ResetFDotNetGuid()                  { m_fidxPersisted &= ~fIDXDotNetGuid; }
 
-        INLINE BOOL FIDBOwnedByFCB() const          { return (m_fidbNonPersisted & fidbOwnedByFcb ); }
-        INLINE VOID SetFIDBOwnedByFCB()         { m_fidbNonPersisted |= fidbOwnedByFcb; }
-        INLINE VOID ResetFIDBOwnedByFCB()       { m_fidbNonPersisted &= ~fidbOwnedByFcb; }
+        INLINE BOOL FIDBOwnedByFCB() const              { return (m_fidbNonPersisted & fidbOwnedByFcb ); }
+        INLINE VOID SetFIDBOwnedByFCB()                 { m_fidbNonPersisted |= fidbOwnedByFcb; }
+        INLINE VOID ResetFIDBOwnedByFCB()               { m_fidbNonPersisted &= ~fidbOwnedByFcb; }
 
+        INLINE BOOL FDeferredPopulateCompleted() const  { return (m_fidbNonPersisted & fidbDeferredPopulateCompleted ); }
+        INLINE VOID SetFDeferredPopulateCompleted()     { m_fidbNonPersisted |= fidbDeferredPopulateCompleted; }
+        INLINE VOID RestFDeferredPopulateCompleted()    { m_fidbNonPersisted &= ~fidbDeferredPopulateCompleted; }
+    
         JET_GRBIT GrbitFromFlags() const;
         VOID SetFlagsFromGrbit( const JET_GRBIT grbit );
 
@@ -613,6 +621,82 @@ class IDB
         VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
 #endif  //  DEBUGGER_EXTENSION
 };
+
+
+#ifdef AMD64
+
+INLINE VOID IDB::VerifyOptimalPacking()
+{
+    // Verify optimal packing.
+    //
+    // No one ever calls this routine.  It's enough that it compiles cleanly for the static_asserts.
+    //
+    // Note: use a field to take up padding inside the structure.  See rgbPadding* arrays.
+    //
+    //
+
+#define sizeofField( TYPE, FIELD ) ( sizeof( (( TYPE * ) 0 )->FIELD) )
+
+#define NoWastedSpaceAround(TYPE, FIELDFIRST, FIELDLAST)               \
+    (                                                                   \
+        ( OffsetOf( TYPE, FIELDFIRST ) == 0 ) &&                        \
+        ( OffsetOf( TYPE, FIELDLAST ) + sizeofField( TYPE, FIELDLAST )  == sizeof( TYPE ) ) && \
+        ( ( sizeof( TYPE ) % 32) == 0 )                                 \
+        ),                                                              \
+        "Unexpected padding around " #TYPE
+
+#define NoWastedSpace(TYPE, FIELD1, FIELD2)                             \
+    ( OffsetOf( TYPE, FIELD1) + sizeofField( TYPE, FIELD1 ) == OffsetOf( TYPE, FIELD2 ) ), \
+        "Unexpected padding between " #FIELD1 " and " #FIELD2
+
+#define CacheLineMark(TYPE, FIELD, NUM)                                 \
+    ( OffsetOf( TYPE, FIELD ) == ( 64 * NUM ) ), "Cache line marker"
+
+
+    static_assert( sizeof( IDB ) == 320, "Current size" );
+    
+    static_assert( NoWastedSpaceAround( IDB, m_crefCurrentIndex, rgbPadding3 ) );
+    static_assert( CacheLineMark( IDB, m_crefCurrentIndex, 0 ) );
+    static_assert( NoWastedSpace( IDB, m_crefCurrentIndex, m_crefVersionCheck ) ); 
+    static_assert( NoWastedSpace( IDB, m_crefVersionCheck, m_fidbPersisted ) );
+    static_assert( NoWastedSpace( IDB, m_fidbPersisted, m_fidxPersisted ) );
+    static_assert( NoWastedSpace( IDB, m_fidxPersisted, m_fidbNonPersisted ) );
+    static_assert( NoWastedSpace( IDB, m_fidbNonPersisted, m_itagIndexName ) );
+    static_assert( NoWastedSpace( IDB, m_itagIndexName, m_cbVarSegMac ) );
+    static_assert( NoWastedSpace( IDB, m_cbVarSegMac, m_cbKeyMost ) );
+    static_assert( NoWastedSpace( IDB, m_cbKeyMost, m_cidxseg ) );
+    static_assert( NoWastedSpace( IDB, m_cidxseg, m_cidxsegConditional ) );
+    static_assert( NoWastedSpace( IDB, m_cidxsegConditional, m_trxDeferredPopulateMinTrx ) );
+    static_assert( NoWastedSpace( IDB, m_trxDeferredPopulateMinTrx, m_ichTuplesToIndexMax ) );
+    static_assert( NoWastedSpace( IDB, m_ichTuplesToIndexMax, m_cchTuplesIncrement ) );
+    static_assert( NoWastedSpace( IDB, m_cchTuplesIncrement, m_ichTuplesStart ) );
+    static_assert( NoWastedSpace( IDB, m_ichTuplesStart, m_rgbPadding1 ) );
+    static_assert( NoWastedSpace( IDB, m_rgbPadding1, rgidxseg ) );  
+    static_assert( NoWastedSpace( IDB, rgidxseg, rgidxsegConditional ) );
+    static_assert( NoWastedSpace( IDB, rgidxsegConditional, m_nlv ) );
+    
+    static_assert( CacheLineMark( IDB, m_nlv, 1 ) ); // All the remaining cache lines hit in this member.
+    static_assert( NoWastedSpace( IDB, m_nlv, m_cchTuplesLengthMin  ) ); 
+    static_assert( NoWastedSpace( IDB, m_cchTuplesLengthMin, m_cchTuplesLengthMax ) );
+    static_assert( NoWastedSpace( IDB, m_cchTuplesLengthMax, m_rgbPadding2 ) );
+    static_assert( NoWastedSpace( IDB, m_rgbPadding2, m_pinst ) );
+    static_assert( NoWastedSpace( IDB, m_pinst, m_rgbitIdx ) ); 
+    static_assert( NoWastedSpace( IDB, m_rgbitIdx, rgbPadding3 ) ); 
+
+    // The declarations of rgidxseg and rgidxsegConditional are arrays based on constants.
+    // The constants have comments stating they are chosen to get 32 byte cache line alignment.
+    // It is therefore required that these two stay next to each other, and that their total size is 32 bytes.
+    // Note that in existing code, they are not and have not started at a 32 byte aligned offset.
+    // Most recently, they started at offset 20.
+    static_assert( NoWastedSpace( IDB, rgidxseg, rgidxsegConditional ) );
+    static_assert( 32 == ( sizeofField( IDB, rgidxseg) + sizeofField( IDB, rgidxsegConditional) ), "Necessary size" );
+
+}
+#endif
+
+//
+//
+//  0x130 bytes (AMD64 aligned)
 
 
 ERR ErrIDBSetIdxSeg(

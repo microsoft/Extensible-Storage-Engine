@@ -366,7 +366,8 @@ LOCAL VOID CMPCopyOneIndex(
     Assert( pidb->CbVarSegMac() <= pidb->CbKeyMost() );
 
     pidxcreate->cbKey       = ichKey;
-    pidxcreate->grbit       = pidb->GrbitFromFlags() | JET_bitIndexUnicode;
+    // turn off JET_bitIndexDeferredPopulateCreate since we're going to fully populate the index.
+    pidxcreate->grbit       = ( pidb->GrbitFromFlags() | JET_bitIndexUnicode ) & ~JET_bitIndexDeferredPopulateCreate;
     pidxcreate->cbKeyMost   = pidb->CbKeyMost();
 
     if ( pidb->FTuples() )
@@ -1543,6 +1544,10 @@ LOCAL ERR ErrCMPCopySelectedTables(
                 && !FCATObjidsTable( szTableName )
                 && !FCATExtentPageCountCacheTable( szTableName )
                 && !FCATLocalesTable( szTableName ) // rebuilt by catalog updates
+                && !FCATDeferredPopulateKeysTable( szTableName ) // We purposefully drop this table and its
+                                                                 //    data (which includes now stale objids).
+                                                                 //    We have to redo deferred repopulate
+                                                                 //    work from the beginning.
                 && !MSysDBM::FIsSystemTable( szTableName ) )
             {
                 err = ErrCMPCopyTable( pcompactinfo, szTableName, ulFlags );

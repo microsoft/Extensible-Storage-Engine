@@ -2032,15 +2032,11 @@ ERR ErrSORTCopyRecords(
                     &pfcbNextIndexBatch,
                     cFILEIndexBatchSizeDefault ) );
 
-#ifdef PARALLEL_BATCH_INDEX_BUILD
         //  only build indexes while copying data records if
         //  there are not many indexes -- if there are too many,
         //  then just create all the indexes in one big pass
         //  after we're done copying the records
         fBuildIndexWhileCopying = ( pfcbNil == pfcbNextIndexBatch );
-#else
-        fBuildIndexWhileCopying = fTrue;
-#endif
 
         if ( fBuildIndexWhileCopying )
         {
@@ -2059,14 +2055,12 @@ ERR ErrSORTCopyRecords(
         }
         else
         {
-#ifdef PARALLEL_BATCH_INDEX_BUILD
             for ( iindex = 0; iindex < cFILEIndexBatchSizeDefault; iindex++ )
             {
                 Assert( pfucbNil != rgpfucbSort[iindex] );
                 SORTClose( rgpfucbSort[iindex] );
                 rgpfucbSort[iindex] = pfucbNil;
             }
-#endif
         }
     }
 
@@ -2220,7 +2214,6 @@ ERR ErrSORTCopyRecords(
             }
         }
 
-#ifdef PARALLEL_BATCH_INDEX_BUILD
         if ( fBuildIndexWhileCopying )
         {
             //  this should be all the indexes for this table
@@ -2249,27 +2242,6 @@ ERR ErrSORTCopyRecords(
                         pstatus,
                         cIndexes ) );
         }
-#else
-        // Finish first batch of indexes, then make the rest.
-        Call( ErrFILEIndexBatchTerm(
-                    ppib,
-                    rgpfucbSort,
-                    pfcbSecondaryIndexes,
-                    cIndexesToBuild,
-                    rgcRecInput,
-                    pstatus ) );
-
-        if ( pfcbNil != pfcbNextIndexBatch )
-        {
-            Assert( cFILEIndexBatchSizeDefault == cIndexesToBuild );
-            Call( ErrFILEBuildAllIndexes(
-                            ppib,
-                            pfucbDest,
-                            pfcbNextIndexBatch,
-                            pstatus,
-                            cFILEIndexBatchSizeDefault ) );
-        }
-#endif  //  PARALLEL_BATCH_INDEX_BUILD
     }
 
 HandleError:

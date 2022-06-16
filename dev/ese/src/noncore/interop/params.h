@@ -237,7 +237,8 @@ MSINTERNAL enum class MJET_PARAM
     RBSFilePath = 216, // path to the revert snapshot directory
     PerfmonRefreshInterval = 217, // Interval, in units of msec, used by the Permormance Monitor to refresh values for collection.
     EnableBlockCache = 218, // Indicates that the ESE Block Cache is enabled.  This is sufficient to access files previously attached to the ESE Block Cache but not to attach new files.
-    MaxValueInvalid = 219, // This is not a valid parameter. It can change from release to release!
+    DeferredIndexPopulateRowsPerTransaction = 219, // Number of primary index rows to process in a single transaction when processing
+    MaxValueInvalid = 220, // This is not a valid parameter. It can change from release to release!
 };
 
 }

@@ -25,6 +25,8 @@ MSINTERNAL enum class MJET_WRN
     UniqueKey = 345, // seek on non-unique index yielded a unique key
     SeparateLongValue = 406, // Column is a separated long-value
     NoMoreRecords = 428, // No more records to stream
+    IndexDeferredPopulateIncomplete = 432, // Populating a deferred populate index did not complete.
+    IndexDeferredPopulateHalted = 433, // Populating a deferred populate index was unexpectedly halted.
     ExistingLogFileHasBadSignature = 558, // Existing log file has bad signature
     ExistingLogFileIsNotContiguous = 559, // Existing log file is not contiguous
     SkipThisRecord = 564, // INTERNAL ERROR

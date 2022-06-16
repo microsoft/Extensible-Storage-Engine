@@ -2376,15 +2376,11 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
         Assert( pfucbCatalog->u.pfcb->PfcbNextIndex() != pfcbNil );
         DIRUp( pfucbCatalog );
 
-#ifdef PARALLEL_BATCH_INDEX_BUILD
         ULONG   cIndexes    = 0;
         for ( FCB * pfcbT = pfucbCatalog->u.pfcb->PfcbNextIndex(); pfcbNil != pfcbT; pfcbT = pfcbT->PfcbNextIndex() )
         {
             cIndexes++;
         }
-#else
-        const ULONG cIndexes    = cFILEIndexBatchSizeDefault;
-#endif
 
         err = ErrFILEBuildAllIndexes(
                 ppib,
@@ -4228,6 +4224,11 @@ LOCAL ERR ErrREPAIRStartCheckAllTables(
     pintegglobals->popts                        = popts;
     pintegglobals->fRepairDisallowed            = fFalse;
 
+    // Make sure we have the MSysDeferredPopulateKeys store open, if one exists.  We'll
+    // need it later, and we need to open it now when we know we have a good catalog and
+    // befre we've started a transaction.
+    g_rgfmp[ ifmp ].ErrInitMSysDeferredPopulateKeys( ppib, fFalse );
+
     Call( ErrDIRBeginTransaction( ppib, 41765, NO_GRBIT ) );
 
     Call( ErrCATOpen( ppib, ifmp, &pfucbCatalog ) );
@@ -4977,15 +4978,11 @@ LOCAL ERR ErrREPAIRCheckOneTable(
             (*popts->pcprintfVerbose)( "rebuilding and comparing indexes\r\n" );
             DIRUp( pfucbTable );
 
-#ifdef PARALLEL_BATCH_INDEX_BUILD
             ULONG   cIndexes    = 0;
             for ( FCB * pfcbT = pfucbTable->u.pfcb->PfcbNextIndex(); pfcbNil != pfcbT; pfcbT = pfcbT->PfcbNextIndex() )
             {
                 cIndexes++;
             }
-#else
-            const ULONG cIndexes    = cFILEIndexBatchSizeDefault;
-#endif
 
             Call( ErrFILEBuildAllIndexes(
                     ppib,
@@ -9347,6 +9344,9 @@ LOCAL ERR ErrREPAIRRepairDatabase(
     {
         BOOL fTableExisted;
         //  Delete the MSExtentPageCountCache table, if it exists. The below attach will rebuild it if necessary.
+        //  We didn't necessarily find anything wrong with it, but since we're here, we found something wrong with
+        //  something, and while fixing it we may have alloc'ed and free'ed extents without proper tracking.
+        //  So, delete the cached values and start again.
         (*popts->pcprintfVerbose)( "\r\nDeleting MSExtentPageCountCache.\r\n"  );
         Call( ErrCATDeleteMSExtentPageCountCache( ppib, *pifmp, EXTENT_CACHE_DELETE_REASON::Repair, &fTableExisted ) );
         if ( fTableExisted )
@@ -11339,6 +11339,55 @@ HandleError:
     return err;
 }
 
+//  ================================================================
+LOCAL ERR ErrREPAIRMarkDeferredIndicesAsComplete(
+        PIB * const ppib,
+        const IFMP ifmp,
+        const PGNO pgnoFDPTable,
+        FCB * const pfcbTable,
+        const REPAIROPTS * const popts )
+//  ================================================================
+{
+    ERR         err         = JET_errSuccess;
+    FCB     *   pfcbIndex   = NULL;
+
+    const OBJID objidTable  = pfcbTable->ObjidFDP();
+
+    for( pfcbIndex = pfcbTable->PfcbNextIndex();
+        pfcbNil != pfcbIndex;
+        pfcbIndex = pfcbIndex->PfcbNextIndex() )
+    {
+        if ( pfcbIndex->Pidb()->FDeferredPopulate() )
+        {
+            const CHAR * const szIndexName  = pfcbTable->Ptdb()->SzIndexName( pfcbIndex->Pidb()->ItagIndexName(), pfcbIndex->FDerivedIndex() );
+
+            (*popts->pcprintfVerbose)( "index %s (objid: %d, pgnoFDP: %d) Deferred populate index being marked as complete.\r\n",
+                                       szIndexName,
+                                       pfcbIndex->ObjidFDP(),
+                                       pfcbIndex->PgnoFDP() );
+
+            Call( ErrCATSetDeferredPopulateKey( ifmp, pfcbIndex->ObjidFDP(), NULL, 0 ) );
+
+            IDB idbTemp = *(pfcbIndex->Pidb());
+
+            idbTemp.ResetFDeferredPopulate();
+
+            Assert( idbTemp.FPersistedFlags() == pfcbIndex->Pidb()->FPersistedFlags() );
+
+            Call( ErrCATChangeIndexFlags(
+                      ppib,
+                      ifmp,
+                      pfcbTable->ObjidFDP(),
+                      szIndexName,
+                      idbTemp.FPersistedFlags(),
+                      idbTemp.FPersistedFlagsX() ) );
+        }
+    }
+
+HandleError:
+    return err;
+}
+
 
 //  ================================================================
 LOCAL ERR ErrREPAIRCreateEmptyIndexes(
@@ -11421,18 +11470,17 @@ LOCAL ERR ErrREPAIRBuildAllIndexes(
 
     if ( pfcbNil != (*ppfucb)->u.pfcb->PfcbNextIndex() )
     {
-#ifdef PARALLEL_BATCH_INDEX_BUILD
         ULONG   cIndexes    = 0;
         for ( FCB * pfcbT = (*ppfucb)->u.pfcb->PfcbNextIndex(); pfcbNil != pfcbT; pfcbT = pfcbT->PfcbNextIndex() )
         {
             cIndexes++;
         }
-#else
-        const ULONG cIndexes    = cFILEIndexBatchSizeDefault;
-#endif
 
         Call( ErrFILEBuildAllIndexes( ppib, *ppfucb, (*ppfucb)->u.pfcb->PfcbNextIndex(), NULL, cIndexes ) );
     }
+
+    // We seem to have suceeded.  Any deferred populate indices will have been completed.
+    Call( ErrREPAIRMarkDeferredIndicesAsComplete(  ppib, ifmp, prepairtable->pgnoFDP, (*ppfucb)->u.pfcb, popts ) );
 
 HandleError:
     if ( pfucbNil != *ppfucb )
