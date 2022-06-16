@@ -183,7 +183,8 @@ enum IOREASONSECONDARY : BYTE
     iorsBTMerge = 13,
     iorsBTRefresh = 14,
     iorsBTPreread = 15,
-    iorsBTMax = 16,
+    iorsBTUtility = 16,
+    iorsBTMax = 17,
 
     // Defined by LG as iorsLRNOP + lrtyp, reserved through iorsLRMax
     iorsLRNOP = 128,

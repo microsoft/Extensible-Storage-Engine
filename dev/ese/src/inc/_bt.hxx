@@ -27,6 +27,12 @@ ERR ErrBTINewMerge( MERGEPATH *pmergePath );
 VOID BTIReleaseMergePaths( MERGEPATH *pmergePathLeaf );
 VOID BTIPerformMerge( FUCB *pfucb, MERGEPATH *pmergePathLeaf );
 
+
+//  Counts how many pages are reachable in a given tree.
+//
+ERR ErrBTIGetReachablePageCount( FUCB* const pfucb, CPG* const pcpg );
+
+
 //  refreshes currency
 //  based on physical currency in CSR
 //  used by DIR level functions re-entering BT to establish currency

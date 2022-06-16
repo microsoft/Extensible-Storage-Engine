@@ -5028,6 +5028,128 @@ HandleError:
 }
 
 
+//  counts how many pages are reachable in a given tree.
+//
+ERR ErrBTIIGetReachablePageCount( FUCB* const pfucb, CSR* pcsr, CPG* const pcpg )
+{
+    ERR err = JET_errSuccess;
+    const INT clines = pcsr->Cpage().Clines();
+    CSR csrChild;
+
+    Expected( FFUCBSpace( pfucb ) );  // Calling this on a large tree might be too expensive.
+    Assert( pcsr->FLatched() );
+    Assert( !pcsr->Cpage().FEmptyPage() );
+    Assert( !pcsr->Cpage().FLeafPage() );
+    Assert( clines > 0 );
+
+    // Accumulate the number of children.
+    ( *pcpg ) += clines;
+
+    if ( pcsr->Cpage().FParentOfLeaf() )
+    {
+        goto HandleError;
+    }
+
+    const CPG cpgSubtreePrereadMax = 16;
+    PGNO rgpgnoSubtree[ cpgSubtreePrereadMax + 1 ] = { pgnoNull };
+
+    // Preread and process each child.
+    for ( INT ilineToProcess = 0, ilinePrereadFirst = -1, ilinePrereadLast = -1;
+            ilineToProcess < clines;
+            ilineToProcess++ )
+    {
+        // Check if we need to preread.
+        if ( ilineToProcess > ilinePrereadLast )
+        {
+            Assert( ilineToProcess == ( ilinePrereadLast + 1 ) );
+
+            ilinePrereadFirst = ilineToProcess;
+            ilinePrereadLast = min( ilinePrereadFirst + cpgSubtreePrereadMax - 1, clines - 1 );
+            Assert( ilinePrereadFirst <= ilinePrereadLast );
+            Assert( ilinePrereadLast < clines );
+
+            // Accumulate pgnos to preread.
+            for ( INT ilineToPreread = ilinePrereadFirst; ilineToPreread <= ilinePrereadLast; ilineToPreread++ )
+            {
+                pcsr->SetILine( ilineToPreread );
+                NDGet( pfucb, pcsr );
+                const PGNO pgnoToPreread = *( (UnalignedLittleEndian<PGNO>*)pfucb->kdfCurr.data.Pv() );
+                Assert( pgnoToPreread != pgnoNull );
+                rgpgnoSubtree[ ilineToPreread - ilinePrereadFirst ] = pgnoToPreread;
+            }
+            rgpgnoSubtree[ ilinePrereadLast - ilinePrereadFirst + 1 ] = pgnoNull;   // Terminator.
+
+            // Issue preread.
+            BFPrereadPageList( pfucb->ifmp, rgpgnoSubtree, bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), TcCurr() );
+        }
+
+        Assert( ilinePrereadFirst >= 0 );
+        Assert( ilineToProcess >= ilinePrereadFirst );
+        Assert( ilineToProcess <= ilinePrereadLast );
+        Assert( ( ilineToProcess - ilinePrereadFirst ) < cpgSubtreePrereadMax );
+
+        // Latch and process the page.
+        const PGNO pgnoToProcess = rgpgnoSubtree[ ilineToProcess - ilinePrereadFirst ];
+        Assert( pgnoToProcess != pgnoNull );
+        Call( csrChild.ErrGetReadPage( pfucb->ppib, pfucb->ifmp, pgnoToProcess, BFLatchFlags( bflfNoTouch ) ) );
+        Call( ErrBTIIGetReachablePageCount( pfucb, &csrChild, pcpg ) );
+        csrChild.ReleasePage();
+        csrChild.Reset();
+    }
+
+HandleError:
+    if ( csrChild.FLatched() )
+    {
+        csrChild.ReleasePage();
+        csrChild.Reset();
+    }
+
+    if ( err >= JET_errSuccess )
+    {
+        err = JET_errSuccess;
+    }
+
+    Assert( pcsr->FLatched() );
+
+    return err;
+}
+
+
+//  counts how many pages are reachable in a given tree.
+//
+ERR ErrBTIGetReachablePageCount( FUCB* const pfucb, CPG* const pcpg )
+{
+    ERR err = JET_errSuccess;
+    CSR* pcsr = Pcsr( pfucb );
+    PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTUtility );
+
+    Expected( FFUCBSpace( pfucb ) || ( ObjidFDP( pfucb ) == objidSystemRoot ) );  // Calling this on a large tree might be too expensive.
+    Assert( pcsr->FLatched() );
+    Assert( pcsr->Cpage().FRootPage() );
+
+    *pcpg = 1;
+
+    // Only proceed if we haven't reached the leaf level yet.
+    if ( pcsr->Cpage().FLeafPage() )
+    {
+        goto HandleError;
+    }
+
+    // We are already positioned at the root. Proceed with recursion.
+    Call( ErrBTIIGetReachablePageCount( pfucb, pcsr, pcpg ) );
+
+HandleError:
+    if ( err >= JET_errSuccess )
+    {
+        err = JET_errSuccess;
+    }
+
+    Assert( pcsr->FLatched() );
+
+    return err;
+}
+
+
 //  ******************************************************
 //  UPDATE OPERATIONS
 //

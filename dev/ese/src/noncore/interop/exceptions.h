@@ -8688,6 +8688,30 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamRootSpaceLeakEstimationAlreadyRunningException : public IsamUsageException
+    {
+    public:
+        IsamRootSpaceLeakEstimationAlreadyRunningException() : IsamUsageException( "The operation did not complete successfully because root space leak estimation is already running on the specified database", JET_errRootSpaceLeakEstimationAlreadyRunning)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamRootSpaceLeakEstimationAlreadyRunningException( String ^ description, Exception^ innerException ) :
+            IsamUsageException( description, innerException )
+        {
+        }
+
+        IsamRootSpaceLeakEstimationAlreadyRunningException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamUsageException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamCallbackFailedException : public IsamStateException
     {
     public:
@@ -9787,6 +9811,8 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamRBSRedeleteFDPUnexpectedException;
         case JET_errDatabaseAlreadyRunningMaintenance:
             return gcnew IsamDatabaseAlreadyRunningMaintenanceException;
+        case JET_errRootSpaceLeakEstimationAlreadyRunning:
+            return gcnew IsamRootSpaceLeakEstimationAlreadyRunningException;
         case JET_errCallbackFailed:
             return gcnew IsamCallbackFailedException;
         case JET_errCallbackNotResolved:

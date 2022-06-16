@@ -635,8 +635,10 @@ ERR ErrCATGetObjidMetadata(
 ERR ErrCATGetNextRootObject(
     _In_ PIB* const         ppib,
     _In_ const IFMP         ifmp,
+    _In_ const BOOL         fSortedByObjId,
     _Inout_ FUCB** const    ppfucbCatalog,
-    _Out_ OBJID* const      pobjid );
+    _Out_ OBJID* const      pobjid,
+    _Out_writes_opt_z_( JET_cbNameMost + 1 ) CHAR* const szObjectName = NULL );
 
 ERR ErrCATGetNextNonRootObject(
     _In_ PIB* const         ppib,

@@ -5081,9 +5081,9 @@ ERR ErrSPIGetSpaceCategoryNoHint(
     OBJID objid = objidNil;
 
     // All root objects (tables) and their children.
-    for ( err = ErrCATGetNextRootObject( ppib, ifmp, &pfucbCatalog, &objid );
+    for ( err = ErrCATGetNextRootObject( ppib, ifmp, fFalse, &pfucbCatalog, &objid );
         ( err >= JET_errSuccess ) && ( objid != objidNil );
-        err = ErrCATGetNextRootObject( ppib, ifmp, &pfucbCatalog, &objid ) )
+        err = ErrCATGetNextRootObject( ppib, ifmp, fFalse, &pfucbCatalog, &objid ) )
     {
         if ( objid == objidExclude )
         {
@@ -10074,9 +10074,9 @@ ERR ErrSPReclaimSpaceLeaks( PIB* const ppib, const IFMP ifmp )
     // All tables: process space owned by the first level of B+ trees right below the root.
     {
     OBJID objid = objidNil;
-    for ( err = ErrCATGetNextRootObject( ppib, ifmp, &pfucbCatalog, &objid );
+    for ( err = ErrCATGetNextRootObject( ppib, ifmp, fFalse, &pfucbCatalog, &objid );
         ( err >= JET_errSuccess ) && ( objid != objidNil );
-        err = ErrCATGetNextRootObject( ppib, ifmp, &pfucbCatalog, &objid ) )
+        err = ErrCATGetNextRootObject( ppib, ifmp, fFalse, &pfucbCatalog, &objid ) )
     {
         Call( ErrSPILRProcessObjectSpaceOwnership( ppib, ifmp, objid, &spbmOwned, &arrShelved ) );
 
@@ -15126,6 +15126,7 @@ LOCAL VOID SPIReportAnyExtentCacheError(
 //  4) RESERVED
 //  5) SHELVED
 //  6) LIST
+//  7) REACHABLEPAGES (must not be combined with other options)
 //
 ERR ErrSPGetInfo(
     PIB                       *ppib,
@@ -15143,8 +15144,10 @@ ERR ErrSPGetInfo(
     CPG           *pcpgReservedExtTotal;
     CPG           *pcpgShelvedExtTotal;
     CPG           *pcpgSplitBuffersTotal;
+    CPG           *pcpgReachableTotal;
     EXTENTINFO    *rgext;
     FUCB          *pfucbT = pfucbNil;
+    FUCB          *pfucbSpace = pfucbNil;
     INT           iext;
     ULONG         cbMaxReq = 0;
     BOOL          fReadCachedValue;
@@ -15160,8 +15163,8 @@ ERR ErrSPGetInfo(
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     tcScope->iorReason.SetIort( iortSpace );
 
-    // Have to specify either owned, available, or split buffers when you call this routine.
-    fSPExtentsRequired = fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers;
+    // Have to specify either owned, available, split buffers, or reachable pages when you call this routine.
+    fSPExtentsRequired = fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers | fSPReachablePages;
 
     fSPExtentsAllowed = fSPExtentsRequired;
     if ( ( pfucbNil == pfucb ) || ( ObjidFDP( pfucb ) == pgnoSystemRoot ) )
@@ -15175,7 +15178,7 @@ ERR ErrSPGetInfo(
         fSPExtentsAllowed |= ( fSPReservedExtent | fSPExtentList );
     }
 
-    //  At least one required extent type specified?
+    // At least one required extent type specified?
     if ( ( fSPExtents & fSPExtentsRequired ) == 0 )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
@@ -15185,6 +15188,21 @@ ERR ErrSPGetInfo(
     if ( ( fSPExtents & ~fSPExtentsAllowed ) != 0 )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    if ( FSPReachablePages( fSPExtents ) )
+    {
+        // Don't allow fSPReachablePages combined with other options.
+        if ( ( fSPExtents & ~fSPReachablePages ) != 0 )
+        {
+            Error( ErrERRCheck( JET_errInvalidParameter ) );
+        }
+
+        // We must have passed in a specific tree/FUCB.
+        if ( pfucb == pfucbNil )
+        {
+            Error( ErrERRCheck( JET_errInvalidParameter ) );
+        }
     }
 
     if ( FSPExtentList( fSPExtents ) )
@@ -15276,6 +15294,10 @@ ERR ErrSPGetInfo(
     {
         cbMaxReq += sizeof( CPG );
     }
+    if ( FSPReachablePages( fSPExtents ) )
+    {
+        cbMaxReq += sizeof( CPG );
+    }
     if ( cbMax < cbMaxReq )
     {
         AssertSz( fFalse, "Called without the necessary buffer allocated for extents." );
@@ -15295,6 +15317,7 @@ ERR ErrSPGetInfo(
     pcpgSplitBuffersTotal = NULL;
     pcpgReservedExtTotal = NULL;
     pcpgShelvedExtTotal = NULL;
+    pcpgReachableTotal = NULL;
     if ( FSPOwnedExtent( fSPExtents ) )
     {
         pcpgOwnExtTotal = pcpgT;
@@ -15320,6 +15343,11 @@ ERR ErrSPGetInfo(
         pcpgShelvedExtTotal = pcpgT;
         pcpgT++;
     }
+    if ( FSPReachablePages( fSPExtents ) )
+    {
+        pcpgReachableTotal = pcpgT;
+        pcpgT++;
+    }
     rgext = (EXTENTINFO *)pcpgT;
 
     if ( pcpgOwnExtTotal )
@@ -15337,6 +15365,14 @@ ERR ErrSPGetInfo(
     if ( pcpgShelvedExtTotal )
     {
         *pcpgShelvedExtTotal = 0;
+    }
+    if ( pcpgSplitBuffersTotal )
+    {
+        *pcpgSplitBuffersTotal = 0;
+    }
+    if ( pcpgReachableTotal )
+    {
+        *pcpgReachableTotal = 0;
     }
 
     const BOOL  fExtentList     = FSPExtentList( fSPExtents );
@@ -15451,17 +15487,18 @@ ERR ErrSPGetInfo(
 
     if ( pfucbNil == pfucb )
     {
+        Assert( !FSPReachablePages( fSPExtents ) );
         err = ErrBTOpen( ppib, pgnoSystemRoot, ifmp, &pfucbT );
     }
     else
     {
+        Assert( !FFUCBSpace( pfucb ) || FSPReachablePages( fSPExtents ) );
         err = ErrBTOpen( ppib, pfucb->u.pfcb, &pfucbT );
     }
     CallR( err );
     Assert( pfucbNil != pfucbT );
     tcScope->nParentObjectClass = TceFromFUCB( pfucbT );
     tcScope->SetDwEngineObjid( ObjidFDP( pfucbT ) );
-
 
     if ( fSetCachedValue )
     {
@@ -15554,17 +15591,15 @@ ERR ErrSPGetInfo(
         {
             //  open cursor on owned extent tree
             //
-            FUCB    *pfucbOE = pfucbNil;
-
-            Call( ErrSPIOpenOwnExt( pfucbT, &pfucbOE ) );
+            Call( ErrSPIOpenOwnExt( pfucbT, &pfucbSpace ) );
 
             if( pcprintf )
             {
                 (*pcprintf)( "\n%s: OWNEXT\n", SzNameOfTable( pfucbT ) );
             }
 
-            err = ErrSPIGetInfo(
-                pfucbOE,
+            Call( ErrSPIGetInfo(
+                pfucbSpace,
                 pcpgOwnExtTotal,
                 NULL,
                 NULL,
@@ -15572,10 +15607,10 @@ ERR ErrSPGetInfo(
                 cext,
                 rgext,
                 &cextSentinelsRemaining,
-                pcprintf );
-            Assert( pfucbOE != pfucbNil );
-            BTClose( pfucbOE );
-            Call( err );
+                pcprintf ) );
+
+            BTClose( pfucbSpace );
+            pfucbSpace = pfucbNil;
         }
     }
 
@@ -15713,17 +15748,15 @@ ERR ErrSPGetInfo(
         {
             //  open cursor on available extent tree
             //
-            FUCB    *pfucbAE = pfucbNil;
-
-            Call( ErrSPIOpenAvailExt( pfucbT, &pfucbAE ) );
+            Call( ErrSPIOpenAvailExt( pfucbT, &pfucbSpace ) );
 
             if( pcprintf )
             {
                 (*pcprintf)( "\n%s: AVAILEXT\n", SzNameOfTable( pfucbT ) );
             }
 
-            err = ErrSPIGetInfo(
-                pfucbAE,
+            Call( ErrSPIGetInfo(
+                pfucbSpace,
                 pcpgAvailExtTotal,
                 pcpgReservedExtTotal,
                 pcpgShelvedExtTotal,
@@ -15731,11 +15764,10 @@ ERR ErrSPGetInfo(
                 cext,
                 rgext,
                 &cextSentinelsRemaining,
-                pcprintf );
+                pcprintf ) );
 
-            Assert( pfucbAE != pfucbNil );
-            BTClose( pfucbAE );
-            Call( err );
+            BTClose( pfucbSpace );
+            pfucbSpace = pfucbNil;
         }
 
         //  if possible, verify AvailExt total against OwnExt total
@@ -15760,39 +15792,72 @@ ERR ErrSPGetInfo(
         {
             //  Get the split buffers ...
             //
-            FUCB    *pfucbAE = pfucbNil;
-            FUCB    *pfucbOE = pfucbNil;
             SPLIT_BUFFER  spbufOnOE;
             SPLIT_BUFFER  spbufOnAE;
             memset( (void*)&spbufOnOE, 0, sizeof(spbufOnOE) );
             memset( (void*)&spbufOnAE, 0, sizeof(spbufOnAE) );
 
-            CallJ( ErrSPIOpenAvailExt( pfucbT, &pfucbAE ), HandleSplitBuffersError );
-            CallJ( ErrSPIOpenOwnExt( pfucbT, &pfucbOE ), HandleSplitBuffersError );
-            CallJ( ErrSPIGetSPBufUnlatched( pfucbOE, &spbufOnOE ), HandleSplitBuffersError );
-            CallJ( ErrSPIGetSPBufUnlatched( pfucbAE, &spbufOnAE ), HandleSplitBuffersError );
+            Call( ErrSPIOpenOwnExt( pfucbT, &pfucbSpace ) );
+            Call( ErrSPIGetSPBufUnlatched( pfucbSpace, &spbufOnOE ) );
+            SPDumpSplitBufExtent( pcprintf, SzNameOfTable( pfucbSpace ), "OE", pfucbSpace->u.pfcb->PgnoOE(), &spbufOnOE );
+            BTClose( pfucbSpace );
+            pfucbSpace = pfucbNil;
 
-            SPDumpSplitBufExtent( pcprintf, SzNameOfTable( pfucbAE ), "OE", pfucbAE->u.pfcb->PgnoOE(), &spbufOnOE );
-            SPDumpSplitBufExtent( pcprintf, SzNameOfTable( pfucbAE ), "AE", pfucbAE->u.pfcb->PgnoAE(), &spbufOnAE );
+            Call( ErrSPIOpenAvailExt( pfucbT, &pfucbSpace ) );
+            Call( ErrSPIGetSPBufUnlatched( pfucbSpace, &spbufOnAE ) );
+            SPDumpSplitBufExtent( pcprintf, SzNameOfTable( pfucbSpace ), "AE", pfucbSpace->u.pfcb->PgnoAE(), &spbufOnAE );
+            BTClose( pfucbSpace );
+            pfucbSpace = pfucbNil;
 
             *pcpgSplitBuffersTotal = spbufOnOE.CpgBuffer1() +
                 spbufOnOE.CpgBuffer2() +
                 spbufOnAE.CpgBuffer1() +
                 spbufOnAE.CpgBuffer2();
-
-        HandleSplitBuffersError:
-            if ( pfucbAE != pfucbNil )
-            {
-                BTClose( pfucbAE );
-            }
-            if ( pfucbOE != pfucbNil )
-            {
-                BTClose( pfucbOE );
-            }
-            Call( err );
         }
     }
 
+    if ( FSPReachablePages( fSPExtents ) )
+    {
+        Assert( pcpgReachableTotal != NULL );
+        Assert( pfucb != pfucbNil );
+
+        FUCB* pfucbTree = pfucbNil;
+
+        if ( FFUCBSpace( pfucb ) )
+        {
+            Assert( pfucbSpace == pfucbNil );
+
+            if ( FFUCBOwnExt( pfucb ) )
+            {
+                Call( ErrSPIOpenOwnExt( pfucb, &pfucbSpace ) );
+            }
+            else if ( FFUCBAvailExt( pfucb ) )
+            {
+                Call( ErrSPIOpenAvailExt( pfucb, &pfucbSpace ) );
+            }
+            else
+            {
+                Assert( fFalse );
+            }
+
+            pfucbTree = pfucbSpace;
+            Call( ErrBTIGotoRoot( pfucbTree, latchReadTouch ) );
+        }
+        else
+        {
+            pfucbTree = pfucbT;
+        }
+
+        Assert( pfucbTree != pfucbNil );
+        Call( ErrBTIGetReachablePageCount( pfucbTree, pcpgReachableTotal ) );
+
+        if ( pfucbTree == pfucbSpace )
+        {
+            Assert( pfucbSpace != pfucbNil );
+            BTClose( pfucbSpace );
+            pfucbSpace = pfucbNil;
+        }
+    }
 
     Assert( 0 == cextSentinelsRemaining );
 
@@ -15865,6 +15930,11 @@ ERR ErrSPGetInfo(
     }
 
 HandleError:
+    if ( pfucbSpace != pfucbNil )
+    {
+        BTClose( pfucbSpace );
+    }
+
     if ( pfucbT != pfucbNil )
     {
         pfucbT->pcsrRoot = pcsrNil;

@@ -2597,6 +2597,37 @@ Number of available extents: %23.%n
 Total available space: %24 bytes (%25 page(s)).%n
 .
 
+MessageId=756
+SymbolicName=ROOT_SPACE_LEAK_ESTIMATION_SUCCEEDED_ID
+Language=English
+%1 (%2) %3Root space leak estimation has completed successfully on database '%4'.%n
+Leaked space: %5 page(s) (%6 bytes, %7%%).%n
+Owned space: %8 page(s) (%9 bytes).%n
+Available space: %10 page(s) (%11 bytes, %12%%).%n
+Used space: %13 page(s) (%14 bytes, %15%%).%n
+Space owned within known file size: %16 page(s) (%17 bytes, %18%%).%n
+Space owned beyond known file size: %19 page(s) (%20 bytes, %21%%).%n
+Space used by primary objects: %22 page(s) (%23 bytes, %24%%).%n
+Space used by root object: %25 page(s) (%26 bytes, %27%%).%n
+Space used by root owned-extent tree: %28 page(s) (%29 bytes, %30%%).%n
+Space used by root available-extent tree: %31 page(s) (%32 bytes, %33%%).%n
+Space used by root space tree split buffers: %34 page(s) (%35 bytes, %36%%).%n
+Number of cached primary objects: %37%n
+Number of uncached primary objects: %38%n
+Performance: %39 page(s) read, %40 page(s) preread, %41 page(s) referenced, %42 page(s) dirtied, %43 page(s) re-dirtied.%n
+Duration: %44 minute(s) and %45 second(s).%n
+.
+
+MessageId=757
+SymbolicName=ROOT_SPACE_LEAK_ESTIMATION_FAILED_ID
+Language=English
+%1 (%2) %3Root space leak estimation has failed on database '%4'.%n
+Error code: %5%n
+Last processed object ID: %6%n
+Context: %7%n
+Duration: %8 minute(s) and %9 second(s).%n
+.
+
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 
 

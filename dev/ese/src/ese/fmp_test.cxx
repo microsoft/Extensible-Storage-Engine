@@ -481,6 +481,35 @@ JETUNITTEST( FMP, NewAndWriteLatch )
         pfmp->ResetLeakReclaimerIsRunning();
         CHECK( !pfmp->FLeakReclaimerIsRunning() );
 
+        // Leak report helpers.
+        CHECK( pfmp->OjidLeakEstimation() == objidFDPOverMax );
+        CHECK( pfmp->ErrStartRootSpaceLeakEstimation() == JET_errSuccess );
+        CHECK( pfmp->OjidLeakEstimation() == objidNil );
+        CHECK( pfmp->ErrStartRootSpaceLeakEstimation() == JET_errRootSpaceLeakEstimationAlreadyRunning );
+        CHECK( pfmp->OjidLeakEstimation() == objidNil );
+        pfmp->StopRootSpaceLeakEstimation();
+        CHECK( pfmp->OjidLeakEstimation() == objidFDPOverMax );
+        CHECK( pfmp->ErrStartRootSpaceLeakEstimation() == JET_errSuccess );
+        CHECK( pfmp->OjidLeakEstimation() == objidNil );
+        pfmp->StopRootSpaceLeakEstimation();
+        CHECK( pfmp->OjidLeakEstimation() == objidFDPOverMax );
+        CHECK( pfmp->ErrStartRootSpaceLeakEstimation() == JET_errSuccess );
+        CHECK( pfmp->OjidLeakEstimation() == objidNil );
+        pfmp->SetOjidLeakEstimation( 1 );
+        CHECK( pfmp->OjidLeakEstimation() == 1 );
+        pfmp->SetOjidLeakEstimation( 12 );
+        CHECK( pfmp->OjidLeakEstimation() == 12 );
+        pfmp->SetOjidLeakEstimation( 123 );
+        CHECK( pfmp->OjidLeakEstimation() == 123 );
+        pfmp->SetOjidLeakEstimation( objidFDPMax - 1 );
+        CHECK( pfmp->OjidLeakEstimation() == ( objidFDPMax - 1 ) );
+        CHECK( pfmp->ErrStartRootSpaceLeakEstimation() == JET_errRootSpaceLeakEstimationAlreadyRunning );
+        CHECK( pfmp->OjidLeakEstimation() == ( objidFDPMax - 1 ) );
+        pfmp->SetOjidLeakEstimation( objidFDPMax );
+        CHECK( pfmp->OjidLeakEstimation() == objidFDPMax );
+        pfmp->StopRootSpaceLeakEstimation();
+        CHECK( pfmp->OjidLeakEstimation() == objidFDPOverMax );
+
         // Self-alloc split-buffer reservation.
         CHECK( !pfmp->FSelfAllocSpBufReservationEnabled() );
         pfmp->SetSelfAllocSpBufReservationEnabled( fTrue );

@@ -89,11 +89,12 @@ const QWORD qwCounterMax                = 0x7fffffffffffff00;
 
 const OBJID objidNil                    = 0x00000000;
 const OBJID objidFDPMax                 = 0xFFFFFF00;
+const OBJID objidFDPOverMax             = objidFDPMax + 1;
 const OBJID objidMaxWarningThreshold    = 0x7F000000;   //  the point at which we start periodically generating warning eventlog messages that we are approaching the max
 const ULONG ulObjidMaxWarningFrequency  = 100000;       //  frequency with which a warning eventlog is generated when we are over the ObjidFDP warning threshold
 const OBJID objidMaxPanicThreshold      = 0xFF000000;   //  the point at which we start aggressively generation warning eventlog messages that we are dangerously close to the max
 const ULONG ulObjidMaxPanicFrequency    = 1000;         //  frequency with which a warning eventlog is generated when we are dangerously close to the max
-
+static_assert( objidNil == 0, "There is code with implicit assumptions about either objidNil being zero, or being less than any valid OBJID." );
 
 const CHAR szNull[]                     = "";
 
