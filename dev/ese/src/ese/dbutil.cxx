@@ -4994,6 +4994,342 @@ HandleError:
     return err;
 }
 
+//  ================================================================
+LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
+    const FMP* const pfmp,
+    const CPG cpgAvailable,
+    const CPG cpgOwnedBelowEof,
+    const CPG cpgOwnedBeyondEof,
+    const CPG cpgUsedPrimary,
+    const CPG cpgUsedRoot,
+    const CPG cpgUsedOe,
+    const CPG cpgUsedAe,
+    const CPG cpgSplitBuffers,
+    const ULONG cCachedPrimary,
+    const ULONG cUncachedPrimary,
+    const JET_THREADSTATS& jts,
+    const ULONG ulMinElapsed,
+    const double dblSecElapsed )
+//  ================================================================
+{
+    const CPG cpgOwned = cpgOwnedBelowEof + cpgOwnedBeyondEof;
+    Assert( cpgOwned > 0 );
+
+    const CPG cpgUsed = cpgUsedPrimary + cpgUsedRoot + cpgUsedOe + cpgUsedAe;
+    Assert( ( cpgUsed <= cpgOwned ) || ( !pfmp->FReadOnlyAttach() && !pfmp->FExclusiveOpen() ) );
+
+    CPG cpgLeaked = cpgOwned - ( cpgAvailable + cpgSplitBuffers + cpgUsed );
+    Assert( ( cpgLeaked >= 0 ) || ( !pfmp->FReadOnlyAttach() && !pfmp->FExclusiveOpen() ) );
+    cpgLeaked = LFunctionalMax( cpgLeaked, 0 );
+
+    OSTraceSuspendGC();
+    const WCHAR* rgwsz[] =
+    {
+        pfmp->WszDatabaseName(),
+        OSFormatW( L"%d", cpgLeaked ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgLeaked ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgLeaked ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgOwned ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgOwned ) ),
+        OSFormatW( L"%d", cpgAvailable ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgAvailable ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgAvailable ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgUsed ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsed ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsed ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgOwnedBelowEof ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgOwnedBelowEof ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedBelowEof ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgOwnedBeyondEof ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgOwnedBeyondEof ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedBeyondEof ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgUsedPrimary ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsedPrimary ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsedPrimary ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgUsedRoot ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsedRoot ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsedRoot ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgUsedOe ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsedOe ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsedOe ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgUsedAe ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsedAe ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsedAe ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgSplitBuffers ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgSplitBuffers ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgSplitBuffers ) / (double)cpgOwned ),
+        OSFormatW( L"%u", cCachedPrimary ),
+        OSFormatW( L"%u", cUncachedPrimary ),
+        OSFormatW( L"%u", jts.cPageRead ), OSFormatW( L"%u", jts.cPagePreread ), OSFormatW( L"%u", jts.cPageReferenced ), OSFormatW( L"%u", jts.cPageDirtied ), OSFormatW( L"%u", jts.cPageRedirtied ),
+        OSFormatW( L"%u", ulMinElapsed ), OSFormatW( L"%.3f", dblSecElapsed )
+    };
+    UtilReportEvent(
+        eventInformation,
+        SPACE_MANAGER_CATEGORY,
+        ROOT_SPACE_LEAK_ESTIMATION_SUCCEEDED_ID,
+        _countof( rgwsz ),
+        rgwsz,
+        0,
+        NULL,
+        pfmp->Pinst() );
+    OSTraceResumeGC();
+}
+
+//  ================================================================
+LOCAL VOID DBUTLIReportSpaceLeakEstimationFailed(
+    const FMP* const pfmp,
+    const ERR err,
+    const OBJID objidLast,
+    const CHAR* const szContext,
+    const ULONG ulMinElapsed,
+    const double dblSecElapsed )
+//  ================================================================
+{
+    OSTraceSuspendGC();
+    const WCHAR* rgwsz[] =
+    {
+        pfmp->WszDatabaseName(),
+        OSFormatW( L"%d", err ),
+        OSFormatW( L"%u", objidLast ),
+        OSFormatW( L"%hs", szContext ),
+        OSFormatW( L"%u", ulMinElapsed ), OSFormatW( L"%.3f", dblSecElapsed )
+    };
+    UtilReportEvent(
+        eventError,
+        SPACE_MANAGER_CATEGORY,
+        ROOT_SPACE_LEAK_ESTIMATION_FAILED_ID,
+        _countof( rgwsz ),
+        rgwsz,
+        0,
+        NULL,
+        pfmp->Pinst() );
+    OSTraceResumeGC();
+}
+
+//  ================================================================
+LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
+//  ================================================================
+{
+    ERR err = JET_errSuccess;
+    FMP* const pfmp = g_rgfmp + ifmp;
+    const CHAR* szContext = NULL;
+    const HRT hrtStart = HrtHRTCount();
+    BOOL fRunning = fFalse;
+    JET_THREADSTATS jtsStart = { 0 }, jtsEnd = { 0 };
+    OBJID objidLast = objidNil;
+    CPG cpgUsedPrimary = 0;
+    ULONG cCachedPrimary = 0, cUncachedPrimary = 0;
+    CPG cpgUsedRoot = 0, cpgUsedOe = 0, cpgUsedAe = 0;
+    CPG rgcpgRootSpaceInfo[ 4 ] = { 0 };
+    FUCB* pfucbCatalog = pfucbNil;
+    FUCB* pfucbSpaceTree = pfucbNil;
+    FUCB* pfucbTable = pfucbNil;
+    FUCB* pfucb = pfucbNil;
+
+    szContext = "CheckAlreadyRunning";
+    Call( pfmp->ErrStartRootSpaceLeakEstimation() );
+    fRunning = fTrue;
+
+    szContext = "ThreadStatsStart";
+    PGNO pgnoFDP = pgnoNull, pgnoFDPParent = pgnoNull;
+    jtsStart.cbStruct = sizeof( jtsStart );
+    jtsEnd.cbStruct = sizeof( jtsStart );
+    Call( JetGetThreadStats( &jtsStart, jtsStart.cbStruct ) );
+
+    szContext = "PrimaryObjects";
+    OnDebug( OBJID objidPrev = objidNil );
+
+    CHAR szObjectName[ JET_cbNameMost + 1 ];
+    for ( err = ErrCATGetNextRootObject( ppib, ifmp, fTrue, &pfucbCatalog, &objidLast, szObjectName );
+        ( err >= JET_errSuccess ) && ( objidLast != objidNil );
+        err = ErrCATGetNextRootObject( ppib, ifmp, fTrue, &pfucbCatalog, &objidLast, szObjectName ) )
+    {
+        Assert( objidLast != objidSystemRoot );  // Root object is not supposed to be returned here.
+        Assert( objidLast > objidPrev );
+        OnDebug( objidPrev = objidLast );
+
+        // Test injection.
+        OnDebug( while ( objidLast >= (OBJID)UlConfigOverrideInjection( 35366, objidFDPOverMax ) ) );
+        OnDebug( Call( ErrFaultInjection( 55190 ) ) );
+
+        CPG cpgRootObject = cpgNil;
+
+        // Check if it is cached.
+        err = ErrCATGetExtentPageCounts( ppib, ifmp, objidLast, &cpgRootObject, NULL );
+        if ( err >= JET_errSuccess )
+        {
+            cCachedPrimary++;
+            cpgUsedPrimary += cpgRootObject;
+        }
+        else
+        {
+            if ( ( err == JET_errRecordNotFound ) || ( err == JET_errNotInitialized ) )
+            {
+                err = JET_errSuccess;
+            }
+            Call( err );
+
+            cUncachedPrimary++;
+
+            Call( ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szObjectName, JET_bitTableReadOnly ) );
+            Call( ErrSPGetInfo(
+                ppib,
+                ifmp,
+                pfucbTable,
+                (BYTE*)&cpgRootObject,
+                sizeof( cpgRootObject ),
+                fSPOwnedExtent,
+                gci::Allow ) );
+            cpgUsedPrimary += cpgRootObject;
+
+            Call( ErrFILECloseTable( ppib, pfucbTable ) );
+            pfucbTable = pfucbNil;
+        }
+    }
+    Call( err );
+    CallS( ErrCATClose( ppib, pfucbCatalog ) );
+    pfucbCatalog = pfucbNil;
+    objidLast = objidSystemRoot;
+
+    // Global space
+    szContext = "RootObject";
+    CPG rgcpgRootInfo[ 4 ] = { cpgNil };
+    Call( ErrSPGetInfo(
+        ppib,
+        ifmp,
+        pfucbNil,
+        (BYTE*)rgcpgRootInfo,
+        sizeof( rgcpgRootInfo ),
+        fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers | fSPShelvedExtent,
+        gci::Allow ) );
+    
+    Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucb ) );
+    Expected( pfucb->u.pfcb );
+    Call( ErrSPGetInfo(
+        ppib,
+        ifmp,
+        pfucb,
+        (BYTE*)&cpgUsedRoot,
+        sizeof( cpgUsedRoot ),
+        fSPReachablePages,
+        gci::Allow ) );
+    Expected( cpgUsedRoot == 1 );
+
+    szContext = "RootOe";
+    Call( ErrSPIOpenOwnExt( pfucb, &pfucbSpaceTree ) );
+    Call( ErrSPGetInfo(
+        ppib,
+        ifmp,
+        pfucbSpaceTree,
+        (BYTE*)&cpgUsedOe,
+        sizeof( cpgUsedOe ),
+        fSPReachablePages,
+        gci::Allow ) );
+    BTClose( pfucbSpaceTree );
+    pfucbSpaceTree = pfucbNil;
+
+    szContext = "RootAe";
+    Call( ErrSPIOpenAvailExt( pfucb, &pfucbSpaceTree ) );
+    Call( ErrSPGetInfo(
+        ppib,
+        ifmp,
+        pfucbSpaceTree,
+        (BYTE*)&cpgUsedAe,
+        sizeof( cpgUsedAe ),
+        fSPReachablePages,
+        gci::Allow ) );
+    BTClose( pfucbSpaceTree );
+    pfucbSpaceTree = pfucbNil;
+    DIRClose( pfucb );
+    pfucb = pfucbNil;
+    pgnoFDP = pgnoFDPParent = pgnoNull;
+
+    szContext = "RootSpace";
+    Call( ErrSPGetInfo(
+        ppib,
+        ifmp,
+        pfucbNil,
+        (BYTE*)rgcpgRootSpaceInfo,
+        sizeof( rgcpgRootSpaceInfo ),
+        fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers | fSPShelvedExtent,
+        gci::Allow ) );
+
+    // We are done with the part that requires exclusivity.
+    pfmp->StopRootSpaceLeakEstimation();
+    fRunning = fFalse;
+
+    szContext = "ThreadStatsEnd";
+    const CPG cpgOwned = rgcpgRootInfo[ 0 ] + rgcpgRootInfo[ 3 ];
+    const CPG cpgAvailable = rgcpgRootInfo[ 1 ] + rgcpgRootInfo[ 2 ];
+    const CPG cpgLeaked =
+        cpgOwned -
+        (
+            cpgAvailable +
+            cpgUsedRoot +
+            cpgUsedOe +
+            cpgUsedAe +
+            cpgUsedPrimary
+        );
+    Assert( cpgLeaked >= 0 );
+    Call( JetGetThreadStats( &jtsEnd, jtsEnd.cbStruct ) );
+
+HandleError:
+    if ( fRunning )
+    {
+        pfmp->StopRootSpaceLeakEstimation();
+    }
+
+    if ( pfucbCatalog != pfucbNil )
+    {
+        Assert( err < JET_errSuccess );
+        CallS( ErrCATClose( ppib, pfucbCatalog ) );
+        pfucbCatalog = pfucbNil;
+    }
+
+    if ( pfucbSpaceTree != pfucbNil )
+    {
+        Assert( err < JET_errSuccess );
+        BTClose( pfucbSpaceTree );
+        pfucbSpaceTree = pfucbNil;
+    }
+
+    if ( pfucbTable != pfucbNil )
+    {
+        Assert( err < JET_errSuccess );
+        Call( ErrFILECloseTable( ppib, pfucbTable ) );
+        pfucbTable = pfucbNil;
+    }
+
+    if ( pfucb != pfucbNil )
+    {
+        Assert( err < JET_errSuccess );
+        DIRClose( pfucb );
+        pfucb = pfucbNil;
+    }
+
+    const double dblSecTotalElapsed = DblHRTSecondsElapsed( DhrtHRTElapsedFromHrtStart( hrtStart ) );
+    const ULONG ulMinElapsed = (ULONG)( dblSecTotalElapsed / 60.0 );
+    const double dblSecElapsed = dblSecTotalElapsed - (double)ulMinElapsed * 60.0;
+    if ( err >= JET_errSuccess )
+    {
+        JET_THREADSTATS jts = { 0 };
+        jts.cPageRead = jtsEnd.cPageRead - jtsStart.cPageRead;
+        jts.cPagePreread = jtsEnd.cPagePreread - jtsStart.cPagePreread;
+        jts.cPageReferenced = jtsEnd.cPageReferenced - jtsStart.cPageReferenced;
+        jts.cPageDirtied = jtsEnd.cPageDirtied - jtsStart.cPageDirtied;
+        jts.cPageRedirtied = jtsEnd.cPageRedirtied - jtsStart.cPageRedirtied;
+
+        DBUTLIReportSpaceLeakEstimationSucceeded(
+            pfmp,
+            rgcpgRootSpaceInfo[ 1 ],    // cpgAvailable
+            rgcpgRootSpaceInfo[ 0 ],    // cpgOwnedBelowEof
+            rgcpgRootSpaceInfo[ 3 ],    // cpgOwnedBeyondEof (shelved)
+            cpgUsedPrimary,
+            cpgUsedRoot,
+            cpgUsedOe,
+            cpgUsedAe,
+            rgcpgRootSpaceInfo[ 2 ],    // cpgSplitBuffers
+            cCachedPrimary,
+            cUncachedPrimary,
+            jts,
+            ulMinElapsed,
+            dblSecElapsed );
+
+        err = JET_errSuccess;
+    }
+    else
+    {
+        DBUTLIReportSpaceLeakEstimationFailed(
+            pfmp,
+            err,
+            objidLast,
+            szContext,
+            ulMinElapsed,
+            dblSecElapsed );
+    }
+
+    return err;
+}
+
 BOOL g_fDisableDumpPrintF = fFalse;
 
 //  ================================================================
@@ -5016,7 +5352,8 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
          opDBUTILDumpPageUsage         != pdbutil->op &&
          opDBUTILChecksumLogFromMemory != pdbutil->op &&
          opDBUTILDumpSpaceCategory     != pdbutil->op && 
-         opDBUTILDumpRBSPages          != pdbutil->op )
+         opDBUTILDumpRBSPages          != pdbutil->op &&
+         opDBUTILEstimateRootSpaceLeak != pdbutil->op )
     {
         //  the current operation requires szDatabase != NULL
 
@@ -5042,6 +5379,15 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
         {
             // calling this function when there is already a log attached
             // to the instance is not supported.
+            return ErrERRCheck( JET_errInvalidParameter );
+        }
+    }
+
+    if ( opDBUTILEstimateRootSpaceLeak == pdbutil->op )
+    {
+        // We need a JET_DBID, not a DB name.
+        if ( ( pdbutil->szDatabase != NULL ) || ( pdbutil->dbid == JET_dbidNil ) )
+        {
             return ErrERRCheck( JET_errInvalidParameter );
         }
     }
@@ -5239,6 +5585,9 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
 
         case opDBUTILDumpRBSHeader:
             return ErrDUMPRBSHeader( pinst, pdbutil->szDatabase, pdbutil->grbitOptions & JET_bitDBUtilOptionDumpVerbose );
+
+        case opDBUTILEstimateRootSpaceLeak:
+            return ErrDBUTLIEstimateRootSpaceLeak( (PIB*)sesid, (IFMP)pdbutil->dbid );
     }
 
 

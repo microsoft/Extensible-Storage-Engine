@@ -17307,7 +17307,7 @@ VOID FCB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     (*pcprintf)( FORMAT_INT( FCB, this, m_wRefCount, dwOffset ) );
 
-    (*pcprintf)( FORMAT_INT( FCB, this, m_objidFDP, dwOffset ) );
+    (*pcprintf)( FORMAT_UINT( FCB, this, m_objidFDP, dwOffset ) );
     (*pcprintf)( FORMAT_INT( FCB, this, m_pgnoFDP, dwOffset ) );
     (*pcprintf)( FORMAT_INT( FCB, this, m_pgnoOE, dwOffset ) );
     (*pcprintf)( FORMAT_INT( FCB, this, m_pgnoAE, dwOffset ) );
@@ -18066,7 +18066,7 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fRBSOn, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fNeedUpdateDbtimeBeginRBS, dwOffset ) );
 
-    (*pcprintf)( FORMAT_INT( FMP, this, m_objidLast, dwOffset ) );
+    (*pcprintf)( FORMAT_UINT( FMP, this, m_objidLast, dwOffset ) );
 
     (*pcprintf)( FORMAT_INT( FMP, this, m_ctasksActive, dwOffset ) );
 
@@ -18217,6 +18217,8 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_POINTER( FMP, this, m_pLogRedoMapBadDbtime, dwOffset ) );
     (*pcprintf)( FORMAT_POINTER( FMP, this, m_pLogRedoMapDbtimeRevert, dwOffset ) );
     (*pcprintf)( FORMAT_POINTER( FMP, this, m_pLogRedoMapDbtimeRevertIgnore, dwOffset ) );
+
+    (*pcprintf)( FORMAT_UINT( FMP, this, m_objidLeakEstimation, dwOffset ) );
 }
 
 INLINE ERR CHECKPOINT::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const

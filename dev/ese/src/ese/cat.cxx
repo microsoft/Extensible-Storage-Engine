@@ -14869,7 +14869,7 @@ ERR ErrCATGetExtentPageCounts(
 
     fdpinfo.pgnoFDP  = pfmp->PgnoExtentPageCountCacheFDP();
     fdpinfo.objidFDP = pfmp->ObjidExtentPageCountCacheFDP();
-    Call( ErrFILEOpenTable( ppib, ifmp, &pfucbExtentPageCountCache, szMSExtentPageCountCache, 0, &fdpinfo) );
+    Call( ErrFILEOpenTable( ppib, ifmp, &pfucbExtentPageCountCache, szMSExtentPageCountCache, 0, &fdpinfo ) );
     Assert( pfucbExtentPageCountCache->u.pfcb->FInitialized() );
 
     // This only ever gets set on the FCB for the ExtentPageCountCache and it never gets unset,
@@ -15238,8 +15238,10 @@ HandleError:
 ERR ErrCATGetNextRootObject(
     _In_ PIB* const         ppib,
     _In_ const IFMP         ifmp,
+    _In_ const BOOL         fSortedByObjId,
     _Inout_ FUCB** const    ppfucbCatalog,
-    _Out_ OBJID* const      pobjid )
+    _Out_ OBJID* const      pobjid,
+    _Out_writes_opt_z_( JET_cbNameMost + 1 ) CHAR* const szObjectName )
 //  ================================================================
 {
     Assert( ppib != NULL );
@@ -15248,12 +15250,14 @@ ERR ErrCATGetNextRootObject(
     Assert( pobjid != NULL );
 
     ERR err = JET_errSuccess;
+    OBJID objid = objidNil;
     FUCB* pfucbCatalog = *ppfucbCatalog;
     BOOL fInitilializedFucb = fFalse;
     BOOL fCatalogLatched = fFalse;
+    BOOL fCursorPositionedOnPrev = fTrue;
+    BOOL fCursorPositioned = fFalse;
     DATA dataField;
-
-    *pobjid = objidNil;
+    CHAR szObjectNameT[ JET_cbNameMost + 1 ];
 
     // Should we open the catalog or continue from where we left off?
     if ( pfucbCatalog == pfucbNil )
@@ -15261,73 +15265,162 @@ ERR ErrCATGetNextRootObject(
         Call( ErrCATOpen( ppib, ifmp, &pfucbCatalog ) );
         fInitilializedFucb = fTrue;
 
-        // Set the "RootObjects" secondary index and sets the search to root objects.
-        Call( ErrIsamSetCurrentIndex( ppib, pfucbCatalog, szMSORootObjectsIndex ) );
-
-        const BYTE bTrue = 0xff;
-
-        // Preread records.
-        JET_INDEX_COLUMN indexColumn;
-        indexColumn.columnid = fidMSO_RootFlag;
-        indexColumn.relop = JET_relopEquals;
-        indexColumn.pv = (void*)&bTrue;
-        indexColumn.cb = sizeof( bTrue );
-        indexColumn.grbit = NO_GRBIT;
-        JET_INDEX_RANGE indexRange;
-        indexRange.rgStartColumns = &indexColumn;
-        indexRange.cStartColumns = 1;
-        indexRange.rgEndColumns = NULL;
-        indexRange.cEndColumns = 0;
-        Call( ErrIsamPrereadIndexRange( (JET_SESID)ppib, (JET_TABLEID)pfucbCatalog, &indexRange, 0, lMax, JET_bitPrereadForward, NULL ) );
-
-        // Go to the first record.
-        Call( ErrIsamMakeKey( ppib, pfucbCatalog, &bTrue, sizeof( bTrue ), JET_bitNewKey | JET_bitFullColumnStartLimit ) );
-        err = ErrIsamSeek( ppib, pfucbCatalog, JET_bitSeekGE );
-        if ( err == JET_errRecordNotFound )
+        if ( !fSortedByObjId )
         {
-            Assert( fFalse );   //  We should have at least the catalog itself.
-            Error( ErrERRCheck( JET_errObjectNotFound ) );
-        }
-        Call( err );
-        err = JET_errSuccess;
+            // Set the "RootObjects" secondary index and sets the search to root objects.
+            Call( ErrIsamSetCurrentIndex( ppib, pfucbCatalog, szMSORootObjectsIndex ) );
 
-        // Set index range (just to be safe, since we expect bTrue to be at the end of the index anyways).
-        Call( ErrIsamMakeKey( ppib, pfucbCatalog, &bTrue, sizeof( bTrue ), JET_bitNewKey | JET_bitFullColumnEndLimit ) );
-        err = ErrIsamSetIndexRange( ppib, pfucbCatalog, JET_bitRangeInclusive | JET_bitRangeUpperLimit );
-        if ( err == JET_errNoCurrentRecord )
-        {
-            Assert( fFalse );   //  We should have at least the catalog itself.
-            Error( ErrERRCheck( JET_errObjectNotFound ) );
-        }
-        Call( err );
-        err = JET_errSuccess;
-    }
-    else
-    {
-        err = ErrIsamMove( ppib, pfucbCatalog, JET_MoveNext, NO_GRBIT );
-        if ( err == JET_errNoCurrentRecord )
-        {
+            const BYTE bTrue = 0xff;
+
+            // Preread records.
+            JET_INDEX_COLUMN indexColumn;
+            indexColumn.columnid = fidMSO_RootFlag;
+            indexColumn.relop = JET_relopEquals;
+            indexColumn.pv = (void*)&bTrue;
+            indexColumn.cb = sizeof( bTrue );
+            indexColumn.grbit = NO_GRBIT;
+            JET_INDEX_RANGE indexRange;
+            indexRange.rgStartColumns = &indexColumn;
+            indexRange.cStartColumns = 1;
+            indexRange.rgEndColumns = NULL;
+            indexRange.cEndColumns = 0;
+            Call( ErrIsamPrereadIndexRange( (JET_SESID)ppib, (JET_TABLEID)pfucbCatalog, &indexRange, 0, lMax, JET_bitPrereadForward, NULL ) );
+
+            // Go to the first record.
+            Call( ErrIsamMakeKey( ppib, pfucbCatalog, &bTrue, sizeof( bTrue ), JET_bitNewKey | JET_bitFullColumnStartLimit ) );
+            err = ErrIsamSeek( ppib, pfucbCatalog, JET_bitSeekGE );
+            if ( err == JET_errRecordNotFound )
+            {
+                Assert( fFalse );   //  We should have at least the catalog itself.
+                Error( ErrERRCheck( JET_errObjectNotFound ) );
+            }
+            Call( err );
             err = JET_errSuccess;
-            goto HandleError;
+
+            // Set index range (just to be safe, since we expect bTrue to be at the end of the index anyways).
+            Call( ErrIsamMakeKey( ppib, pfucbCatalog, &bTrue, sizeof( bTrue ), JET_bitNewKey | JET_bitFullColumnEndLimit ) );
+            err = ErrIsamSetIndexRange( ppib, pfucbCatalog, JET_bitRangeInclusive | JET_bitRangeUpperLimit );
+            if ( err == JET_errNoCurrentRecord )
+            {
+                Assert( fFalse );   //  We should have at least the catalog itself.
+                Error( ErrERRCheck( JET_errObjectNotFound ) );
+            }
+
+            Call( err );
+            err = JET_errSuccess;
+
+            fCursorPositioned = fTrue;
         }
-        Call( err );
-        err = JET_errSuccess;
+        else
+        {
+            // Just in case: set the primary index as the current index.
+            Call( ErrIsamSetCurrentIndex( ppib, pfucbCatalog, szMSOIdIndex ) );
+
+            // Go to the first record.
+            err = ErrIsamMove( ppib, pfucbCatalog, JET_MoveFirst, JET_bitNil );
+            if ( err == JET_errRecordNotFound )
+            {
+                Assert( fFalse );   //  We should have at least the catalog itself.
+                Error( ErrERRCheck( JET_errObjectNotFound ) );
+            }
+
+            Call( err );
+            err = JET_errSuccess;
+
+            fCursorPositionedOnPrev = fFalse;
+        }
     }
 
-    Call( ErrDIRGet( pfucbCatalog ) );
-    fCatalogLatched = fTrue;
+    while ( !fCursorPositioned )
+    {
+        if ( fCursorPositionedOnPrev )
+        {
+            err = ErrIsamMove( ppib, pfucbCatalog, JET_MoveNext, NO_GRBIT );
+            if ( err == JET_errNoCurrentRecord )
+            {
+                err = JET_errSuccess;
+                goto HandleError;
+            }
+            Call( err );
+            err = JET_errSuccess;
+        }
 
-    // We're correctly positioned at the record, retrieve the objid.
+        if ( !fSortedByObjId )
+        {
+            // We've positioned the cursor.
+            fCursorPositioned = fTrue;
+        }
+        else
+        {
+            Assert( !fCatalogLatched );
+            Call( ErrDIRGet( pfucbCatalog ) );
+            fCatalogLatched = fTrue;
+
+            // Retrieve the object type.
+            Call( ErrRECIRetrieveFixedColumn( pfcbNil, pfucbCatalog->u.pfcb->Ptdb(), fidMSO_Type, pfucbCatalog->kdfCurr.data, &dataField ) );
+            Assert( dataField.Cb() == sizeof( SYSOBJ ) );
+
+            const SYSOBJ sysobj = *( (UnalignedLittleEndian<SYSOBJ>*)dataField.Pv() );
+            Assert( sysobj != sysobjNil );
+            if ( sysobj == sysobjTable )
+            {
+                // We've positioned the cursor.
+                fCursorPositioned = fTrue;
+            }
+            else
+            {
+                Call( ErrDIRRelease( pfucbCatalog ) );
+                fCatalogLatched = fFalse;
+            }
+        }
+    }
+
+    if ( !fCatalogLatched )
+    {
+        Call( ErrDIRGet( pfucbCatalog ) );
+        fCatalogLatched = fTrue;
+    }
+
+    // Retrieve the object ID.
     Call( ErrRECIRetrieveFixedColumn( pfcbNil, pfucbCatalog->u.pfcb->Ptdb(), fidMSO_Id, pfucbCatalog->kdfCurr.data, &dataField ) );
-    *pobjid = *( (UnalignedLittleEndian<OBJID>*)dataField.Pv() );
+    Assert( dataField.Cb() == sizeof( objid ) );
+    objid = *( (UnalignedLittleEndian<OBJID>*)dataField.Pv() );
+    Assert( objid != objidNil );
+
+    if ( szObjectName != NULL )
+    {
+        // Retrieve the object name.
+        Call( ErrRECIRetrieveVarColumn( pfcbNil, pfucbCatalog->u.pfcb->Ptdb(), fidMSO_Name, pfucbCatalog->kdfCurr.data, &dataField ) );
+        Assert( ( dataField.Cb() / sizeof( szObjectNameT[ 0 ] ) ) < _countof( szObjectNameT ) );
+        UtilMemCpy( szObjectNameT, dataField.Pv(), dataField.Cb() );
+        szObjectNameT[ dataField.Cb() / sizeof( szObjectNameT[0] ) ] = '\0';
+    }
 
 HandleError:
     Assert( ( err < JET_errSuccess ) || ( pfucbCatalog != pfucbNil ) );
+
+    if ( err >= JET_errSuccess )
+    {
+        *pobjid = objid;
+        if ( szObjectName != NULL )
+        {
+            OSStrCbCopyA( szObjectName, sizeof( szObjectNameT ), szObjectNameT );
+        }
+    }
+    else
+    {
+        *pobjid = objidNil;
+        if ( szObjectName != NULL )
+        {
+            *szObjectName = '\0';
+        }
+    }
 
     if ( fCatalogLatched )
     {
         Assert( pfucbCatalog != pfucbNil );
         CallS( ErrDIRRelease( pfucbCatalog ) );
+        fCatalogLatched = fFalse;
     }
 
     if ( ( err < JET_errSuccess ) && fInitilializedFucb )

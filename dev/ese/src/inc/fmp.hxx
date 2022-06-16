@@ -574,8 +574,12 @@ class FMP
         // This can happen when we do a non-revertable delete outside the required range.
         CLogRedoMap *       m_pLogRedoMapDbtimeRevertIgnore;
 
+        // Stores the OBJID that is currently being processed by the leak estimation code.
+        // A value of objidFDPOverMax means it is not running.
+        OBJID               m_objidLeakEstimation;
+
     // =====================================================================
-    // Member retrieval..
+    // Member retrieval.
     public:
 
         IFMP Ifmp() const;
@@ -777,6 +781,12 @@ public:
         CLogRedoMap* PLogRedoMapBadDbTime() const           { return m_pLogRedoMapBadDbtime; };
         CLogRedoMap* PLogRedoMapDbtimeRevert() const        { return m_pLogRedoMapDbtimeRevert; };
         CLogRedoMap* PLogRedoMapDbtimeRevertIgnore() const  { return m_pLogRedoMapDbtimeRevertIgnore; };
+
+        // Space leak estimation.
+        ERR ErrStartRootSpaceLeakEstimation();
+        OBJID OjidLeakEstimation();
+        VOID SetOjidLeakEstimation( const OBJID objid );
+        VOID StopRootSpaceLeakEstimation();
 
     // =====================================================================
     // Member manipulation.

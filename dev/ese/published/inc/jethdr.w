@@ -295,6 +295,7 @@ typedef enum
     opDBUTILDumpCacheFile,
     opDBUTILDumpRBSHeader,
     opDBUTILDumpRBSPages,
+    opDBUTILEstimateRootSpaceLeak,
 } DBUTIL_OP;
 
 typedef enum
@@ -6659,6 +6660,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errDatabaseAlreadyRunningMaintenance -2004  /* The operation did not complete successfully because the database is already running maintenance on specified database */
 // end_PubEsent
 #define wrnOLD2TaskSlotFull                  2005 /* Online defrag task slots are full */
+#define JET_errRootSpaceLeakEstimationAlreadyRunning -2006  /* The operation did not complete successfully because root space leak estimation is already running on the specified database */
 // begin_PubEsent
 
 

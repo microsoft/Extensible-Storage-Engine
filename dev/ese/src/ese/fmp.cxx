@@ -1636,6 +1636,7 @@ ERR FMP::ErrInitializeOneFmp(
     pfmp->ResetLeakReclaimerIsRunning();
     pfmp->ResetPgnoMaxTracking();
     pfmp->ResetCpgAvail();
+    pfmp->SetOjidLeakEstimation( objidFDPOverMax );
 
     pfmp->SetDbtimeBeginRBS( 0 );
     pfmp->ResetRBSOn();
@@ -3062,6 +3063,42 @@ VOID FMP::WaitForAsyncIOForViewCache()
             AssertSz( fFalse, "Asynchronous Read File I/O appears to be hung." );
         }
     }
+}
+
+//  ================================================================
+ERR FMP::ErrStartRootSpaceLeakEstimation()
+//  ================================================================
+{
+    if ( (OBJID)AtomicCompareExchange( (LONG*)&m_objidLeakEstimation, (LONG)objidFDPOverMax, (LONG)objidNil ) != objidFDPOverMax )
+    {
+        return ErrERRCheck( JET_errRootSpaceLeakEstimationAlreadyRunning );
+    }
+
+    return JET_errSuccess;
+}
+
+//  ================================================================
+OBJID FMP::OjidLeakEstimation()
+//  ================================================================
+{
+    return (OBJID)AtomicRead( (LONG*)&m_objidLeakEstimation );
+}
+
+//  ================================================================
+VOID FMP::SetOjidLeakEstimation( const OBJID objid )
+//  ================================================================
+{
+    const OBJID objidOld = (OBJID)AtomicExchange( (LONG*)&m_objidLeakEstimation, (LONG)objid );
+    Assert( objidOld <= objidFDPOverMax );
+    Assert( objid >= objidOld );
+}
+
+//  ================================================================
+VOID FMP::StopRootSpaceLeakEstimation()
+//  ================================================================
+{
+    Expected( m_objidLeakEstimation < objidFDPOverMax );
+    SetOjidLeakEstimation( objidFDPOverMax );
 }
 
 //  ================================================================

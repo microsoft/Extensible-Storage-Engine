@@ -584,6 +584,7 @@
 	EXTERNAL_WRN( 2003,	State,		JET_wrnDatabaseScanNotRunning	 )
 	EXTERNAL_ERR( -2004,	Usage,		JET_errDatabaseAlreadyRunningMaintenance	 )
 	INTERNAL_WRN( 2005,	Quota,		wrnOLD2TaskSlotFull	 )
+	EXTERNAL_ERR( -2006,	Usage,		JET_errRootSpaceLeakEstimationAlreadyRunning	)
 	EXTERNAL_WRN( 2100,	State,		JET_wrnCallbackNotRegistered	 )
 	EXTERNAL_ERR( -2101,	State,		JET_errCallbackFailed	 )
 	EXTERNAL_ERR( -2102,	Usage,		JET_errCallbackNotResolved	 )
