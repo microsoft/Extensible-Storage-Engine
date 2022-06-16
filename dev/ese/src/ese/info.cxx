@@ -1424,7 +1424,11 @@ ERR VTAPI ErrIsamGetTableInfo(
                 objectinfo.flags |= JET_bitObjectSystemDynamic;
             else if ( MSysDBM::FIsSystemTable( szTableName ) )
                 objectinfo.flags |= JET_bitObjectSystemDynamic;
+            else if ( FCATDeferredPopulateKeysTable( szTableName ) )
+                objectinfo.flags |= JET_bitObjectSystemDynamic;
             else if ( FCATLocalesTable( szTableName ) )
+                objectinfo.flags |= JET_bitObjectSystemDynamic;
+            else if ( FCATExtentPageCountCacheTable( szTableName ) )
                 objectinfo.flags |= JET_bitObjectSystemDynamic;
 
             if ( pfucb->u.pfcb->FFixedDDL() )

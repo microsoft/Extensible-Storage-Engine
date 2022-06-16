@@ -1439,6 +1439,7 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
 
     const BOOL                      fConditional        = ( pidxcreate->cConditionalColumn > 0 );
     const BOOL                      fPrimary            = ( grbit & JET_bitIndexPrimary );
+    const BOOL                      fDeferredPopulate   = ( grbit & JET_bitIndexDeferredPopulateCreate );
     const BOOL                      fUnique             = ( grbit & ( JET_bitIndexUnique|JET_bitIndexPrimary ) );
     const BOOL                      fDisallowNull       = ( grbit & JET_bitIndexDisallowNull );
     const BOOL                      fIgnoreNull         = ( grbit & JET_bitIndexIgnoreNull );
@@ -1771,6 +1772,11 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
         pidb->SetFSortNullsHigh();
     }
     
+    if ( fDeferredPopulate )
+    {
+        pidb->SetFDeferredPopulate();
+    }
+
     //  not both linear and cross product
     //
     Assert( !( fCrossProduct && fNestedTable ) );
@@ -2654,6 +2660,7 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate, 
         || MSysDBM::FIsSystemTable( szTable )
         || FKVPTestTable( szTable )
         || FCATExtentPageCountCacheTable( szTable )
+        || FCATDeferredPopulateKeysTable( szTable )
         || FCATLocalesTable( szTable ) );
 
     const BOOL  fTemplateTable      = !!( ptablecreate->grbit & JET_bitTableCreateTemplateTable );
@@ -2803,6 +2810,7 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate, 
                     || FCATExtentPageCountCacheTable( szTable )
                     || MSysDBM::FIsSystemTable( szTable )
                     || FKVPTestTable( szTable )
+                    || FCATDeferredPopulateKeysTable( szTable )
                     || FCATLocalesTable( szTable ) );
             }
         }
@@ -4210,12 +4218,24 @@ ERR ErrFILEIndexBatchAddEntry(
 INLINE ERR ErrFILEIAppendToIndex(
     FUCB        * const pfucbSort,
     FUCB        * const pfucbIndex,
-    ULONG       *pcRecOutput,
+    ULONG       *pcRecordsFoundInSort,
     const BOOL  fLogged )
 {
     ERR             err;
     const INT       fDIRFlags   = ( fDIRNoVersion | fDIRAppend | ( fLogged ? 0 : fDIRNoLog ) );
     INST * const    pinst       = PinstFromPfucb( pfucbIndex );
+
+
+    *pcRecordsFoundInSort = 0;
+
+    // Position on the first entry of the sort table.
+    err = ErrSORTFirst( pfucbSort );
+    if ( err == JET_errNoCurrentRecord )
+    {
+        // Nothing here to append.
+        return JET_errSuccess;
+    }
+    CallR( err );
 
     CallR( ErrDIRInitAppend( pfucbIndex ) );
     do
@@ -4244,7 +4264,7 @@ INLINE ERR ErrFILEIAppendToIndex(
                     pfucbSort->kdfCurr.data,
                     fDIRFlags ) );
         Assert( Pcsr( pfucbIndex )->FLatched() );
-        (*pcRecOutput)++;
+        (*pcRecordsFoundInSort)++;
 
         err = ErrSORTNext( pfucbSort );
     }
@@ -4253,6 +4273,7 @@ INLINE ERR ErrFILEIAppendToIndex(
     if ( JET_errNoCurrentRecord == err )
         err = ErrDIRTermAppend( pfucbIndex );
 
+    // Note *pcRecordsFoundInSort is only accurate on a return of JET_errSuccess.
     return err;
 }
 
@@ -4289,34 +4310,232 @@ LOCAL VOID FILEIReportIndexCorrupt( FUCB * const pfucbIndex, CPRINTF * const pcp
 INLINE ERR ErrFILEICheckIndex(
     FUCB    * const pfucbSort,
     FUCB    * const pfucbIndex,
-    ULONG   *pcRecSeen,
+    ULONG   *pcRecordsFoundInSort,
     BOOL    *pfCorruptedIndex,
     CPRINTF * const pcprintf )
 {
     ERR     err;
     INT     cMisMatchCount = 0;
     DIB     dib;
+    BOOL    fIsDeferredPopulateIndex;
+    BOOL    fFoundEndOfIndex = fFalse;
+    BOOL    fFoundEndOfSortTable = fFalse;
+    DATA    dataPrimaryKeyProgress;
+    BYTE    rgbProgressKey[JET_cbKeyMostMost]; // 2K off the stack.  Too much?
+    ULONG   cbProgressKey = 0;
+
     dib.dirflag = fDIRNull;
     dib.pos     = posFirst;
 
     Assert( NULL != pfCorruptedIndex );
 
+    // A deferred-populate index is pretty much by definition going to not match
+    // the sort table.  It MUST, however, be a subset of the sort table.  There is
+    // no pattern to which set members may be present (because there is no defined
+    // mapping between the cardinality of a row in the primary and the cardinality of
+    // the resultant rows in the secondary AND because a user may be touching random
+    // entries in the primary and thus updating random entries in the secondary), but
+    // there are certain constraints as to which members MAY be not-present.  The
+    // constraints can be validated by comparing bookmarks.  When we're walking
+    // through the sort table and the index, we compare the bookmarks from the sort
+    // table and the index to determine if a correct subset relationship exists.
+    //
+    // When comparing bookmarks, there are 4 possibilities:
+    //
+    // 1) The bookmark in the sort table and the bookmark in the index match.  This
+    //    shows an expected, integrous entry in the index.  Proceed to the next entry
+    //    in both the sort table and the index and continue checking the index.
+    //
+    // 2) The bookmark in the sort table and the bookmark in the index do NOT match
+    //    AND the bookmark in the index is "less than" the bookmark in the sort table.
+    //    This shows an unexpected, corrupt entry in the index.  No more checking is
+    //    necessary.
+    //
+    // 3) The bookmark in the sort table and the bookmark in the index do NOT match
+    //    AND the bookmark in the index is "greater than" the bookmark in the sort
+    //    table.  This is, by itself, not enough to determine whether there exists
+    //    a corruption or not.  Consider:
+    //
+    //   3.1) The primary key embedded in the sort table bookmark is not "ahead" of
+    //        the stored primary key representing progress in deferred population of
+    //        the index.  This bookmark results from processing a row in the primary
+    //        that has therefore already been processed for the secondary index, and
+    //        thus the bookmark must also be present in the secondary index.  Since
+    //        it isn't, the index is corrupt.  No more checking is necessary.
+    //
+    //   3.2) The primary key embedded in the sort table bookmark is "ahead" of the
+    //        the stored primary key representing progress in deferred population of
+    //        the index.  This bookmark results from processing a row in the primary
+    //        that has therefore not yet been processed for the secondary index, and
+    //        thus the bookmark may or may not be present in the secondary index
+    //        (depending on whether the row in the primary has been modified
+    //        by the user).  Regardless, its absence from the secondary will presumably
+    //        be corrected when deferred processing progress reaches the row in the
+    //        primary, so the index is not corrupt.  Proceed to the next entry in the
+    //        sort table only, and continue checking the index.
+
+
+    fIsDeferredPopulateIndex = pfucbIndex->u.pfcb->Pidb()->FDeferredPopulate(); // "Cache" this, it doesn't change.
+    if ( fIsDeferredPopulateIndex )
+    {
+        Call( ErrCATGetDeferredPopulateKey(
+                  pfucbIndex->ifmp,
+                  ObjidFDP( pfucbIndex ),
+                  rgbProgressKey,
+                  sizeof(rgbProgressKey),
+                  &cbProgressKey ) );
+        dataPrimaryKeyProgress.SetCb( cbProgressKey );
+        dataPrimaryKeyProgress.SetPv( rgbProgressKey );
+    }
+
     FUCBSetPrereadForward( pfucbIndex, cpgPrereadSequential );
 
-    Call( ErrBTDown( pfucbIndex, &dib, latchReadTouch ) );
-
-    do
+    // Position on the first entry of the index.
+    err = ErrBTDown( pfucbIndex, &dib, latchReadTouch );
+    if ( err == JET_errRecordNotFound )
     {
-        (*pcRecSeen)++;
+        fFoundEndOfIndex = fTrue;
+        err = JET_errSuccess;
+    }
+    Call( err );
 
-        Assert( Pcsr( pfucbIndex )->FLatched() );
+    // Position on the first entry of the sort table.
+    err = ErrSORTFirst( pfucbSort );
+    if ( err == JET_errNoCurrentRecord )
+    {
+        fFoundEndOfSortTable = fTrue;
+        err = JET_errSuccess;
+    }
+    Call( err );
 
-        INT cmp = CmpKeyData( pfucbIndex->kdfCurr, pfucbSort->kdfCurr );
-        if( 0 != cmp )
+    // Exit from the loop is via "break" statements.
+    for( ; ; )
+    {
+        enum ENTRY_COMPARISON
+        {
+            ecMatch,
+            ecCorrupt,
+            ecExtra
+        };
+
+        ENTRY_COMPARISON ecResult;
+        INT              cmp;
+        
+        Assert( JET_errSuccess == err );
+
+        //
+        // Positioning was done before loop entry or at the end of the last loop iteration.
+        // Make sure the result is allowable.
+        //
+        if ( fFoundEndOfIndex || fFoundEndOfSortTable )
+        {
+            if ( fFoundEndOfIndex && fFoundEndOfSortTable )
+            {
+                // Nothing more to look at.
+                goto HandleError;
+            }
+            else if ( fFoundEndOfIndex )
+            {
+                if ( fIsDeferredPopulateIndex )
+                {
+                    // It's allowable and ignorable for a deferred populate index to run out
+                    // before we run out of entries on the sort table.
+                }
+                else
+                {
+                    FILEIReportIndexCorrupt( pfucbIndex, pcprintf );
+                    (*pcprintf)( "real index has fewer (%d) srecords\r\n", *pcRecordsFoundInSort );
+                    *pfCorruptedIndex = fTrue;
+                    break;
+                }
+            }
+            else if( fFoundEndOfSortTable )
+            {
+                // But we haven't finished reading the index.
+                FILEIReportIndexCorrupt( pfucbIndex, pcprintf );
+                (*pcprintf)( "generated index has fewer (%d) srecords\r\n", *pcRecordsFoundInSort );
+                *pfCorruptedIndex = fTrue;
+                break;
+            }
+        }
+
+        Assert( !fFoundEndOfSortTable );
+        (*pcRecordsFoundInSort)++;
+
+        //
+        // Now that we're sure of our positioning, compare the keys
+        //
+        if ( fFoundEndOfIndex )
+        {
+            // The only time we're still looping when we've reached the end of the index
+            // is when we're looking at a defferred populate index.  In that case, we don't
+            // really have a key from the index; we're just making sure that the remaining
+            // keys on the sort table are appropriate.
+            Assert( fIsDeferredPopulateIndex );
+            cmp = 1;
+        }
+        else
+        {
+            Assert( Pcsr( pfucbIndex )->FLatched() );
+            cmp = CmpKeyData( pfucbIndex->kdfCurr, pfucbSort->kdfCurr );
+        }
+
+        if ( 0 > cmp )
+        {
+            // An entry in the sort table that is not present in the index
+            // and whose bookmark is greater than the bookmark of the entry
+            // in the index.  This is always an indication of corruption.
+            ecResult = ecCorrupt;
+        }
+        else if ( 0 == cmp )
+        {
+            // The bookmarks of the entries in the index and the sort table are the same.
+            ecResult = ecMatch;
+        }
+        else
+        {
+            // An entry in the sort table that is not present in the index
+            // and whose bookmark is less than the bookmark of the entry in
+            // the index.  In a normal index, this is an indication of corruption.
+            // In a deferred populate index, this may or may not be OK.  It
+            // depends on the primary key embedded in the sort table bookmark
+            // and the primary key stored as progress for the deferred populate work.
+            if ( !fIsDeferredPopulateIndex )
+            {
+                ecResult = ecCorrupt;
+            }
+            else
+            {
+                if ( 0 == dataPrimaryKeyProgress.Cb() )
+                {
+                    // There actually has been no progress recorded for the deferred populate index,
+                    // so any extra entries in the sort table will presumably be added later when
+                    // progress actually reaches the relevant row in the primary.
+                    ecResult = ecExtra;
+                }
+                else
+                {
+                    cmp = CmpData(dataPrimaryKeyProgress, pfucbSort->kdfCurr.data );
+
+                    if ( 0 < cmp )
+                    {
+                        // The primary keys indicate the entry should have already
+                        // been present in the index.
+                        ecResult = ecCorrupt;
+                    }
+                    else
+                    {
+                        ecResult = ecExtra;
+                    }
+                }
+            }
+        }
+
+        if ( ecResult == ecCorrupt )
         {
             FILEIReportIndexCorrupt( pfucbIndex, pcprintf );
             (*pcprintf)(    "index entry %d [%d:%d] (objid %d) inconsistent\r\n",
-                            *pcRecSeen,
+                            *pcRecordsFoundInSort,
                             Pcsr( pfucbIndex )->Pgno(),
                             Pcsr( pfucbIndex )->ILine(),
                             Pcsr( pfucbIndex )->Cpage().ObjidFDP() );
@@ -4390,48 +4609,46 @@ INLINE ERR ErrFILEICheckIndex(
             }
         }
 
-        err = ErrBTNext( pfucbIndex, fDIRNull );
-        if( err < 0 )
-        {
-            if ( JET_errNoCurrentRecord == err
-                && JET_errNoCurrentRecord != ErrSORTNext( pfucbSort ) )
-            {
-                FILEIReportIndexCorrupt( pfucbIndex, pcprintf );
-                (*pcprintf)( "real index has fewer (%d) srecords\r\n", *pcRecSeen );
-                *pfCorruptedIndex = fTrue;
-                break;
-            }
-        }
-        else
-        {
-            err = ErrSORTNext( pfucbSort );
-            if( JET_errNoCurrentRecord == err )
-            {
-                FILEIReportIndexCorrupt( pfucbIndex, pcprintf );
-                (*pcprintf)( "generated index has fewer (%d) srecords\r\n", *pcRecSeen );
-                *pfCorruptedIndex = fTrue;
-                break;
-            }
-        }
-    }
-    while ( err >= 0 );
+        //
+        // And now reposition in the index and the sort table as appropriate.
+        //
 
-    err = ( JET_errNoCurrentRecord == err ? JET_errSuccess : err );
+        // Only move in the index if we've not already found the end of the index and
+        // we've not found an extra element in the sort table.
+        if ( !fFoundEndOfIndex && ( ecResult != ecExtra ) )
+        {
+            err = ErrBTNext( pfucbIndex, fDIRNull );
+            if ( err == JET_errNoCurrentRecord )
+            {
+                fFoundEndOfIndex = fTrue;
+                err = JET_errSuccess;
+            }
+            Call( err );
+        }
+
+        // Always move in the sort table
+        err = ErrSORTNext( pfucbSort );
+        if ( err == JET_errNoCurrentRecord )
+        {
+            fFoundEndOfSortTable = fTrue;
+            err = JET_errSuccess;
+        }
+        Call( err );
+    }
 
 HandleError:
     FUCBResetPreread( pfucbIndex );
     BTUp( pfucbIndex );
+    // Note *pcRecordsFoundInSort is only accurate on a return of JET_errSuccess.
     return err;
 }
 
-
-#ifdef PARALLEL_BATCH_INDEX_BUILD
 
 LOCAL ERR ErrFILESingleIndexTerm(
     PIB         * const ppib,
     FUCB        ** const rgpfucbSort,
     FCB         * const pfcbIndex,
-    ULONG       * const rgcRecInput,
+    ULONG       * const rgcRecordsInsertedInSort,
     const ULONG iindex,
     BOOL        *pfCorruptionEncountered,
     CPRINTF     * const pcprintf,
@@ -4439,12 +4656,15 @@ LOCAL ERR ErrFILESingleIndexTerm(
 {
     Assert( pfcbNil != pfcbIndex );
 
-    ERR         err             = JET_errSuccess;
-    FUCB        *pfucbIndex     = pfucbNil;
-    const BOOL  fUnique         = pfcbIndex->Pidb()->FUnique();
-    ULONG       cRecOutput      = 0;
-    BOOL        fEntriesExist   = fTrue;
-    BOOL        fCorruptedIndex = fFalse;
+    ERR         err                 = JET_errSuccess;
+    FUCB        *pfucbIndex         = pfucbNil;
+    ULONG       cRecordsFoundInSort = 0;
+    BOOL        fCorruptedIndex     = fFalse;
+    BOOL        fCheckOnly          = ( pfCorruptionEncountered != NULL ); // We use the existence of this as a flag
+                                                                           // indicating to only check, not rebuild.
+
+    // pfCorruptionEncountered, if non-NULL, is an accumulator used outside this routine and must
+    // not be set to fFalse here.
 
     Assert( pfcbIndex->FTypeSecondaryIndex() );
     Assert( pidbNil != pfcbIndex->Pidb() );
@@ -4458,138 +4678,130 @@ LOCAL ERR ErrFILESingleIndexTerm(
     Call( ErrSORTEndInsert( rgpfucbSort[iindex] ) );
 
 #ifdef SHOW_INDEX_PERF
-    OSTrace( tracetagIndexPerf, OSFormat(   "Sorted keys for index %d in %d msecs.\n",
-                                        iindex+1,
-                                        TickOSTimeCurrent() - tickStart ) );
+    OSTrace( tracetagIndexPerf, OSFormat( "Sorted keys for index %d in %d msecs.\n",
+                                          iindex+1,
+                                          TickOSTimeCurrent() - tickStart ) );
 #endif
 
-    //  transfer index entries to actual index
-    //  insert first one in normal method!
+    // We used to only do things with the real index if we found entries in the sort table.
+    // But, consider the case where the index is corrupt in that it has an entry on it while
+    // the real data implies no entries.
+
+    //  open cursor on index
     //
-    err = ErrSORTNext( rgpfucbSort[iindex] );
-    if ( err < 0 )
+    Assert( pfucbNil == pfucbIndex );
+    Call( ErrDIROpen( ppib, pfcbIndex, &pfucbIndex ) );
+    FUCBSetIndex( pfucbIndex );
+    FUCBSetSecondary( pfucbIndex );
+    DIRGotoRoot( pfucbIndex );
+
+    if ( fCheckOnly )
     {
-        if ( JET_errNoCurrentRecord != err )
+        // Only checking the keys in the index in the database against the keys in the sort table.
+        Assert( NULL != pcprintf );
+        Call( ErrFILEICheckIndex(
+                  rgpfucbSort[iindex],
+                  pfucbIndex,
+                  &cRecordsFoundInSort,
+                  &fCorruptedIndex,
+                  pcprintf ) );
+        if ( fCorruptedIndex )
+        {
+            *pfCorruptionEncountered = fTrue;
             goto HandleError;
-
-        err = JET_errSuccess;
-
-        Assert( rgcRecInput[iindex] == 0 );
-        fEntriesExist = fFalse;
-    }
-
-    if ( fEntriesExist )
-    {
-
-        //  open cursor on index
-        //
-        Assert( pfucbNil == pfucbIndex );
-        Call( ErrDIROpen( ppib, pfcbIndex, &pfucbIndex ) );
-        FUCBSetIndex( pfucbIndex );
-        FUCBSetSecondary( pfucbIndex );
-        DIRGotoRoot( pfucbIndex );
-
-        if ( NULL != pfCorruptionEncountered )
-        {
-            Assert( NULL != pcprintf );
-            Call( ErrFILEICheckIndex(
-                        rgpfucbSort[iindex],
-                        pfucbIndex,
-                        &cRecOutput,
-                        &fCorruptedIndex,
-                        pcprintf ) );
-            if ( fCorruptedIndex )
-                *pfCorruptionEncountered = fTrue;
         }
-        else
-        {
-#ifdef SHOW_INDEX_PERF
-            const TICK  tickStart   = TickOSTimeCurrent();
-#endif
-
-            Call( ErrFILEIAppendToIndex(
-                        rgpfucbSort[iindex],
-                        pfucbIndex,
-                        &cRecOutput,
-                        fLogged ) );
-
-#ifdef SHOW_INDEX_PERF
-            OSTraceIndent( tracetagIndexPerf, +1 );
-            OSTrace( tracetagIndexPerf, OSFormat(   "Appended %d keys for index %d in %d msecs.\n",
-                                                cRecOutput,
-                                                iindex+1,
-                                                TickOSTimeCurrent() - tickStart ) );
-            OSTraceIndent( tracetagIndexPerf, -1 );
-#endif
-        }
-
-        DIRClose( pfucbIndex );
-        pfucbIndex = pfucbNil;
     }
     else
     {
+        // We already believe there is a corruption, we're rebuilding the index.  Copy
+        // everything from the sort table to a new index tree.
+#ifdef SHOW_INDEX_PERF
+        const TICK  tickStart   = TickOSTimeCurrent();
+#endif
+        Call( ErrFILEIAppendToIndex(
+                  rgpfucbSort[iindex],
+                  pfucbIndex,
+                  &cRecordsFoundInSort,
+                  fLogged ) );
+
 #ifdef SHOW_INDEX_PERF
         OSTraceIndent( tracetagIndexPerf, +1 );
-        OSTrace( tracetagIndexPerf, OSFormat( "No keys generated for index %d.\n", iindex+1 ) );
+        OSTrace( tracetagIndexPerf, OSFormat(   "Appended %d keys for index %d in %d msecs.\n",
+                                                cRecOutput,
+                                                iindex+1,
+                                                TickOSTimeCurrent() - tickStart ) );
         OSTraceIndent( tracetagIndexPerf, -1 );
 #endif
     }
 
-    SORTClose( rgpfucbSort[iindex] );
-    rgpfucbSort[iindex] = pfucbNil;
-
-    Assert( cRecOutput <= rgcRecInput[iindex] );
-    if ( cRecOutput != rgcRecInput[iindex] )
+    if ( fCheckOnly && *pfCorruptionEncountered )
     {
-        if ( cRecOutput < rgcRecInput[iindex] && !fUnique )
-        {
-            //  duplicates over multi-valued columns must have been removed
-        }
+        // We've already found a problem, no need to look for issues with duplicate entries.
+        goto HandleError;
+    }
 
-        else if ( NULL != pfCorruptionEncountered )
-        {
-            *pfCorruptionEncountered = fTrue;
+    Assert( err >= JET_errSuccess );
 
-            // Only report this error if we haven't
-            // encountered corruption on this index already.
-            if ( !fCorruptedIndex )
+    // No problems up to this point.  Last thing to check is for issues with duplicate entries,
+    // which we can find by looking at counts associated with the sort table. cRecordsFoundInSort
+    // is the actual number of entries in sort table found as we either validated the sort against
+    // the real DB or as we copied out of the sort into a new index.  rgcRecordsInsertedInSort[iindex]
+    // is the number of entries inserted into the sort table as it was built.  It is essentially
+    // a raw count of the keys produced from the real DB.  cRecordsFoundInSort may be smaller if
+    // duplicates were removed, which happens if the real index is unique.
+
+    if ( cRecordsFoundInSort == rgcRecordsInsertedInSort[iindex] )
+    {
+        // Exactly as many records in the sort table as were inserted.  No duplicates were removed.
+        err = JET_errSuccess;
+    }
+    else if ( cRecordsFoundInSort < rgcRecordsInsertedInSort[iindex] )
+    {
+        // Fewer entries seen on the sort table than were inserted.  There must have been duplicates.
+        if ( pfcbIndex->Pidb()->FUnique() )
+        {
+            // We removed duplicates from the sort in a unique index.  That means the index is
+            // inherently corrupted and cannot be repaired; the data used to build it violates
+            // the uniqueness constraint and would result in JET_errKeyDuplicate.
+            if ( fCheckOnly )
             {
-                if ( cRecOutput > rgcRecInput[iindex] )
-                {
-                    (*pcprintf)( "Too many index keys generated\n" );
-                }
-                else
-                {
-                    Assert( fUnique );
-                    (*pcprintf)( "%d duplicate key(s) on unique index\n", rgcRecInput[iindex] - cRecOutput );
-                }
+                (*pcprintf)( "%d duplicate key(s) on unique index (%d), unrepairable condition\n",
+                             (rgcRecordsInsertedInSort[iindex] - cRecordsFoundInSort ),
+                             pfcbIndex->ObjidFDP() );
+                *pfCorruptionEncountered = fTrue;
+                err = JET_errSuccess;
+            }
+            else
+            {
+                err = ErrERRCheck( JET_errKeyDuplicate );
             }
         }
-
-        else if ( cRecOutput > rgcRecInput[iindex] )
-        {
-            err = ErrERRCheck( JET_errIndexBuildCorrupted );
-            goto HandleError;
-        }
-
         else
         {
-            Assert( cRecOutput < rgcRecInput[iindex] );
-            Assert( fUnique );
-
-            //  If we got dupes and the index was NOT unique, it must have been
-            //  dupes over multi-value columns, in which case the dupes
-            //  get properly eliminated.
-            err = ErrERRCheck( JET_errKeyDuplicate );
-            goto HandleError;
+            // Duplicates are not a problem in a non-unique index.
+            err = JET_errSuccess;
         }
+    }
+    else
+    {
+        Assert( cRecordsFoundInSort > rgcRecordsInsertedInSort[iindex] );
+
+        // Somehow, the actual count of entries in the sort table ended up greater than
+        // the number of entries we tried to put in.
+        AssertSz( fFalse, "Can't have more entries in the sort table than there were keys generated." );
+        err = ErrERRCheck( JET_errIndexBuildCorrupted );
     }
 
 HandleError:
     if ( pfucbNil != pfucbIndex )
     {
-        Assert( err < 0 );
         DIRClose( pfucbIndex );
+    }
+
+    if ( rgpfucbSort[iindex] != pfucbNil )
+    {
+        SORTClose( rgpfucbSort[iindex] );
+        rgpfucbSort[iindex] = pfucbNil;
     }
 
     return err;
@@ -5597,432 +5809,6 @@ HandleError:
 
     return err;
 }
-
-#else
-
-ERR ErrFILEIndexBatchTerm(
-    PIB         * const ppib,
-    FUCB        ** const rgpfucbSort,
-    FCB         * const pfcbIndexesToBuild,
-    const ULONG cIndexesToBuild,
-    ULONG       * const rgcRecInput,
-    STATUSINFO  * const pstatus,
-    BOOL        *pfCorruptionEncountered,
-    CPRINTF     * const pcprintf )
-{
-    ERR         err = JET_errSuccess;
-    FUCB        *pfucbIndex = pfucbNil;
-    FCB         *pfcbIndex = pfcbIndexesToBuild;
-
-    Assert( pfcbNil != pfcbIndexesToBuild );
-    Assert( cIndexesToBuild > 0 );
-
-    for ( ULONG iindex = 0; iindex < cIndexesToBuild; iindex++, pfcbIndex = pfcbIndex->PfcbNextIndex() )
-    {
-        const BOOL  fUnique         = pfcbIndex->Pidb()->FUnique();
-        ULONG       cRecOutput      = 0;
-        BOOL        fEntriesExist   = fTrue;
-        BOOL        fCorruptedIndex = fFalse;
-
-        Assert( pfcbNil != pfcbIndex );
-        Assert( pfcbIndex->FTypeSecondaryIndex() );
-        Assert( pidbNil != pfcbIndex->Pidb() );
-
-#ifdef SHOW_INDEX_PERF
-        const TICK  tickStart       = TickOSTimeCurrent();
-
-        OSTrace( tracetagIndexPerf, OSFormat( "About to sort keys for index %d.\n", iindex+1 ) );
-#endif
-
-        Call( ErrSORTEndInsert( rgpfucbSort[iindex] ) );
-
-#ifdef SHOW_INDEX_PERF
-        OSTrace( tracetagIndexPerf, OSFormat(   "Sorted keys for index %d in %d msecs.\n",
-                                            iindex+1,
-                                            TickOSTimeCurrent() - tickStart ) );
-#endif
-
-        //  transfer index entries to actual index
-        //  insert first one in normal method!
-        //
-        err = ErrSORTNext( rgpfucbSort[iindex] );
-        if ( err < 0 )
-        {
-            if ( JET_errNoCurrentRecord != err )
-                goto HandleError;
-
-            err = JET_errSuccess;
-
-            Assert( rgcRecInput[iindex] == 0 );
-            fEntriesExist = fFalse;
-        }
-
-        if ( fEntriesExist )
-        {
-
-            //  open cursor on index
-            //
-            Assert( pfucbNil == pfucbIndex );
-            Call( ErrDIROpen( ppib, pfcbIndex, &pfucbIndex ) );
-            FUCBSetIndex( pfucbIndex );
-            FUCBSetSecondary( pfucbIndex );
-            DIRGotoRoot( pfucbIndex );
-
-            if ( NULL != pfCorruptionEncountered )
-            {
-                Assert( NULL != pcprintf );
-                Call( ErrFILEICheckIndex(
-                            rgpfucbSort[iindex],
-                            pfucbIndex,
-                            &cRecOutput,
-                            &fCorruptedIndex,
-                            pcprintf ) );
-                if ( fCorruptedIndex )
-                    *pfCorruptionEncountered = fTrue;
-            }
-            else
-            {
-#ifdef SHOW_INDEX_PERF
-                const TICK  tickStart   = TickOSTimeCurrent();
-#endif
-
-                Call( ErrFILEIAppendToIndex(
-                            rgpfucbSort[iindex],
-                            pfucbIndex,
-                            &cRecOutput,
-                            g_rgfmp[pfucbIndex->ifmp].FLogOn() ) );
-
-#ifdef SHOW_INDEX_PERF
-                OSTraceIndent( tracetagIndexPerf, +1 );
-                OSTrace( tracetagIndexPerf, OSFormat(   "Appended %d keys for index %d in %d msecs.\n",
-                                                    cRecOutput,
-                                                    iindex+1,
-                                                    TickOSTimeCurrent() - tickStart ) );
-                OSTraceIndent( tracetagIndexPerf, -1 );
-#endif
-            }
-
-            DIRClose( pfucbIndex );
-            pfucbIndex = pfucbNil;
-        }
-        else
-        {
-#ifdef SHOW_INDEX_PERF
-            OSTraceIndent( tracetagIndexPerf, +1 );
-            OSTrace( tracetagIndexPerf, OSFormat( "No keys generated for index %d.\n", iindex+1 ) );
-            OSTraceIndent( tracetagIndexPerf, -1 );
-#endif
-        }
-
-        SORTClose( rgpfucbSort[iindex] );
-        rgpfucbSort[iindex] = pfucbNil;
-
-        Assert( cRecOutput <= rgcRecInput[iindex] );
-        if ( cRecOutput != rgcRecInput[iindex] )
-        {
-            if ( cRecOutput < rgcRecInput[iindex] && !fUnique )
-            {
-                //  duplicates over multi-valued columns must have been removed
-            }
-
-            else if ( NULL != pfCorruptionEncountered )
-            {
-                *pfCorruptionEncountered = fTrue;
-
-                // Only report this error if we haven't
-                // encountered corruption on this index already.
-                if ( !fCorruptedIndex )
-                {
-                    if ( cRecOutput > rgcRecInput[iindex] )
-                    {
-                        (*pcprintf)( "Too many index keys generated\n" );
-                    }
-                    else
-                    {
-                        Assert( fUnique );
-                        (*pcprintf)( "%d duplicate key(s) on unique index\n", rgcRecInput[iindex] - cRecOutput );
-                    }
-                }
-            }
-
-            else if ( cRecOutput > rgcRecInput[iindex] )
-            {
-                err = ErrERRCheck( JET_errIndexBuildCorrupted );
-                goto HandleError;
-            }
-
-            else
-            {
-                Assert( cRecOutput < rgcRecInput[iindex] );
-                Assert( fUnique );
-
-                //  If we got dupes and the index was NOT unique, it must have been
-                //  dupes over multi-value columns, in which case the dupes
-                //  get properly eliminated.
-                err = ErrERRCheck( JET_errKeyDuplicate );
-                goto HandleError;
-            }
-        }
-
-        if ( pstatus )
-        {
-            Call( ErrFILEIndexProgress( pstatus ) );
-        }
-    }
-
-HandleError:
-    if ( pfucbNil != pfucbIndex )
-    {
-        Assert( err < 0 );
-        DIRClose( pfucbIndex );
-    }
-
-    return err;
-}
-
-
-ERR ErrFILEBuildAllIndexes(
-    PIB         * const ppib,
-    FUCB        * const pfucbTable,
-    FCB         * const pfcbIndexes,
-    STATUSINFO  * const pstatus,
-    const ULONG cIndexBatchMax,
-    const BOOL  fCheckOnly,
-    CPRINTF     * const pcprintf )
-{
-    ERR         err;
-    DIB         dib;
-    FUCB        *rgpfucbSort[cFILEIndexBatchSizeDefault];
-    FCB         *pfcbIndexesToBuild;
-    FCB         *pfcbNextBuildIndex;
-    KEY         keyBuffer;
-    BYTE        *pbKey                  = NULL;
-    ULONG       rgcRecInput[cFILEIndexBatchSizeDefault];
-    ULONG       cIndexesToBuild;
-    ULONG       iindex;
-    BOOL        fTransactionStarted     = fFalse;
-    BOOL        fCorruptionEncountered  = fFalse;
-    const BOOL  fLogged                 = g_rgfmp[pfucbTable->ifmp].FLogOn();
-    INST        * const pinst           = PinstFromPpib( ppib );
-
-    if ( 0 == ppib->Level() )
-    {
-        //  only reason we need a transaction is to ensure read-consistency of primary data
-        CallR( ErrDIRBeginTransaction( ppib, 50469, NO_GRBIT ) );
-        fTransactionStarted = fTrue;
-    }
-
-    Assert( cIndexBatchMax > 0 );
-    Assert( cIndexBatchMax <= cFILEIndexBatchSizeDefault );
-    for ( iindex = 0; iindex < cIndexBatchMax; iindex++ )
-        rgpfucbSort[iindex] = pfucbNil;
-
-    Alloc( pbKey = (BYTE *)RESKEY.PvRESAlloc() );
-    keyBuffer.prefix.Nullify();
-    keyBuffer.suffix.SetCb( cbKeyAlloc );
-    keyBuffer.suffix.SetPv( pbKey );
-
-    dib.pos     = posFirst;
-    dib.pbm     = NULL;
-    dib.dirflag = fDIRNull;
-
-    FUCBSetPrereadForward( pfucbTable, cpgPrereadSequential );
-    err = ErrBTDown( pfucbTable, &dib, latchReadTouch );
-    Assert( JET_errNoCurrentRecord != err );
-    if( JET_errRecordNotFound == err )
-    {
-        //  the tree is empty
-        err = JET_errSuccess;
-        goto HandleError;
-    }
-
-    // Cursor building index should only be navigating primary index.
-    Assert( pfucbNil == pfucbTable->pfucbCurIndex );
-
-    // Don't waste time by calling this function when unneeded.
-    Assert( pfcbNil != pfcbIndexes );
-
-    pfcbNextBuildIndex = pfcbIndexes;
-
-NextBuild:
-#ifdef SHOW_INDEX_PERF
-    ULONG   cRecs, cPages;
-    TICK    tickStart;
-    PGNO    pgnoLast;
-    cRecs = 0;
-    cPages  = 1;
-    pgnoLast = Pcsr( pfucbTable )->Pgno();
-    tickStart   = TickOSTimeCurrent();
-#endif
-
-    //  HACK: force locLogical to OnCurBM to silence
-    //  RECIRetrieveKey(), which will make DIR-level
-    //  calls using this cursor
-    pfucbTable->locLogical = locOnCurBM;
-
-    pfcbIndexesToBuild = pfcbNextBuildIndex;
-    pfcbNextBuildIndex = pfcbNil;
-
-    Assert( cIndexBatchMax <= cFILEIndexBatchSizeDefault );
-    err = ErrFILEIndexBatchInit(
-                ppib,
-                rgpfucbSort,
-                pfcbIndexesToBuild,
-                &cIndexesToBuild,
-                rgcRecInput,
-                &pfcbNextBuildIndex,
-                cIndexBatchMax );
-
-    // This is either a full batch or the last batch of indexes to build.
-    Assert( err < 0
-        || cIndexBatchMax == cIndexesToBuild
-        || pfcbNil == pfcbNextBuildIndex );
-
-#ifdef SHOW_INDEX_PERF
-    OSTrace( tracetagIndexPerf, OSFormat(   "Beginning scan of records to rebuild %d indexes.\n", cIndexesToBuild ) );
-    OSTraceIndent( tracetagIndexPerf, +1 );
-
-    FCB *   pfcbIndexT;
-    for ( pfcbIndexT = pfcbIndexesToBuild, iindex = 0; iindex < cIndexesToBuild; pfcbIndexT = pfcbIndexT->PfcbNextIndex(), iindex++ )
-    {
-        TDB *   ptdbT   = pfcb->Ptdb();
-        IDB *   pidbT   = pfcbIndexT->Pidb();
-
-        OSTrace( tracetagIndexPerf, OSFormat(   "Index #%d: %s\n",
-                                            iindex+1,
-                                            ptdbT->SzIndexName( pidbT->ItagIndexName() ) ) );
-    }
-    OSTraceIndent( tracetagIndexPerf, -1 );
-#endif
-
-    //  build up new index in a sort file
-    //
-    do
-    {
-        Call( err );
-
-        //  this loop can take some time, so see if we need
-        //  to terminate because of shutdown
-        //
-        Call( pinst->ErrCheckForTermination() );
-
-        if ( fLogged )
-        {
-            //  check if the log disk is full, because even
-            //  though we're still in the scanning phase,
-            //  we won't be able to insert keys into the
-            //  index if we can't log the insertion
-            //
-            Call( pinst->m_plog->ErrLGCheckState() );
-        }
-
-#ifdef SHOW_INDEX_PERF
-        cRecs++;
-
-        if ( Pcsr( pfucbTable )->Pgno() != pgnoLast )
-        {
-            cPages++;
-            pgnoLast = Pcsr( pfucbTable )->Pgno();
-        }
-#endif
-
-        //  get bookmark of primary index node
-        //
-        Assert( Pcsr( pfucbTable )->FLatched() );
-        Assert( locOnCurBM == pfucbTable->locLogical );
-        Call( ErrBTISaveBookmark( pfucbTable ) );
-
-        Call( ErrFILEIndexBatchAddEntry(
-                    rgpfucbSort,
-                    pfucbTable,
-                    &pfucbTable->bmCurr,
-                    pfucbTable->kdfCurr.data,
-                    pfcbIndexesToBuild,
-                    cIndexesToBuild,
-                    rgcRecInput,
-                    keyBuffer ) );
-
-        Assert( Pcsr( pfucbTable )->FLatched() );
-        err = ErrBTNext( pfucbTable, fDIRNull );
-    }
-    while ( JET_errNoCurrentRecord != err );
-    Assert( JET_errNoCurrentRecord == err );
-
-#ifdef SHOW_INDEX_PERF
-    OSTrace( tracetagIndexPerf, OSFormat(   "Scanned %d records (%d pages) and formulated all keys in %d msecs.\n",
-                                        cRecs,
-                                        cPages,
-                                        TickOSTimeCurrent() - tickStart ) );
-#endif
-
-    FUCBResetPreread( pfucbTable );
-    BTUp( pfucbTable );
-
-    Call( ErrFILEIndexBatchTerm(
-                ppib,
-                rgpfucbSort,
-                pfcbIndexesToBuild,
-                cIndexesToBuild,
-                rgcRecInput,
-                pstatus,
-                fCheckOnly ? &fCorruptionEncountered : NULL,
-                pcprintf ) );
-
-    if ( pfcbNil != pfcbNextBuildIndex )
-    {
-        //  reseek to beginning of data (must succeed since it succeeded the first time)
-        FUCBSetPrereadForward( pfucbTable, cpgPrereadSequential );
-        err = ErrBTDown( pfucbTable, &dib, latchReadTouch );
-        CallS( err );
-        Call( err );
-
-        goto NextBuild;
-    }
-
-    if ( fCorruptionEncountered )
-    {
-        OSUHAEmitFailureTag( PinstFromPfucb( pfucbTable ), HaDbFailureTagCorruption, L"b277592d-6179-477f-8f56-390b6827a9f8" );
-        err = ErrERRCheck( JET_errDatabaseCorrupted );
-    }
-    else
-    {
-        err = JET_errSuccess;
-    }
-
-HandleError:
-#ifdef SHOW_INDEX_PERF
-    OSTrace( tracetagIndexPerf, OSFormat( "Completed batch index build with error %d.\n", err ) );
-#endif
-
-    Assert ( err != errDIRNoShortCircuit );
-    if ( err < 0 )
-    {
-        for ( iindex = 0; iindex < cIndexBatchMax; iindex++ )
-        {
-            if ( pfucbNil != rgpfucbSort[iindex] )
-            {
-                SORTClose( rgpfucbSort[iindex] );
-                rgpfucbSort[iindex] = pfucbNil;
-            }
-        }
-
-        FUCBResetPreread( pfucbTable );
-        BTUp( pfucbTable );
-    }
-
-    if ( fTransactionStarted )
-    {
-        //  read-only transaction, so should never fail
-        CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
-    }
-
-HandleError:
-    RESKEY.Free( pbKey );
-    return err;
-}
-
-#endif  //  PARALLEL_BATCH_INDEX_BUILD
-
 
 //  resume logging on an index build for which logging was initially suspended
 //
@@ -7274,6 +7060,11 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
         return ErrERRCheck( JET_errInvalidParameter );
     }
     
+    if ( pidxcreate->grbit & JET_bitIndexDeferredPopulateProcess )
+    {
+        AssertSz( fFalse, "Shouldn't be creating an index with this grbit." );
+        return ErrERRCheck( JET_errInvalidParameter );
+    }
     
     // Force a write to the output structure (but don't actually modify the value).
     OnDebug( AtomicCompareExchange( &pidxcreate->err, pidxcreate->err, pidxcreate->err ) );
@@ -7505,31 +7296,49 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
                 BTUp( pfucbTable );
             }
 
-            //  ignore errors if trace fails
-            //
-            szTraceBuffer[cbTraceBuffer] = 0;
-            OSStrCbFormatA(
-                szTraceBuffer,
-                cbTraceBuffer,
-                "Begin %s CreateIndex: %s [objid:0x%x,pgnoFDP:0x%x]",
-                ( fIndexLogged ? "" : "NON-LOGGED" ),
-                szIndexName,
-                pfcbIdx->ObjidFDP(),
-                pfcbIdx->PgnoFDP() );
-            CallS( pinst->m_plog->ErrLGTrace( ppib, szTraceBuffer ) );
+            if ( pidxcreate->grbit & JET_bitIndexDeferredPopulateCreate )
+            {
+                err = JET_errSuccess;
+                OSStrCbFormatA(
+                    szTraceBuffer,
+                    cbTraceBuffer,
+                    "Skipping CreateIndex scan phase on DeferredPopulate [objid:0x%x,pgnoFDP:0x%x,error:0x%x]",
+                    pfcbIdx->ObjidFDP(),
+                    pfcbIdx->PgnoFDP(),
+                    err );
+                CallS( pinst->m_plog->ErrLGTrace( ppib, szTraceBuffer ) );
+            }
+            else
+            {
+                //  build index using our versioned view of the table
+                //
 
-            //  build index using our versioned view of the table
-            //
-            err = ErrFILEIBuildIndex( ppib, pfucb, pfucbIdx, &fIndexLogged );
+                //  ignore errors if trace fails
+                //
+                szTraceBuffer[cbTraceBuffer] = 0;
+                OSStrCbFormatA(
+                    szTraceBuffer,
+                    cbTraceBuffer,
+                    "Begin %s CreateIndex: %s [objid:0x%x,pgnoFDP:0x%x]",
+                    ( fIndexLogged ? "" : "NON-LOGGED" ),
+                    szIndexName,
+                    pfcbIdx->ObjidFDP(),
+                    pfcbIdx->PgnoFDP() );
+                CallS( pinst->m_plog->ErrLGTrace( ppib, szTraceBuffer ) );
 
-            OSStrCbFormatA(
-                szTraceBuffer,
-                cbTraceBuffer,
-                "End CreateIndex scan phase [objid:0x%x,pgnoFDP:0x%x,error:0x%x]",
-                pfcbIdx->ObjidFDP(),
-                pfcbIdx->PgnoFDP(),
-                err );
-            CallS( pinst->m_plog->ErrLGTrace( ppib, szTraceBuffer ) );
+                //  build index using our versioned view of the table
+                //
+                err = ErrFILEIBuildIndex( ppib, pfucb, pfucbIdx, &fIndexLogged );
+
+                OSStrCbFormatA(
+                    szTraceBuffer,
+                    cbTraceBuffer,
+                    "End CreateIndex scan phase [objid:0x%x,pgnoFDP:0x%x,error:0x%x]",
+                    pfcbIdx->ObjidFDP(),
+                    pfcbIdx->PgnoFDP(),
+                    err );
+                CallS( pinst->m_plog->ErrLGTrace( ppib, szTraceBuffer ) );
+            }
 
             if ( !fIndexLogged && g_rgfmp[pfucbTable->ifmp].FLogOn() )
             {
@@ -7576,10 +7385,29 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
             Assert( !FFUCBVersioned( pfucbIdx ) );  // no versioned operations should have occurred on this cursor
             DIRBeforeFirst( pfucb );
 
-            //  update the index with operations happening concurrently
-            //
-            err = ErrFILEIUpdateIndex( ppib, pfucb, pfucbIdx );
-
+            if ( pidxcreate->grbit & JET_bitIndexDeferredPopulateCreate )
+            {
+                //  We don't need to update the index with operations happening concurrently,
+                // but we do need to link the index into the table.
+                pfucb->u.pfcb->EnterDDL();
+                pfucb->u.pfcb->LinkSecondaryIndex( pfucbIdx->u.pfcb );
+                FILESetAllIndexMask( pfucb->u.pfcb );
+                pfucb->u.pfcb->LeaveDDL();
+                // After this point, new transactions can see the deferred index and will
+                // insert items correctly.  We need to get the "current" TRXID.  If
+                // we disable population of this 2ndary index until the oldest transaction
+                // in the system is newer than that transaction, we are guaranteed that
+                // population of the deferred 2ndary index won't miss any committed changes it
+                // needs to be aware of.
+                pfcbIdx->Pidb()->SetTrxDeferredPopulateMinTrx( PinstFromPpib( ppib )->m_trxNewest );                
+            }
+            else
+            {
+                //  update the index with operations happening concurrently
+                //
+                err = ErrFILEIUpdateIndex( ppib, pfucb, pfucbIdx );
+            }
+            
             OSStrCbFormatA(
                 szTraceBuffer,
                 cbTraceBuffer,
@@ -7727,13 +7555,7 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
     BOOL                fInTransaction              = fFalse;
     BOOL                fLazyCommit                 = fTrue;
     ULONG               iindex;
-
-#ifdef PARALLEL_BATCH_INDEX_BUILD
     FUCB                ** rgpfucbIdx               = NULL;
-#else
-    FUCB                * rgpfucbIdx[cFILEIndexBatchSizeDefault];
-#endif
-
     JET_INDEXCREATE3_A      *pidxcreateT                = NULL;
     JET_INDEXCREATE3_A      *pidxcreateNext             = NULL;
 
@@ -7788,19 +7610,8 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
         return JET_errSuccess;
     }
 
-#ifdef PARALLEL_BATCH_INDEX_BUILD
     AllocR( rgpfucbIdx = (FUCB **)PvOSMemoryHeapAlloc( sizeof(FUCB *) * cIndexes ) );
     memset( rgpfucbIdx, 0, sizeof(FUCB *) * cIndexes );
-#else
-    if ( cIndexes > cFILEIndexBatchSizeDefault )
-    {
-        err = ErrERRCheck( JET_errTooManyIndexes );
-        return err;
-    }
-
-    for ( iindex = 0; iindex < cIndexes; iindex++ )
-        rgpfucbIdx[iindex] = pfucbNil;
-#endif
 
     // Temporarily open new table cursor.
     CallJ( ErrDIROpen( ppib, pfcb, &pfucb ), Cleanup );
@@ -7960,12 +7771,468 @@ HandleError:
     AssertDIRNoLatch( ppib );
 
 Cleanup:
-#ifdef PARALLEL_BATCH_INDEX_BUILD
     if ( NULL != rgpfucbIdx )
     {
         OSMemoryHeapFree( rgpfucbIdx );
     }
-#endif
+
+    return err;
+}
+
+LOCAL ERR ErrFILEIProcessDeferredPopulateIndexWorker(
+    PIB                *ppib,
+    FUCB               *pfucbTable,
+    FUCB               *pfucbIndex,
+    BYTE               *rgbKeyBuffer,
+    ULONG              cbKeyBuffer,
+    PSTR               szIndexName
+    )
+{
+    ERR             err;
+    FCB * const     pfcbIdx             = pfucbIndex->u.pfcb;
+    BOOL            fInLocalTransaction = fFalse;
+    BOOL            fPopulationComplete = fFalse;
+    BOOL            fDidOne             = fFalse;
+    BOOL            fGotWriteConflict   = fFalse;
+    DIB             dib;
+    BOOKMARK        bookmark;
+    ULONG           cbKey;
+
+    // Cursor building index should only be navigating primary index.
+    Assert( pfucbNil == pfucbTable->pfucbCurIndex );
+
+    // Work buffer is not used when building index.
+    Assert( NULL == pfucbIndex->pvWorkBuf );
+
+    Assert( FFUCBSecondary( pfucbIndex ) );
+    Assert( pfcbNil != pfcbIdx );
+    Assert( pfcbIdx->Pidb() != pidbNil );
+    Assert( pfcbIdx->FTypeSecondaryIndex() );
+    Assert( pfcbIdx->FInitialized() );
+
+    // Index has been linked into table's index list.
+    Assert( pfcbIdx->PfcbTable() == pfucbTable->u.pfcb );
+
+    if ( TrxCmp( TrxOldest( PinstFromPpib( ppib ) ), pfcbIdx->Pidb()->TrxDeferredPopulateMinTrx() ) < 0 )
+    {
+        // There are still transactions hanging around that precede the transaction
+        // that created this deferred index.  If that transaction inserts a row into
+        // the primary index here, then it won't know about the deferred 2ndary index
+        // and so won't update the 2ndary index if necessary.  Additionally, it may be
+        // inserting a row that the deferred population will never become aware of,
+        // so the worker won't update the 2ndary index with that row, either.  So,
+        // we don't allow one to do deferred population until all such transactions
+        // are gone.  We could wait around for the old transactions to go away, but
+        // who knows how long that might take?  Just return an error to the caller.
+        Error( ErrERRCheck( JET_errIndexDeferredPopulateCurrentlyUnavailable ) );
+    }
+    
+    Call( ErrDIRBeginTransaction( ppib, 57815, NO_GRBIT ) );
+    fInLocalTransaction = fTrue;
+
+    Call( ErrCATGetDeferredPopulateKey(
+              pfucbTable->ifmp,
+              ObjidFDP( pfucbIndex ),
+              rgbKeyBuffer,
+              cbKeyBuffer,
+              &cbKey ) );
+
+    bookmark.Nullify();
+    bookmark.key.suffix.SetPv( rgbKeyBuffer );
+    bookmark.key.suffix.SetCb( cbKey );
+
+    dib.pos     = posDown;
+    dib.pbm     = &bookmark;
+    dib.dirflag = fDIRFavourNext;
+
+    FUCBSetSequential( pfucbTable );
+    err = ErrDIRDown( pfucbTable, &dib );
+    switch ( err )
+    {
+        case JET_errSuccess:
+            // Positioned on the requested entry.
+            break;
+
+        case wrnNDFoundGreater:
+            // Bookmark is to an entry that presumably is either NULL or refers to a deleted node.
+            break;
+
+        case JET_errRecordNotFound:
+            // No more records in the table.  Go through the rest of the work to get cleanup.
+            // We'll break out of the loop below on the first ErrDIRNext().
+            break;
+
+        case JET_errNoCurrentRecord:
+            AssertSz( fFalse, "Unexpected error from ErrBTDown" );
+            __fallthrough;
+
+        default:
+            Assert( err < JET_errSuccess ); // We don't expect any other warning.
+            Call( err );
+    }
+
+    // Walk the primary index and populate the secondary one.
+    //  We take a read lock on each row we walk on in the primary in order to conflict
+    //  with someone else updating the row and affecting the 2ndary index we're currently
+    //  populating.
+    //
+    ULONG ulRowsPerTransaction = ( ULONG ) min (
+        ( ( ULONG_PTR ) UINT_MAX ),
+        UlParam( PinstFromPpib( ppib ), JET_paramDeferredIndexPopulateRowsPerTransaction )
+        );
+
+    for (ULONG i=0;i < ulRowsPerTransaction ; i++ )
+    {
+        err = ErrDIRNext( pfucbTable, fDIRNull );
+        if ( JET_errNoCurrentRecord == err )
+        {
+            // No more entries, exit the loop.
+            fPopulationComplete = fTrue;
+            err = JET_errSuccess;
+            break;
+        }
+        Call( err );
+
+        // We expect to be on the page, latched
+        Assert( Pcsr( pfucbTable )->FLatched() );
+        Assert( locOnCurBM == pfucbTable->locLogical );
+        Call( ErrDIRRelease( pfucbTable ) );
+
+        AssertSz( !g_rgfmp[pfucbTable->ifmp].FVersioningOff(), "Versioning must be on for the lock to work" );
+        err = ErrDIRGetLock( pfucbTable, readLock );
+        if ( JET_errWriteConflict == err )
+        {
+            // Can't lock this row, so we can't safely process it.  But the rows we
+            // have already processed are fine.  Just exit the loop early with a
+            // JET_errSuccess return.
+            err = JET_errSuccess;
+            fGotWriteConflict = fTrue;
+            break;
+        }
+        Call( err );
+
+        Call( ErrRECIPopulateSecondaryIndex(
+                  pfucbTable,
+                  pfucbIndex,
+                  &(pfucbTable->bmCurr) ) );
+        fDidOne = fTrue;
+
+        // Save the current bookmark as the last bookmark we've successfully processed.
+        pfucbTable->bmCurr.key.suffix.CopyInto( bookmark.key.suffix );
+    }
+
+    Assert( pfucbTable->bmCurr.key.prefix.FNull() );
+    Assert( pfucbTable->bmCurr.data.FNull() );
+
+    if ( fPopulationComplete )
+    {
+        // Completed the deferred population process, unset the bookmark and unmark the index in the catalog.
+        Call( ErrCATSetDeferredPopulateKey(
+                  pfucbTable->ifmp,
+                  ObjidFDP( pfucbIndex ),
+                  NULL,
+                  0) );
+
+        IDB idbTemp = *(pfcbIdx->Pidb());
+
+        idbTemp.ResetFDeferredPopulate();
+
+        Assert( idbTemp.FPersistedFlags() == pfcbIdx->Pidb()->FPersistedFlags() );
+
+        Call( ErrCATChangeIndexFlags(
+                  ppib,
+                  pfucbTable->ifmp,
+                  ObjidFDP( pfucbTable ),
+                  szIndexName,
+                  idbTemp.FPersistedFlags(),
+                  idbTemp.FPersistedFlagsX() ) );
+    }
+    else if ( fDidOne )
+    {
+        // We might not have done anything if we failed to lock the first row we tried.
+        // Save the last bookmark we successfully processed.  If we exited the
+        // loop above on a write conflict from ErrDIRGetLock, this bookmark is NOT the
+        // current bookmark from pfucbTable.
+        Call( ErrCATSetDeferredPopulateKey(
+                  pfucbTable->ifmp,
+                  ObjidFDP( pfucbIndex ),
+                  (BYTE *)bookmark.key.suffix.Pv(),
+                  bookmark.key.suffix.Cb() ) );
+    }
+    
+    Call( ErrDIRCommitTransaction( ppib, 0 ) );
+    fInLocalTransaction = fFalse;
+    // No error; we did what we intended to do and committed.
+
+    // We don't expect warnings here.
+    CallS( err );
+    
+    if ( fPopulationComplete )
+    {
+        // Population is complete.  Alter the in-memory FCB.
+        Assert( JET_errSuccess == err );
+        Assert( !fGotWriteConflict );
+        Assert ( 0 == ppib->Level() );
+
+        // First, set the flag saying the worker has completed populating the index.
+        // This flag is not persisted.  This flag has no effect yet since no one will
+        // check the flag because the persisted flag saying we're still in process of
+        // populating is still set.  When this flag IS checked, it indicates that there
+        // is a minimum transaction needed before you can set to the index.  This will
+        // prevent transactions opened before the worker completed the index from using
+        // the index; those transactions still have an incomplete view of the index.
+        pfcbIdx->Pidb()->SetFDeferredPopulateCompleted();
+
+        // Second reset the minimum transaction.  Up til now, it marked the minimum transaction
+        // before we allowed the populate worker to run.  Since the populate worker is complete
+        // and won't need to run again, we can use the variable to now mean the minimum
+        // transaction needed to set to the index.
+        pfcbIdx->Pidb()->SetTrxDeferredPopulateMinTrx( PinstFromPpib( ppib )->m_trxNewest );
+
+        // Finally, remove the mark saying the populate worker needs to run.  This allows
+        // the other flag to take over control of setting to the index.
+        pfcbIdx->Pidb()->ResetFDeferredPopulate();
+    }
+    else if ( fGotWriteConflict )
+    {
+        // Population is not complete and we got a write conflict.  Let the caller know.
+        err = ErrERRCheck( JET_wrnIndexDeferredPopulateHalted );
+    }
+    else
+    {
+        // Population is not complete, but nothing else went wrong.  Let the caller know.
+        err = ErrERRCheck( JET_wrnIndexDeferredPopulateIncomplete );
+    }
+
+HandleError:
+    // Work buffer is not used when populating index.
+    Assert( NULL == pfucbIndex->pvWorkBuf );
+    Assert ( err != errDIRNoShortCircuit );
+
+    FUCBResetPreread( pfucbTable );
+    BTUp( pfucbTable );
+
+    if ( fInLocalTransaction )
+    {
+        Assert( err < JET_errSuccess );
+        CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
+    }
+
+    // We only return success if the index population is complete.
+    Assert( ( JET_errSuccess != err ) || fPopulationComplete );
+
+    return err;
+}
+
+LOCAL ERR VTAPI ErrFILEIProcessDeferredPopulateIndex(
+    PIB                 * ppib,
+    FUCB                * pfucbGiven,
+    JET_INDEXCREATE3_A  * pidxcreate )
+{
+    ERR                 err;
+    INST * const        pinst                       = PinstFromPpib( ppib );
+    FUCB                *pfucbTable                 = pfucbNil;
+    FCB                 *pfcbTable                  = pfcbNil;
+    FUCB                *pfucbIdx                   = pfucbNil;
+    FCB                 *pfcbIdx                    = pfcbNil;
+    BYTE                *rgbKeyBuffer               = NULL;
+    ULONG               cbKeyBuffer;
+    CHAR                szIndexName[ JET_cbNameMost+1 ];
+    const ULONG         cbTraceBuffer               = 127;
+    CHAR                szTraceBuffer[cbTraceBuffer + 1];
+    BOOL                fSetPopulating              = fFalse;
+
+    CallR( ErrPIBCheck( ppib ) );
+    CheckTable( ppib, pfucbGiven );
+
+    // Must not be in a transaction.  That lets the helper call below not use too much version store, as it
+    // can commit to transaction level 0.
+    if( 0 != ppib->Level() )
+    {
+        return ErrERRCheck( JET_errInTransaction );
+    }
+
+    // The only members of pidxcreate we care about are cbStruct, szIndexName, and grbit.
+    // We check the rest of the params to make sure they're NULL or 0.
+    // szKey and rgconditionalcolumn are not checked for NULL, but the counts associated
+    // with them are checked for 0.
+    // cbKeyMost can be 255, a default value.
+    if ( pidxcreate->cbStruct != sizeof( JET_INDEXCREATE3_A ) )          { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    if ( pidxcreate->grbit != JET_bitIndexDeferredPopulateProcess )      { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    if ( pidxcreate->szIndexName == NULL )                               { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    if ( pidxcreate->cbKey )                                             { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    if ( pidxcreate->cConditionalColumn )                                { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    if ( pidxcreate->cbVarSegMac )                                       { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    if ( pidxcreate->pidxunicode )                                       { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    if ( pidxcreate->ptuplelimits )                                      { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    // These can get set to defaults even if the caller didn't specify it, so allow the defaults.
+    if ( pidxcreate->cbKeyMost )
+    {
+        if ( pidxcreate->cbKeyMost != 255 )                              { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    }
+    if ( pidxcreate->pSpacehints )
+    {
+        if ( pidxcreate->pSpacehints->ulInitialDensity )                 { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+        if ( pidxcreate->pSpacehints->cbInitial )                        { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+        if ( pidxcreate->pSpacehints->grbit )                            { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+        if ( pidxcreate->pSpacehints->ulMaintDensity )                   { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+        if ( pidxcreate->pSpacehints->ulGrowth)                          { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+        if ( pidxcreate->pSpacehints->cbMinExtent )                      { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+        if ( pidxcreate->pSpacehints->cbMaxExtent )                      { Error( ErrERRCheck( JET_errInvalidParameter ) ); }
+    }
+
+    //  Get a fresh copy of the table FUCB.
+    Call( ErrDIROpen( ppib, pfucbGiven->u.pfcb, &pfucbTable ) );
+    pfcbTable = pfucbTable->u.pfcb;
+
+    //  Get the index
+    Call( ErrUTILCheckName( szIndexName, pidxcreate->szIndexName, JET_cbNameMost+1 ) );
+
+    pfcbTable->EnterDML();
+    err = ErrERRCheck( JET_errIndexNotFound );
+    // Skip the primary index, look through 2ndary indices.
+    for ( pfcbIdx = pfcbTable->PfcbNextIndex(); pfcbIdx != pfcbNil; pfcbIdx = pfcbIdx->PfcbNextIndex() )
+    {
+        err = ErrFILEIAccessIndexByName( ppib, pfcbTable, pfcbIdx, szIndexName );
+
+        switch ( min( JET_errSuccess, err ) )
+        {
+            case JET_errSuccess:
+                // The index is accessible
+                Expected( err == JET_errSuccess ); // We don't expect warnings.
+                break;
+
+            case JET_errIndexNotFound:
+                // Not the right index;
+                continue;
+
+            default:
+                break;
+        }
+
+        // We didn't continue, so leave the loop.
+        break;
+    }
+    pfcbTable->LeaveDML();
+    Call( err );
+
+    //
+    // Make sure this is a deferred-populate index and that no-one else is actually populating it
+    // right now.
+    pfcbIdx->Lock();
+    if ( !pfcbIdx->Pidb()->FDeferredPopulate() )
+    {
+        pfcbIdx->Unlock();
+        // Can't populate a lazy create index if it's not lazy create.
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    if ( pfcbIdx->FPopulating() )
+    {
+        pfcbIdx->Unlock();
+        // Someone else is working on this right now.
+        Error( ErrERRCheck( JET_errWriteConflict ) );
+    }
+
+    pfcbIdx->SetFPopulating();
+    // Remember we set this so we properly unset it later.
+    fSetPopulating = fTrue;
+    pfcbIdx->Unlock();
+
+    // Allocate a buffer outside the loop so we only do it once.
+    cbKeyBuffer = pfcbIdx->Pidb()->CbKeyMost() + 1;
+    Alloc( rgbKeyBuffer = new BYTE[ cbKeyBuffer ] );
+
+    // Get an FUCB for the index, also.
+    Call( ErrDIROpen( ppib, pfcbIdx, &pfucbIdx ) );
+    FUCBSetIndex( pfucbIdx );
+    FUCBSetSecondary( pfucbIdx );
+
+    //
+    //  ignore errors if trace fails
+    //
+    szTraceBuffer[cbTraceBuffer] = 0;
+    OSStrCbFormatA(
+        szTraceBuffer,
+        cbTraceBuffer,
+        "Begin PopulateExistingIndex: %s [objid:0x%x,pgnoFDP:0x%x]",
+        szIndexName,
+        pfcbIdx->ObjidFDP(),
+        pfcbIdx->PgnoFDP() );
+    CallS( pinst->m_plog->ErrLGTrace( ppib, szTraceBuffer ) );
+
+    for ( ; ; )
+    {
+        //  Populate index using our versioned view of the table
+        Call( ErrFILEIProcessDeferredPopulateIndexWorker(
+                  ppib,
+                  pfucbTable,
+                  pfucbIdx,
+                  rgbKeyBuffer,
+                  cbKeyBuffer,
+                  szIndexName ) );
+
+        // If we processed without hitting an error (including getting a
+        // write conflict while trying to lock a row to process, which
+        // would have resulted in JET_wrnIndexDeferredPopulateHalted)
+        // but still didn't complete, give the callback a chance to see
+        // if we should continue processing.
+        if ( JET_wrnIndexDeferredPopulateIncomplete == err )
+        {
+            BOOL fCallbackCalled;
+
+            ERR errCallback = ErrRECCallback(
+                ppib,
+                pfucbTable,
+                JET_cbtypIndexDeferredPopulateThrottle,
+                0,
+                szIndexName,
+                NULL,
+                0,
+                &fCallbackCalled );
+
+            if ( fCallbackCalled && ( JET_errSuccess == errCallback ) )
+            {
+                continue;
+            }
+        }
+        break;
+    }
+
+    OSStrCbFormatA(
+        szTraceBuffer,
+        cbTraceBuffer,
+        "End PopulateExistingIndex: [objid:0x%x,pgnoFDP:0x%x,error:0x%x]",
+        pfcbIdx->ObjidFDP(),
+        pfcbIdx->PgnoFDP(),
+        err );
+    CallS( pinst->m_plog->ErrLGTrace( ppib, szTraceBuffer ) );
+
+HandleError:
+    Assert ( 0 == ppib->Level() );
+
+    if ( fSetPopulating )
+    {
+        Assert( pfcbNil != pfcbIdx );
+        pfcbIdx->Lock();
+        pfcbIdx->ResetFPopulating();
+        pfcbIdx->Unlock();
+    }
+
+    if ( NULL != rgbKeyBuffer )
+    {
+        delete[] rgbKeyBuffer;
+    }
+
+    if ( pfucbNil != pfucbIdx )
+    {
+        DIRClose( pfucbIdx );
+    }
+
+    if ( pfucbNil != pfucbTable )
+    {
+        DIRClose( pfucbTable );
+    }
 
     return err;
 }
@@ -8014,7 +8281,11 @@ ERR VTAPI ErrIsamCreateIndex(
     ERR                 err                 = JET_errSuccess;
     PIB                 * const ppib        = reinterpret_cast<PIB *>( sesid );
     FUCB                * const pfucbTable  = reinterpret_cast<FUCB *>( vtid );
+    FMP                 *pfmp               = PfmpFromIfmp( pfucbTable->ifmp );
     BOOL                fInTransaction      = fFalse;
+    ULONG               iIndexCreate        = 0;
+    JET_INDEXCREATE3_A* pindexcreateT       = NULL;
+    BOOL                fLazyCommit;
 
 #ifdef SHOW_INDEX_PERF
     const TICK          tickStart           = TickOSTimeCurrent();
@@ -8026,41 +8297,94 @@ ERR VTAPI ErrIsamCreateIndex(
     Call( ErrPIBOpenTempDatabase ( ppib ) );
 
 #ifdef MINIMAL_FUNCTIONALITY
-
-    ULONG       iIndexCreate    = 0;
-    JET_INDEXCREATE3_A* pindexcreateT   = NULL;
-    BOOL                fLazyCommit     = fTrue;
+    // For minimal functionality:
+    //        * Always create indices one by one (not batch).
+    //        * Do not allow deferr-populated indices.
+    //        * Begin a new transaction.
+    //        * Do lazy commit if all indices indicate lazy commit.
+    const BOOL fDoOneByOne = fTrue;
+    const BOOL fAllowDeferred = fFalse;
+    fLazyCommit = fTrue;
 
     Call( ErrDIRBeginTransaction( ppib, 39205, NO_GRBIT ) );
     fInTransaction = fTrue;
+#else
+    // For non-minimal functionality:
+    //        * Create indices one by one (not batch) if only one index is supplied.
+    //        * Do not allow deferr-populated indices.
+    //        * Do not begin a new transaction.
+    //        * Do not do lazy commit (irrelevant, since it only matters when closing the new transaction).
+    const BOOL fDoOneByOne = ( 1 == cIndexCreate );
+    const BOOL fAllowDeferred = fTrue;
+    fLazyCommit = fFalse;
+#endif
 
-    for (   iIndexCreate = 0, pindexcreateT = pindexcreate;
-            iIndexCreate < cIndexCreate;
-            iIndexCreate++, pindexcreateT = (JET_INDEXCREATE3_A *)( (BYTE *)pindexcreateT + pindexcreateT->cbStruct ) )
+    if ( fDoOneByOne )
     {
-        Assert( sizeof(JET_INDEXCREATE3_A) == pindexcreateT->cbStruct );
+        Assert( cIndexCreate >= 0 );
+        for (   iIndexCreate = 0, pindexcreateT = pindexcreate;
+                iIndexCreate < cIndexCreate;
+                iIndexCreate++, pindexcreateT = (JET_INDEXCREATE3_A *)( (BYTE *)pindexcreateT + pindexcreateT->cbStruct ) )
+        {
+            Assert( sizeof(JET_INDEXCREATE3_A) == pindexcreateT->cbStruct );
 
-        Call( ErrFILEICreateIndex( ppib, pfucbTable, pindexcreateT ) );
-        fLazyCommit = fLazyCommit && ( pindexcreateT->grbit & JET_bitIndexLazyFlush );
-    }
+            if ( pindexcreate->grbit & JET_bitIndexDeferredPopulateProcess )
+            {
+                // Trying to continue processing a deferred-populate index.
 
-    Call( ErrDIRCommitTransaction( ppib, fLazyCommit ? JET_bitCommitLazyFlush : 0 ) );
-    fInTransaction = fFalse;
+                if ( !fAllowDeferred )
+                {
+                    Error( ErrERRCheck( JET_errIllegalOperation ) );
+                }
 
-#else  //  !MINIMAL_FUNCTIONALITY
+                if ( NULL == pfmp->PkvpsMSysDeferredPopulateKeys() )
+                {
+                    // The store for the keys for deferred population doesn't yet
+                    // exist.  That means that there was no such store at DB
+                    // attach AND we have not created on yet during runtime.
+                    // Therefore, we can not be continuing the processing of a
+                    // deferred populate index since we can't have started one.
+                    Error( ErrERRCheck( JET_errIllegalOperation ) );
+                }
 
-    Assert( cIndexCreate >= 0 );
-    if ( 1 == cIndexCreate )
-    {
-        Call( ErrFILEICreateIndex( ppib, pfucbTable, pindexcreate ) );
+                Call( ErrFILEIProcessDeferredPopulateIndex( ppib, pfucbTable, pindexcreate ) );
+            }
+            else
+            {
+                // Trying to create a single index, deferred-populate or not.
+                if ( pindexcreate->grbit & JET_bitIndexDeferredPopulateCreate )
+                {
+                    // Trying to create a single deferred-populate index.
+                    if ( !fAllowDeferred )
+                    {
+                        Error( ErrERRCheck( JET_errIllegalOperation ) );
+                    }
+
+                    if ( NULL == pfmp->PkvpsMSysDeferredPopulateKeys() )
+                    {
+                        // The store for the keys for deferred population doesn't yet
+                        // exist.  Try to create it.  Failing to create it will fail
+                        // the creation of the index.
+                        Call( pfmp->ErrInitMSysDeferredPopulateKeys( ppib, fTrue ) );
+                    }
+                    Assert ( pfmp->PkvpsMSysDeferredPopulateKeys() );
+                }
+
+                Call( ErrFILEICreateIndex( ppib, pfucbTable, pindexcreate ) );
+            }
+            fLazyCommit = fLazyCommit && ( pindexcreateT->grbit & JET_bitIndexLazyFlush );
+        }
     }
     else
     {
         Call( ErrFILEIBatchCreateIndex( ppib, pfucbTable, pindexcreate, cIndexCreate ) );
     }
 
-#endif  //  MINIMAL_FUNCTIONALITY
-
+    if ( fInTransaction )
+    {
+        Call( ErrDIRCommitTransaction( ppib, fLazyCommit ? JET_bitCommitLazyFlush : 0 ) );
+        fInTransaction = fFalse;
+    }
 HandleError:
     if ( fInTransaction )
     {
@@ -9211,6 +9535,7 @@ VOID IDB::SetFlagsFromGrbit( const JET_GRBIT grbit )
     const BOOL  fNestedTable        = ( grbit & JET_bitIndexNestedTable );
     const BOOL  fDotNetGuid         = ( grbit & JET_bitIndexDotNetGuid );
     const BOOL  fDisallowTruncation = ( grbit & JET_bitIndexDisallowTruncation );
+    const BOOL  fDeferredPopulate   = ( grbit & JET_bitIndexDeferredPopulateCreate );
 
     ResetFlags();
 
@@ -9249,6 +9574,11 @@ VOID IDB::SetFlagsFromGrbit( const JET_GRBIT grbit )
         SetFSortNullsHigh();
     }
     
+    if ( fDeferredPopulate )
+    {
+        SetFDeferredPopulate();
+    }
+
     //  not both linear and cross product
     //
     Assert( !( fCrossProduct && fNestedTable ) );
@@ -9296,6 +9626,11 @@ JET_GRBIT IDB::GrbitFromFlags() const
         grbit |= JET_bitIndexDotNetGuid;
     }
     
+    if ( FDeferredPopulate() )
+    {
+        grbit |= JET_bitIndexDeferredPopulateCreate;
+    }
+
     if ( FDisallowTruncation() )
         grbit |= JET_bitIndexDisallowTruncation;
     if ( FNoNullSeg() )

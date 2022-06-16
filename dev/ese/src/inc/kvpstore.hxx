@@ -255,7 +255,7 @@ public:
     //
 
     CKVPStore( IFMP ifmp, const WCHAR * const wszTableName );
-    ERR ErrKVPInitStore( PIB * const ppibProvided, const TrxUpdate eTrxUpd, const ULONG ulMajorVersionExpected );
+    ERR ErrKVPInitStore( PIB * const ppibProvided, const TrxUpdate eTrxUpd, const ULONG ulMajorVersionExpected, BOOL fAllowCreation = fTrue);
     ERR ErrKVPInitStore( const ULONG ulMajorVersionExpected )   { return ErrKVPInitStore( NULL, eReadWrite, ulMajorVersionExpected ); }
     VOID KVPTermStore();
     ~CKVPStore( );

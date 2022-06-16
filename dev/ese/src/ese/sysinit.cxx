@@ -629,6 +629,9 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
 
         CATTermMSLocales( pfmp );
         Assert( NULL == pfmp->PkvpsMSysLocales() );
+
+        CATTermMSDeferredPopulateKeys( pfmp );
+        Assert( NULL == pfmp->PkvpsMSysDeferredPopulateKeys() );
     }
 
     //  terminate backup session

@@ -93,6 +93,7 @@ const FormatVersions g_rgfmtversEngine[] = {
     { JET_efvScanCheck2Flags, /* 9480 */                { 1568,230,500 }, { 8,110,240 }, { 3,0,0 } }, // [2021/10/22]
     { JET_efvExtentFreed2, /* 9500 */                   { 1568,230,500 }, { 8,120,260 }, { 3,0,0 } }, // [2021/12/21]
     { JET_efvKVPStoreV2, /* 9520 */                     { 1568,250,520 }, { 8,120,260 }, { 3,0,0 } }, // [2022/02/17]
+    { JET_efvIndexDeferredPopulate, /* 9540 */          { 1568,260,540 }, { 8,120,260 }, { 3,0,0 } }, // [2022/03/02]  
 };
 
 const INT g_cfmtversEngine = _countof( g_rgfmtversEngine );

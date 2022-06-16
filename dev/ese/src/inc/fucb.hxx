@@ -376,24 +376,26 @@ INLINE VOID FUCB::VerifyOptimalPacking()
     // Also note that we keep track of 64 byte boundaries as a cache line mark.
     //
 
-#define _NoWastedSpaceAround(TYPE, FIELDFIRST, FIELDLAST)               \
+#define sizeofField( TYPE, FIELD ) ( sizeof( (( TYPE * ) 0 )->FIELD) )
+
+#define NoWastedSpaceAround(TYPE, FIELDFIRST, FIELDLAST)               \
     (                                                                   \
         ( OffsetOf( TYPE, FIELDFIRST ) == 0 ) &&                        \
-        ( OffsetOf( TYPE, FIELDLAST ) + sizeof( (( TYPE * ) 0 )->FIELDLAST)  == sizeof( TYPE ) ) && \
+        ( OffsetOf( TYPE, FIELDLAST ) + sizeofField( TYPE, FIELDLAST )  == sizeof( TYPE ) ) && \
         ( ( sizeof( TYPE ) % 32) == 0 )                                 \
         ),                                                              \
         "Unexpected padding around " #TYPE
 
 #define NoWastedSpace(TYPE, FIELD1, FIELD2)                             \
-    ( OffsetOf( TYPE, FIELD1) + sizeof(((TYPE *)0)->FIELD1) == OffsetOf( TYPE, FIELD2 ) ), \
-        "Unexpected padding between " #FIELD1 " and " #FIELD2 
+    ( OffsetOf( TYPE, FIELD1) + sizeofField( TYPE, FIELD1 ) == OffsetOf( TYPE, FIELD2 ) ), \
+        "Unexpected padding between " #FIELD1 " and " #FIELD2
 
 #define CacheLineMark(TYPE, FIELD, NUM)                                 \
     ( OffsetOf( TYPE, FIELD ) == ( 64 * NUM ) ), "Cache line marker"
 
     static_assert( sizeof( FUCB ) == 512, "Current size" );
 
-    static_assert( _NoWastedSpaceAround( FUCB, pvtfndef, pfucbLatchHolderForSpace ) );
+    static_assert( NoWastedSpaceAround( FUCB, pvtfndef, pfucbLatchHolderForSpace ) );
     static_assert( CacheLineMark( FUCB, pvtfndef, 0 ) );
     static_assert( NoWastedSpace( FUCB, pvtfndef,              ppib) );
     static_assert( NoWastedSpace( FUCB, ppib,                  pfucbNextOfSession) );

@@ -240,6 +240,8 @@ MSINTERNAL enum class MJET_GRBIT
     IndexNestedTable = 0x00020000, // index over multiple multi-valued columns but only with values of same itagSequence
     IndexDotNetGuid = 0x00040000, // index over GUID column according to .Net GUID sort order
     IndexImmutableStructure = 0x00080000, // Do not write to the input structures during a JetCreateIndexN call.
+    IndexDeferredPopulateCreate = 0x00100000, // Only create the index, don't actually populate it.
+    IndexDeferredPopulateProcess = 0x00200000, // Populate an index that was previously created with JET_bitIndexDeferredPopulateCreate
     KeyAscending = 0x00000000,
     KeyDescending = 0x00000001,
     TableDenyWrite = 0x00000001,

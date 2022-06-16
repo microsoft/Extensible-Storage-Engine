@@ -1868,6 +1868,11 @@ ERR ErrRECIReplaceInIndex(
     FUCB        *pfucbIdx,
     BOOKMARK    *pbmPrimary,
     RCE         *prcePrimary = prceNil );
+ERR ErrRECIPopulateSecondaryIndex(
+    FUCB            *pfucb,
+    FUCB            *pfucbIdx,
+    BOOKMARK        *pbmPrimary );
+
 
 ERR ErrRECInsert( FUCB *pfucb, BOOKMARK * const pbmPrimary );
 
@@ -1880,7 +1885,8 @@ ERR ErrRECCallback(
         const ULONG ulId,
         void * const pvArg1,
         void * const pvArg2,
-        const ULONG ulUnused );
+        const ULONG ulUnused,
+        BOOL *pfCallbackCalled = NULL );
 
 #if defined( DEBUG ) || !defined( RTM )
 ERR ErrRECSessionWriteConflict( FUCB *pfucb );

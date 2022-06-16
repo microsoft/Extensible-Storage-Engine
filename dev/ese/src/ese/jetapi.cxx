@@ -14209,21 +14209,36 @@ ERR CAutoIDXCREATE2::_ErrSet( JET_INDEXCREATE_W * pindexcreate )
             Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
 
-        if ( pindexcreate->cbKey == 0 )
+        if ( pindexcreate->grbit & JET_bitIndexDeferredPopulateProcess )
         {
-            CallR( ErrERRCheck( JET_errInvalidParameter ) );
-        }
+            if ( pindexcreate->cbKey != 0 )
+            {
+                CallR( ErrERRCheck( JET_errInvalidParameter ) );
+            }
 
-        if ( pindexcreate->cbKey < sizeof( WCHAR ) * ( LOSStrLengthMW( pindexcreate->szKey ) + 1 ) )
-        {
-            CallR( ErrERRCheck( JET_errIndexInvalidDef ) );
+            if ( pindexcreate->cConditionalColumn != 0 )
+            {
+                CallR( ErrERRCheck( JET_errInvalidParameter ) );
+            }
         }
-
-        if ( ( pindexcreate->szKey[0] != L'+' && pindexcreate->szKey[0] != L'-' ) ||
-            pindexcreate->szKey[ ( pindexcreate->cbKey / sizeof( WCHAR ) ) - 1] != L'\0' ||
-            pindexcreate->szKey[ ( pindexcreate->cbKey / sizeof( WCHAR ) ) - 2] != L'\0' )
+        else
         {
-            CallR( ErrERRCheck( JET_errIndexInvalidDef ) );
+            if ( pindexcreate->cbKey == 0 )
+            {
+                CallR( ErrERRCheck( JET_errInvalidParameter ) );
+            }
+
+            if ( pindexcreate->cbKey < sizeof( WCHAR ) * ( LOSStrLengthMW( pindexcreate->szKey ) + 1 ) )
+            {
+                CallR( ErrERRCheck( JET_errIndexInvalidDef ) );
+            }
+
+            if ( ( pindexcreate->szKey[0] != L'+' && pindexcreate->szKey[0] != L'-' ) ||
+                 pindexcreate->szKey[ ( pindexcreate->cbKey / sizeof( WCHAR ) ) - 1] != L'\0' ||
+                 pindexcreate->szKey[ ( pindexcreate->cbKey / sizeof( WCHAR ) ) - 2] != L'\0' )
+            {
+                CallR( ErrERRCheck( JET_errIndexInvalidDef ) );
+            }
         }
     }
 
@@ -14260,54 +14275,57 @@ ERR CAutoIDXCREATE2::_ErrSet( JET_INDEXCREATE_W * pindexcreate )
     m_pindexcreate->szKey = m_szKey;
     m_pindexcreate->cbKey = cchActual * sizeof( char );
 
-    // we may have a LANGID or LANGID+CbVarSegMac at the end
-    //
-    Assert ( pindexcreate->cbKey >= sizeof( WCHAR ) * ( LOSStrLengthMW( pindexcreate->szKey ) + 1 ) );
-
     // we are in the limits of allocation
     //
     Assert( cbAllocateMax >= m_pindexcreate->cbKey );
 
-    ULONG cbPastStringKey = pindexcreate->cbKey - sizeof( WCHAR ) * ( LOSStrLengthMW( pindexcreate->szKey ) + 1 );
-    if ( cbPastStringKey > 0 )
+    if ( pindexcreate->cbKey != 0 )
     {
-        if ( cbPastStringKey == ( sizeof(LANGID) + ( sizeof(WCHAR) * 2 ) ) )
+        // we may have a LANGID or LANGID+CbVarSegMac at the end
+        //
+        Assert ( pindexcreate->cbKey >= sizeof( WCHAR ) * ( LOSStrLengthMW( pindexcreate->szKey ) + 1 ) );
+
+        ULONG cbPastStringKey = pindexcreate->cbKey - sizeof( WCHAR ) * ( LOSStrLengthMW( pindexcreate->szKey ) + 1 );
+        if ( cbPastStringKey > 0 )
         {
+            if ( cbPastStringKey == ( sizeof(LANGID) + ( sizeof(WCHAR) * 2 ) ) )
+            {
 
-            LANGID * pLangId = (LANGID *)( pindexcreate->szKey + LOSStrLengthMW( pindexcreate->szKey ) + 1 );
+                LANGID * pLangId = (LANGID *)( pindexcreate->szKey + LOSStrLengthMW( pindexcreate->szKey ) + 1 );
 
-            memcpy( m_pindexcreate->szKey + m_pindexcreate->cbKey, pLangId, sizeof(LANGID) );
-            m_pindexcreate->cbKey += sizeof(LANGID);
+                memcpy( m_pindexcreate->szKey + m_pindexcreate->cbKey, pLangId, sizeof(LANGID) );
+                m_pindexcreate->cbKey += sizeof(LANGID);
 
-            memset( m_pindexcreate->szKey + m_pindexcreate->cbKey, '\0', 2 * sizeof(char) );
-            m_pindexcreate->cbKey += 2 * sizeof(char);
+                memset( m_pindexcreate->szKey + m_pindexcreate->cbKey, '\0', 2 * sizeof(char) );
+                m_pindexcreate->cbKey += 2 * sizeof(char);
 
+            }
+            else if ( cbPastStringKey == ( sizeof(LANGID) + ( sizeof(WCHAR) * 2 ) + sizeof( BYTE ) + ( sizeof(WCHAR) * 2 ) ) )
+            {
+                LANGID * pLangId = (LANGID *)( pindexcreate->szKey + LOSStrLengthMW( pindexcreate->szKey ) + 1 );
+
+                memcpy( m_pindexcreate->szKey + m_pindexcreate->cbKey, pLangId, sizeof(LANGID) );
+                m_pindexcreate->cbKey += sizeof(LANGID);
+
+                memset( m_pindexcreate->szKey + m_pindexcreate->cbKey, '\0', 2 * sizeof(char) );
+                m_pindexcreate->cbKey += 2 * sizeof(char);
+
+                BYTE * pcbVarMac = ( (BYTE*) pLangId ) + ( sizeof(WCHAR) * 2 );
+
+                memcpy( m_pindexcreate->szKey + m_pindexcreate->cbKey, pcbVarMac, sizeof(BYTE) );
+                m_pindexcreate->cbKey += sizeof(BYTE);
+
+                memset( m_pindexcreate->szKey + m_pindexcreate->cbKey, '\0', 2 * sizeof(char) );
+                m_pindexcreate->cbKey += 2 * sizeof(char);
+
+            }
+            else
+            {
+                CallR( ErrERRCheck( JET_errIndexInvalidDef ) );
+            }
         }
-        else if ( cbPastStringKey == ( sizeof(LANGID) + ( sizeof(WCHAR) * 2 ) + sizeof( BYTE ) + ( sizeof(WCHAR) * 2 ) ) )
-        {
-            LANGID * pLangId = (LANGID *)( pindexcreate->szKey + LOSStrLengthMW( pindexcreate->szKey ) + 1 );
-
-            memcpy( m_pindexcreate->szKey + m_pindexcreate->cbKey, pLangId, sizeof(LANGID) );
-            m_pindexcreate->cbKey += sizeof(LANGID);
-
-            memset( m_pindexcreate->szKey + m_pindexcreate->cbKey, '\0', 2 * sizeof(char) );
-            m_pindexcreate->cbKey += 2 * sizeof(char);
-
-            BYTE * pcbVarMac = ( (BYTE*) pLangId ) + ( sizeof(WCHAR) * 2 );
-
-            memcpy( m_pindexcreate->szKey + m_pindexcreate->cbKey, pcbVarMac, sizeof(BYTE) );
-            m_pindexcreate->cbKey += sizeof(BYTE);
-
-            memset( m_pindexcreate->szKey + m_pindexcreate->cbKey, '\0', 2 * sizeof(char) );
-            m_pindexcreate->cbKey += 2 * sizeof(char);
-
-        }
-        else
-        {
-            CallR( ErrERRCheck( JET_errIndexInvalidDef ) );
-        }
-
     }
+
     // we are in the limits of allocation
     //
     Assert( cbAllocateMax >= m_pindexcreate->cbKey );

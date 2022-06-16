@@ -595,6 +595,54 @@ VOID FMP::SetDbHeaderUpdateState( _In_ const DbHeaderUpdateState dbhusNewState )
 }
 #endif // DEBUG
 
+ERR FMP::ErrInitMSysDeferredPopulateKeys_( FMP * pfmp, PIB * const ppib, BOOL fAllowCreation )
+{
+    Assert( NULL == pfmp->PkvpsMSysDeferredPopulateKeys() );
+    ERR err;
+
+    err =  ErrCATInitMSDeferredPopulateKeys( ppib, pfmp->Ifmp(), fAllowCreation );
+    return err;
+}
+
+ERR FMP::ErrInitMSysDeferredPopulateKeys( PIB * const ppib, BOOL fAllowCreation )
+{
+    ERR err = m_initOnceMSysDeferredPopulateKeys.Init(FMP::ErrInitMSysDeferredPopulateKeys_, this, ppib, fAllowCreation );
+
+    if ( !fAllowCreation )
+    {
+        // The whole reason for the use of the init once structure is so we only have one thread
+        // at a time actually creating the table.  Since we're not allowing creation, that's not
+        // necessary here.  Furthermore, there are valid reasons to try to look up the existence
+        // of the table multiple times (serially without race possibilities), which ends up being
+        // multiple calls to this function with fAllowCreation == fFalse, and if we don't Reset(),
+        // then only the first lookup will find the table.
+        m_initOnceMSysDeferredPopulateKeys.Reset();
+
+        switch ( err )
+        {
+        case JET_errSuccess:
+            break;
+
+        case JET_errObjectNotFound:
+            // Since we were only checking to see if the store was already there, it's not
+            // really a problem if it's not.
+            err = JET_errSuccess;
+            break;
+
+        case JET_errEngineFormatVersionParamTooLowForRequestedFeature:
+            // Since we were only checking to see if the store was already there, it's not
+            // really a problem that the efv is too low for it to be there.
+            err = JET_errSuccess;
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    return err;
+}
+
 
 ERR ErrDBFormatFeatureEnabled_( const JET_ENGINEFORMATVERSION efvFormatFeature, const DbVersion& dbvCurrentFromFile );
 
@@ -1554,6 +1602,8 @@ ERR FMP::ErrInitializeOneFmp(
     pfmp->SetTrxOldestCandidate( trxMax );
     pfmp->SetTrxOldestTarget( trxMax );
     pfmp->SetTrxNewestWhenDiscardsLastReported( trxMin );
+
+    pfmp->SetKVPMSysDeferredPopulateKeys( NULL );
 
     pfmp->SetWriteLatch( ppib );
     pfmp->SetLgposAttach( lgposMin );

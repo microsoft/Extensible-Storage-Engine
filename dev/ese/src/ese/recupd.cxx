@@ -9,7 +9,8 @@ enum RECOPER
 {
     recoperInsert,
     recoperDelete,
-    recoperReplace
+    recoperReplace,
+    recoperPopulate
 };
 
 INLINE PCSTR SzRecoper( RECOPER recoper )
@@ -26,6 +27,9 @@ INLINE PCSTR SzRecoper( RECOPER recoper )
             break;
         case recoperReplace:
             szReturn = "Replace";
+            break;
+        case recoperPopulate:
+            szReturn = "Populate";
             break;
         default:
             AssertSz( fFalse, "Unexpected case in switch." );
@@ -885,7 +889,8 @@ ERR ErrRECCallback(
         const ULONG ulId,
         void * const pvArg1,
         void * const pvArg2,
-        const ULONG ulUnused )
+        const ULONG ulUnused,
+        BOOL *pfCallbackCalled )
 //  ================================================================
 //
 //  Call the specified callback type for the specified id
@@ -901,12 +906,20 @@ ERR ErrRECCallback(
     TDB * const ptdb = pfcb->Ptdb();
     Assert( NULL != ptdb );
 
-    Assert( err >= JET_errSuccess );
+    BOOL fCallbackCalledDummy;
+
+    if ( NULL == pfCallbackCalled )
+    {
+        pfCallbackCalled = &fCallbackCalledDummy;
+    }
+
+    *pfCallbackCalled = fFalse;
 
     if( NULL != ptdb->Pcbdesc() )
     {
 ///     pfcb->EnterDDL();
         err = ErrRECICallback( ppib, pfucb, ptdb, cbtyp, ulId, pvArg1, pvArg2, ulUnused );
+        *pfCallbackCalled = fTrue;
 ///     pfcb->LeaveDDL();
     }
 
@@ -917,6 +930,7 @@ ERR ErrRECCallback(
         {
             TDB * const ptdbTemplate = pfcbTemplate->Ptdb();
             err = ErrRECICallback( ppib, pfucb, ptdbTemplate, cbtyp, ulId, pvArg1, pvArg2, ulUnused );
+            *pfCallbackCalled = fTrue;
         }
     }
 
@@ -2506,6 +2520,31 @@ ERR ErrRECIDeleteIndexEntry(
     // And now deal with any other error that occurred while finding the value to delete.
     Call( err );
 
+    if ( !pDeleteContext->m_fErrorOnNotFound &&
+         FFUCBUnique( pfucbIdx )            &&
+         0 != CmpData(keyPrimary.suffix, pfucbIdx->kdfCurr.data ) )
+    {
+        // This is an odd case.  We're being asked to delete an entry from a unique index.
+        // Also, we're being told to not error on not found, which (for now at least) is a 
+        // proxy flag for a deferred-populate index.  However, since the index is not yet
+        // completely populated, it may not actually be unique.  So, the seek we just did
+        // did not actually land on the row in the 2ndary index we wanted.  It landed on a
+        // row with the same key that came from another row from the primary index.  We
+        // noticed that by comparing the primary key passed in with the primary key in the
+        // row we actually landed on and they didn't match.  Note we only need to do this
+        // for unique indices since the primary key is embedded in the 2ndary bookmark for
+        // non-unique indices, so we're guaranteed to either find the row we want or not
+        // directly from the ErrDIRDown.  Further note that this means that the index is
+        // actually corrupt (or at least, not completable) because the data that goes into
+        // the unique index is not actually unique.  We'll generate an appropriate error
+        // later when we try to insert the duplicate index entry.
+        Call( ErrDIRRelease( pfucbIdx ) );
+
+        // Ignore the error (although we don't count this as a modification)
+        err = JET_errSuccess;
+        goto HandleError;
+    }
+
     //  PERF: we should be able to avoid the release and call
     //  ErrDIRDelete with the page latched
     //
@@ -2568,7 +2607,7 @@ ERR ErrRECIDeleteFromIndex(
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     Assert( pidbNil != pidb );
 
-    DELETE_INDEX_ENTRY_CONTEXT DeleteContext( recoperDelete, fTrue );
+    DELETE_INDEX_ENTRY_CONTEXT DeleteContext( recoperDelete, !(pidb->FDeferredPopulate()) );
     TRACK_INDEX_ENTRY_CONTEXT TrackContext( recoperDelete );
 
     // Track all the expected keys for deletion.  Do it this way rather than
@@ -3233,6 +3272,98 @@ HandleError:
 }
 
 
+// Called on an entry where not all entry values have been correctly indexed.
+// Removes any existing index entries (which is probably a subset of required
+// existing entries) and adds all required index entries.
+ERR ErrRECIPopulateSecondaryIndex(
+    FUCB            *pfucb,
+    FUCB            *pfucbIdx,
+    BOOKMARK        *pbmPrimary )
+{
+    ERR             err;
+    //const FCB       * const pfcbIdx         = pfucbIdx->u.pfcb;
+    //const IDB       * const pidb            = pfcbIdx->Pidb();
+
+    DELETE_INDEX_ENTRY_CONTEXT DeleteContext( recoperPopulate, fFalse );
+    INSERT_INDEX_ENTRY_CONTEXT InsertContext( recoperPopulate, fDIRBackToFather );
+    TRACK_INDEX_ENTRY_CONTEXT TrackContext( recoperReplace );
+
+    AssertDIRNoLatch( pfucb->ppib );
+
+    Assert( pfucbIdx->u.pfcb != pfcbNil );
+    Assert( pfucbIdx->u.pfcb->FTypeSecondaryIndex() );
+    Assert( pfucbIdx->u.pfcb->Pidb() != pidbNil );
+    Assert( !(pfucbIdx->u.pfcb->Pidb()->FTuples()) );
+    Assert( pfucbIdx->u.pfcb->Pidb()->FDeferredPopulate() );
+    Assert( pfucbIdx->u.pfcb->FPopulating() );
+
+    // Delete all the old keys.
+    // Note that ErrRECIEnumerateKeys enumerates the keys that are SUPPOSED to exist
+    // based on the data source, not the keys that ACTUALLY exist.  By our DeleteContext,
+    // the actual delete will ignore NotFound entries when trying to delete a key
+    // that should be there but isn't.
+    Call ( ErrRECIEnumerateKeys(
+               pfucb,
+               pfucbIdx,
+               pbmPrimary,
+               prceNil,
+               keyLocationRecord,
+               &DeleteContext,
+               ErrRECIDeleteIndexEntry ) );
+
+    // Track all the new keys for potential insertion.  Do it this way
+    // rather than directly using EnumerateKeys to insert so we have a chance to deal
+    // with duplicate keys from this one record.
+    TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Insert;
+    Call( ErrRECIEnumerateKeys(
+              pfucb,
+              pfucbIdx,
+              pbmPrimary,
+              prceNil,
+              keyLocationRecord,
+              &TrackContext,
+              ErrRECITrackIndexEntry ) );
+
+    if ( 0 != TrackContext.m_cDataUsed )
+    {
+        //
+        // We tracked keys to post process.
+        TrackContext.CleanActionList();
+
+        //
+        // Do the resulting actions.
+        //
+        for ( ULONG i = 0; i < TrackContext.m_cDataUsed; i++ )
+        {
+            switch (TrackContext.m_pData[i].Action())
+            {
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Skip:
+                // Key was present more than once.  We act only once on a key.
+                continue;
+
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Insert:
+                // Necessary on the first ACTION::Insert, cheap on all the others.
+                DIRGotoRoot( pfucbIdx );
+
+                Call( ErrRECIInsertIndexEntry(
+                          pfucbIdx,
+                          TrackContext.m_pData[i].Key(),
+                          pbmPrimary->key,
+                          prceNil,
+                          &InsertContext ) );
+                break;
+
+            default:
+                AssertSz( fFalse, "Can't happen.");
+                break;
+            }
+        }
+    }
+
+HandleError:
+    return err;
+}
+
 //+local
 // ErrRECIReplaceInIndex
 // ========================================================================
@@ -3260,7 +3391,7 @@ ERR ErrRECIReplaceInIndex(
     const IDB       * const pidb            = pfcbIdx->Pidb();
     const BOOL      fReplaceByProxy         = ( prcePrimary != prceNil );
 
-    DELETE_INDEX_ENTRY_CONTEXT DeleteContext( recoperReplace, fTrue );
+    DELETE_INDEX_ENTRY_CONTEXT DeleteContext( recoperReplace, !(pidb->FDeferredPopulate()) );
     INSERT_INDEX_ENTRY_CONTEXT InsertContext( recoperReplace, fDIRBackToFather );
     TRACK_INDEX_ENTRY_CONTEXT TrackContext( recoperReplace );
 

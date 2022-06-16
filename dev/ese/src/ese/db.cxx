@@ -5093,6 +5093,17 @@ PostAttachTasks:
         CallJ( ErrSPTrimDBTaskInit( ifmp ), Detach );
     }
 
+    if( !FFMPIsTempDB( ifmp)     && // just in case
+        !pinst->FRecovering()    && // just in case
+        !g_fRepair               &&
+        !pfmp->FReadOnlyAttach()
+        )
+    {
+        // Find the MSysDeferredPopulateKeys table, if it exists.  The "fFalse" param says
+        // to not create it if it doesn't exist, just look for it.
+        CallJ( pfmp->ErrInitMSysDeferredPopulateKeys( ppib, fFalse ), Detach );
+    }
+
     pfmp->m_isdlAttach.Trigger( eAttachDone );
 
     //  we won't log the temp DB
@@ -5610,6 +5621,8 @@ StartDetaching:
     // This cannot be undone (easily), so do this only after detach is logged and the we will not rollback the detach
     CATTermMSLocales( &(g_rgfmp[ifmp]) );
     Assert( NULL == pfmp->PkvpsMSysLocales() );
+    CATTermMSDeferredPopulateKeys( &(g_rgfmp[ifmp]) );
+    Assert( NULL == pfmp->PkvpsMSysDeferredPopulateKeys() );
 
     if ( !plog->FRecovering() && ErrFaultInjection( 37004 ) < JET_errSuccess )
     {

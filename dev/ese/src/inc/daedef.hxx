@@ -26,10 +26,6 @@
 //  support for JET_bitCheckUniqueness on JetSeek()
 #define CHECK_UNIQUE_KEY_ON_NONUNIQUE_INDEX
 
-//  index rebuild perf improvements
-#define PARALLEL_BATCH_INDEX_BUILD
-#define DONT_LOG_BATCH_INDEX_BUILD
-
 //  ****************************************************
 //  global test hook / diagnostics macros
 //
