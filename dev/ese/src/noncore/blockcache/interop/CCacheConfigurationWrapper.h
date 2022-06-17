@@ -92,6 +92,16 @@ namespace Internal
                         {
                             return I()->IsAsyncWriteBackEnabled() ? fTrue : fFalse;
                         }
+
+                        ULONG CIOMaxOutstandingDestage()
+                        {
+                            return I()->MaxConcurrentIODestage();
+                        }
+
+                        ULONG CbIOMaxOutstandingDestage()
+                        {
+                            return I()->MaxConcurrentIOSizeDestage();
+                        }
                 };
             }
         }

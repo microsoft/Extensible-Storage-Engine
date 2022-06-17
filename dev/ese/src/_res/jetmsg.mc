@@ -3121,6 +3121,16 @@ Language=English
 %1 (%2) %3The caching file at '%4' could not perform a caching operation '%5' due to an unexpected error %6.  The caching operation will fail with error %7.%n
 .
 
+MessageId=4005
+SymbolicName=BLOCK_CACHE_CACHING_FILE_NOT_ENABLED_ID
+Language=English
+%1 (%2) %3The caching file with the requested physical ids was not enabled.%n
+%n
+Volume id=%4%n
+File id=%5%n
+Unique id=%6%n
+.
+
 ;///////////////////////////////////////////////////////////
 ;//	RBS Events
 ;///////////////////////////////////////////////////////////

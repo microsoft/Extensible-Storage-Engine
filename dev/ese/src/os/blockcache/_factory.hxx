@@ -151,6 +151,9 @@ class COSBlockCacheFactoryImpl : public IBlockCacheFactory
                                             _In_    const BOOL              fClusterUpdated,
                                             _In_    const BOOL              fSuperceded,
                                             _Out_   CCachedBlockSlotState*  pslotst ) override;
+        ERR ErrDetachFile(  _In_z_      const WCHAR* const                              wszFilePath,
+                            _In_opt_    const IBlockCacheFactory::PfnDetachFileStatus   pfnDetachFileStatus,
+                            _In_opt_    const DWORD_PTR                                 keyDetachFileStatus ) override;
 };
 
 INLINE ERR COSBlockCacheFactoryImpl::ErrCreateFileSystemWrapper(    _Inout_ IFileSystemAPI** const  ppfsapiInner,
@@ -261,9 +264,7 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrCreateFileFilter(   _Inout_             
 
     //  create the file filter
 
-    Alloc( pff = new CFileFilter( ppfapiInner, pfsf, pfsconfig, pfident, pctm, pcrep, volumeid, fileid, ppcfconfig, ppc, &pcfh ) );
-
-    pff->SetEverEligibleForCaching( fTrue );
+    Alloc( pff = new CFileFilter( ppfapiInner, pfsf, pfsconfig, pfident, pctm, pcrep, volumeid, fileid, ppcfconfig, fTrue, ppc, &pcfh ) );
 
     //  return the file filter
 
@@ -481,7 +482,7 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrDumpCachedFileHeader(   _In_z_  const WC
 
     Call( pfsapi->ErrFileOpen( wszFilePath, IFileAPI::fmfNone, (IFileAPI**)&pff ) );
 
-    Call( CCachedFileHeader::ErrDump( &fsconfig, &g_fident, pff, CPRINTFSTDOUT::PcprintfInstance() ) );
+    Call( CCachedFileHeader::ErrDump( &fsconfig, &g_fident, pff, pcprintf ) );
 
 HandleError:
     delete pff;
@@ -523,7 +524,7 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrDumpCacheFile(  _In_z_  const WCHAR* con
 
     Call( pfsf->ErrFileOpen( wszFilePath, IFileAPI::fmfNone, (IFileAPI**)&pff ) );
 
-    Call( CCacheFactory::ErrDump( pfsf, &g_fident, &fsconfig, &pcconfig, &g_ctm, &pff, CPRINTFSTDOUT::PcprintfInstance() ) );
+    Call( CCacheFactory::ErrDump( pfsf, &g_fident, &fsconfig, &pcconfig, &g_ctm, &pff, pcprintf ) );
 
 HandleError:
     delete pff;
@@ -803,4 +804,60 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrCreateCachedBlockSlotState( _In_    cons
     new( pslotst ) CCachedBlockSlotState( slot, fSlabUpdated, fChunkUpdated, fSlotUpdated, fClusterUpdated, fSuperceded );
 
     return JET_errSuccess;
+}
+
+INLINE ERR COSBlockCacheFactoryImpl::ErrDetachFile( _In_z_      const WCHAR* const                              wszFilePath,
+                                                    _In_opt_    const IBlockCacheFactory::PfnDetachFileStatus   pfnDetachFileStatus,
+                                                    _In_opt_    const DWORD_PTR                                 keyDetachFileStatus )
+{
+    ERR                 err     = JET_errSuccess;
+    CFileIdentification fident;
+    CCacheTelemetry     ctm;
+    CCacheRepository    crep( &fident, &ctm );
+    IFileSystemAPI*     pfsapi  = NULL;
+    CFileSystemFilter*  pfsf    = NULL;
+
+    class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
+    {
+        public:
+
+            CFileSystemConfiguration()
+            {
+                m_dtickAccessDeniedRetryPeriod = 0;
+                m_fBlockCacheEnabled = fTrue;
+            }
+
+            ERR ErrGetBlockCacheConfiguration( _Out_ IBlockCacheConfiguration** const ppbcconfig ) override
+            {
+                ERR err = JET_errSuccess;
+
+                Alloc( *ppbcconfig = new CBlockCacheConfiguration() );
+
+            HandleError:
+                return err;
+            }
+
+        private:
+
+            class CBlockCacheConfiguration : public CDefaultBlockCacheConfiguration
+            {
+                public:
+
+                    CBlockCacheConfiguration()
+                    {
+                        m_fDetachEnabled = fTrue;
+                    }
+            };
+
+    } fsconfig;
+
+    Alloc( pfsapi = new COSFileSystem( &fsconfig ) );
+    Alloc( pfsf = new CFileSystemFilter( &fsconfig, &pfsapi, &fident, &ctm, &crep ) );
+
+    Call( pfsf->ErrFileDetach( wszFilePath, (CFileSystemFilter::PfnDetachFileStatus)pfnDetachFileStatus, keyDetachFileStatus ) );
+
+HandleError:
+    delete pfsf;
+    delete pfsapi;
+    return err;
 }

@@ -84,6 +84,8 @@
 
 #include "CachingPolicy.h"
 #include "ICache.h"
+#include "DestageStatus.h"
+#include "DestageStatusInverse.h"
 #include "Complete.h"
 #include "CompleteInverse.h"
 #include "CCacheWrapper.h"
@@ -174,6 +176,7 @@
 #include "CachedBlockSlabManager.h"
 
 #include "IBlockCacheFactory.h"
+#include "DetachFileStatusInverse.h"
 #include "CBlockCacheFactoryWrapper.h"
 #include "BlockCacheFactoryBase.h"
 #include "BlockCacheFactory.h"

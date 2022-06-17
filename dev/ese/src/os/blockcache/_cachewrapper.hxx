@@ -24,7 +24,7 @@ class TCacheWrapper  //  cw
 
         ERR ErrDump( _In_ CPRINTF* const pcprintf ) override;
 
-        ERR ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType ) override;
+        BOOL FEnabled() override;
 
         ERR ErrGetPhysicalId(   _Out_                   VolumeId* const pvolumeid,
                                 _Out_                   FileId* const   pfileid,
@@ -37,6 +37,12 @@ class TCacheWrapper  //  cw
         ERR ErrFlush(   _In_ const VolumeId     volumeid,
                         _In_ const FileId       fileid,
                         _In_ const FileSerial   fileserial ) override;
+
+        ERR ErrDestage( _In_        const VolumeId                  volumeid,
+                        _In_        const FileId                    fileid,
+                        _In_        const FileSerial                fileserial,
+                        _In_opt_    const ICache::PfnDestageStatus  pfnDestageStatus,
+                        _In_opt_    const DWORD_PTR                 keyDestageStatus ) override;
 
         ERR ErrInvalidate(  _In_ const VolumeId     volumeid,
                             _In_ const FileId       fileid,
@@ -121,9 +127,9 @@ ERR TCacheWrapper<I>::ErrDump( _In_ CPRINTF* const pcprintf )
 }
 
 template< class I >
-ERR TCacheWrapper<I>::ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType )
+BOOL TCacheWrapper<I>::FEnabled()
 {
-    return m_piInner->ErrGetCacheType( rgbCacheType );
+    return m_piInner->FEnabled();
 }
 
 
@@ -149,6 +155,16 @@ ERR TCacheWrapper<I>::ErrFlush( _In_ const VolumeId     volumeid,
                                 _In_ const FileSerial   fileserial )
 {
     return m_piInner->ErrFlush( volumeid, fileid, fileserial );
+}
+        
+template< class I >
+ERR TCacheWrapper<I>::ErrDestage(   _In_        const VolumeId                  volumeid,
+                                    _In_        const FileId                    fileid,
+                                    _In_        const FileSerial                fileserial,
+                                    _In_opt_    const ICache::PfnDestageStatus  pfnDestageStatus,
+                                    _In_opt_    const DWORD_PTR                 keyDestageStatus )
+{
+    return m_piInner->ErrDestage( volumeid, fileid, fileserial, pfnDestageStatus, keyDestageStatus );
 }
 
 template< class I >

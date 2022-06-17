@@ -91,6 +91,16 @@ namespace Internal
                             return this->target->IsAsyncWriteBackEnabled();
                         }
 
+                        virtual Int32 MaxConcurrentIODestage()
+                        {
+                            return this->target->MaxConcurrentIODestage();
+                        }
+
+                        virtual Int32 MaxConcurrentIOSizeDestage()
+                        {
+                            return this->target->MaxConcurrentIOSizeDestage();
+                        }
+
                     private:
 
                         ICacheConfiguration^ target;

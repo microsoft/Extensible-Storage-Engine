@@ -505,6 +505,11 @@ namespace Internal
                                 isSuperceded );
                         }
 
+                        static void DetachFile( String^ path, IBlockCacheFactory::DetachFileStatus^ status )
+                        {
+                            return factory->DetachFile( path, status );
+                        }
+
                     private:
 
                         ref class OSLayer : IDisposable

@@ -26,6 +26,8 @@ namespace Internal
                                                             _Out_   ::ICachedFileConfiguration** const  ppcfconfig  ) override;
                         ERR ErrGetCacheConfiguration(   _In_z_  const WCHAR* const              wszKeyPathCachingFile,
                                                         _Out_   ::ICacheConfiguration** const   ppcconfig ) override;
+
+                        BOOL FDetachEnabled() override;
                 };
 
                 template< class TM, class TN >
@@ -72,6 +74,12 @@ namespace Internal
                         *ppcconfig = NULL;
                     }
                     return err;
+                }
+
+                template< class TM, class TN >
+                inline BOOL CBlockCacheConfigurationWrapper<TM, TN>::FDetachEnabled()
+                {
+                    return I()->IsDetachEnabled() ? fTrue : fFalse;
                 }
             }
         }

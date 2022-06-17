@@ -31,6 +31,12 @@ class TPassThroughCache
                         _In_ const FileId       fileid,
                         _In_ const FileSerial   fileserial ) override;
 
+        ERR ErrDestage( _In_        const VolumeId                  volumeid,
+                        _In_        const FileId                    fileid,
+                        _In_        const FileSerial                fileserial,
+                        _In_opt_    const ICache::PfnDestageStatus  pfnDestageStatus,
+                        _In_opt_    const DWORD_PTR                 keyDestageStatus ) override;
+
         ERR ErrInvalidate(  _In_ const VolumeId     volumeid,
                             _In_ const FileId       fileid,
                             _In_ const FileSerial   fileserial,
@@ -115,6 +121,27 @@ template< class I >
 ERR TPassThroughCache<I>::ErrFlush( _In_ const VolumeId     volumeid,
                                     _In_ const FileId       fileid,
                                     _In_ const FileSerial   fileserial )
+{
+    ERR                                 err     = JET_errSuccess;
+    CPassThroughCachedFileTableEntry*   pcfte   = NULL;
+
+    //  get the cached file
+
+    Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
+
+    //  trivial implementation:  nothing to do
+
+HandleError:
+    ReleaseCachedFile( &pcfte );
+    return err;
+}
+
+template< class I >
+ERR TPassThroughCache<I>::ErrDestage(   _In_        const VolumeId                  volumeid,
+                                        _In_        const FileId                    fileid,
+                                        _In_        const FileSerial                fileserial,
+                                        _In_opt_    const ICache::PfnDestageStatus  pfnDestageStatus,
+                                        _In_opt_    const DWORD_PTR                 keyDestageStatus )
 {
     ERR                                 err     = JET_errSuccess;
     CPassThroughCachedFileTableEntry*   pcfte   = NULL;

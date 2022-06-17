@@ -157,9 +157,14 @@ class TCacheRepository  //  crep
                             _In_    IFileSystemConfiguration* const pfsconfig,
                             _Inout_ ICacheConfiguration** const     ppcconfig,
                             _Inout_ IFileFilter** const             ppff,
-                            _In_    const BOOL                      fCreate );
+                            _In_    const BOOL                      fCreate,
+                            _In_    const BOOL                      fOpenById );
         
         ERR ErrCachingFileNotFoundById( _In_                IFileSystemConfiguration* const pfsconfig,
+                                        _In_                const VolumeId                  volumeid,
+                                        _In_                const FileId                    fileid, 
+                                        _In_reads_(cbGuid)  const BYTE* const               rgbUniqueId );
+        ERR ErrCachingFileNotEnabled(   _In_                IFileSystemConfiguration* const pfsconfig,
                                         _In_                const VolumeId                  volumeid,
                                         _In_                const FileId                    fileid, 
                                         _In_reads_(cbGuid)  const BYTE* const               rgbUniqueId );
@@ -219,43 +224,38 @@ ERR TCacheRepository<I>::ErrOpen(   _In_    IFileSystemFilter* const        pfsf
 
     *ppc = NULL;
 
-    //  only open the cache if it is enabled
+    //  get the absolute path of the cache
 
-    if ( (*ppcconfig)->FCacheEnabled() )
+    (*ppcconfig)->Path( wszAbsPath );
+
+    //  translate the absolute path into an unambiguous file key path
+
+    Call( m_pfident->ErrGetFileKeyPath( wszAbsPath, wszKeyPath ) );
+
+    //  wait to lock the entry for this cache
+
+    Call( ErrLockCache( wszKeyPath, &sem, &pcpte ) );
+
+    //  if the cache isn't open then open it
+
+    if ( !pcpte->Pc() )
     {
-        //  get the absolute path of the cache
-
-        (*ppcconfig)->Path( wszAbsPath );
-
-        //  translate the absolute path into an unambiguous file key path
-
-        Call( m_pfident->ErrGetFileKeyPath( wszAbsPath, wszKeyPath ) );
-
-        //  wait to lock the entry for this cache
-
-        Call( ErrLockCache( wszKeyPath, &sem, &pcpte ) );
-
-        //  if the cache isn't open then open it
-
-        if ( !pcpte->Pc() )
-        {
-            Call( ErrOpenCacheMiss( pfsf, pfsconfig, ppcconfig, wszAbsPath, pcpte, &pcr ) );
-        }
-
-        //  the cache is already open
-
-        else
-        {
-            //  open the already open cache
-
-            Call( ErrOpenCacheHit( pcpte, &pcr ) );
-        }
-
-        //  return the opened cache
-
-        *ppc = pcr;
-        pcr = NULL;
+        Call( ErrOpenCacheMiss( pfsf, pfsconfig, ppcconfig, wszAbsPath, pcpte, &pcr ) );
     }
+
+    //  the cache is already open
+
+    else
+    {
+        //  open the already open cache
+
+        Call( ErrOpenCacheHit( pcpte, &pcr ) );
+    }
+
+    //  return the opened cache
+
+    *ppc = pcr;
+    pcr = NULL;
 
 HandleError:
     ReleaseCache( pcpte, &sem );
@@ -637,7 +637,7 @@ ERR TCacheRepository<I>::ErrOpenCacheMiss(  _In_    IFileSystemFilter* const    
 
     //  mount the cache
 
-    Call( ErrMountCache( pcpte, pfsf, pfsconfig, ppcconfig, &pff, fCreated ) );
+    Call( ErrMountCache( pcpte, pfsf, pfsconfig, ppcconfig, &pff, fCreated, fFalse ) );
 
     //  provide a wrapper for the cache that will release it on the last close
 
@@ -681,7 +681,7 @@ ERR TCacheRepository<I>::ErrOpenByIdCacheMiss(  _In_    IFileSystemFilter* const
 
     //  mount the cache
 
-    Call( ErrMountCache( pcpte, pfsf, pfsconfig, &pcconfig, &pff, fFalse) );
+    Call( ErrMountCache( pcpte, pfsf, pfsconfig, &pcconfig, &pff, fFalse, fTrue ) );
 
     //  provide a wrapper for the cache that will release it on the last close
 
@@ -724,20 +724,51 @@ ERR TCacheRepository<I>::ErrMountCache( _In_    CCachePathTableEntry* const     
                                         _In_    IFileSystemConfiguration* const pfsconfig,
                                         _Inout_ ICacheConfiguration** const     ppcconfig,
                                         _Inout_ IFileFilter** const             ppff,
-                                        _In_    const BOOL                      fCreate )
+                                        _In_    const BOOL                      fCreate,
+                                        _In_    const BOOL                      fOpenById )
 {
-    ERR     err = JET_errSuccess;
-    ICache* pc  = NULL;
+    ERR         err                     = JET_errSuccess;
+    ICache*     pc                      = NULL;
+    VolumeId    volumeid                = volumeidInvalid;
+    FileId      fileid                  = fileidInvalid;
+    BYTE        rgbUniqueId[ cbGuid ]   = { 0 };
 
     //  create / mount the cache
 
     if ( fCreate )
     {
+        //  only create the cache if it is enabled
+
+        if ( !(*ppcconfig)->FCacheEnabled() )
+        {
+            Error( ErrERRCheck( JET_errDiskFull ) );
+        }
+
+        //  only create the cache if it isn't zero sized
+
+        if ( !(*ppcconfig)->CbMaximumSize() )
+        {
+            Error( ErrERRCheck( JET_errDiskFull ) );
+        }
+
+        //  create the cache
+
         Call( CCacheFactory::ErrCreate( pfsf, m_pfident, pfsconfig, ppcconfig, m_pctm, ppff, &pc ) );
     }
     else
     {
+        //  mount the cache
+
         Call( CCacheFactory::ErrMount( pfsf, m_pfident, pfsconfig, ppcconfig, m_pctm, ppff, &pc ) );
+
+        //  if we are not opening a cache by id for an attached file and if the cache we opened doesn't match the
+        //  requested configuration then don't use it
+
+        if ( !fOpenById && !pc->FEnabled() )
+        {
+            Call( pc->ErrGetPhysicalId( &volumeid, &fileid, rgbUniqueId ) );
+            Error( ErrCachingFileNotEnabled( pfsconfig, volumeid, fileid, rgbUniqueId ) );
+        }
     }
 
     //  make the cache available for other opens
@@ -786,6 +817,50 @@ ERR TCacheRepository<I>::ErrCachingFileNotFoundById(    _In_                IFil
     pfsconfig->EmitEvent(   eventError,
                             BLOCK_CACHE_CATEGORY,
                             BLOCK_CACHE_CACHING_FILE_ID_MISMATCH_ID,
+                            irgpwsz,
+                            rgpwsz,
+                            JET_EventLoggingLevelMin );
+
+    return ErrERRCheck( JET_errDiskIO );
+}
+
+template<class I>
+ERR TCacheRepository<I>::ErrCachingFileNotEnabled(  _In_                IFileSystemConfiguration* const pfsconfig,
+                                                    _In_                const VolumeId                  volumeid,
+                                                    _In_                const FileId                    fileid, 
+                                                    _In_reads_(cbGuid)  const BYTE* const               rgbUniqueId )
+{
+    const ULONG     cwsz                = 3;
+    const WCHAR*    rgpwsz[ cwsz ]      = { 0 };
+    DWORD           irgpwsz             = 0;
+    WCHAR           wszVolumeId[ 64 ]   = { 0 };
+    WCHAR           wszFileId[ 64 ]     = { 0 };
+    WCHAR           wszUniqueId[ 64 ]   = { 0 };
+
+    OSStrCbFormatW( wszVolumeId, sizeof( wszVolumeId ), L"0x%08x", volumeid );
+    OSStrCbFormatW( wszFileId, sizeof( wszFileId ), L"0x%016I64x", fileid );
+    OSStrCbFormatW( wszUniqueId,
+                    sizeof( wszUniqueId ),
+                    L"%08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx",
+                    *((DWORD*)&rgbUniqueId[ 0 ]),
+                    *((WORD*)&rgbUniqueId[ 4 ]),
+                    *((WORD*)&rgbUniqueId[ 6 ]),
+                    *((BYTE*)&rgbUniqueId[ 8 ]),
+                    *((BYTE*)&rgbUniqueId[ 9 ]),
+                    *((BYTE*)&rgbUniqueId[ 10 ]),
+                    *((BYTE*)&rgbUniqueId[ 11 ]),
+                    *((BYTE*)&rgbUniqueId[ 12 ]),
+                    *((BYTE*)&rgbUniqueId[ 13 ]),
+                    *((BYTE*)&rgbUniqueId[ 14 ]),
+                    *((BYTE*)&rgbUniqueId[ 15 ]) );
+
+    rgpwsz[ irgpwsz++ ] = wszVolumeId;
+    rgpwsz[ irgpwsz++ ] = wszFileId;
+    rgpwsz[ irgpwsz++ ] = wszUniqueId;
+
+    pfsconfig->EmitEvent(   eventError,
+                            BLOCK_CACHE_CATEGORY,
+                            BLOCK_CACHE_CACHING_FILE_NOT_ENABLED_ID,
                             irgpwsz,
                             rgpwsz,
                             JET_EventLoggingLevelMin );

@@ -100,7 +100,7 @@ const INT   fUTILOPTSDefragRepair               = 0x00000002;       // Defrag mo
 const INT   fUTILOPTSPreserveTempDB             = 0x00000004;       // Defrag and upgrade modes. In HardRecovery use for KeepLogs
 const INT   fUTILOPTSDefragInfo                 = 0x00000008;       // Defrag and upgrade modes.
 const INT   fUTILOPTSIncrBackup                 = 0x00000010;       // Backup only.
-// const INT    fUTILOPTSInPlaceUpgrade             = 0x00000020;       // Upgrade only.
+const INT   fUTILOPTSDetachFile                 = 0x00000020;       // ESE Block Cache Detach File.
 const INT   fUTILOPTSVerbose                    = 0x00000040;       // Repair/Integrity only
 const INT   fUTILOPTSReportErrors               = 0x00000080;       // Repair/Integrity only
 const INT   fUTILOPTSDontRepair                 = 0x00000100;       // Repair only
@@ -184,6 +184,10 @@ const INT   fUTILOPTSRecoveryWithoutUndoForReal = 0x40000000;
 #define FUTILOPTSIncrBackup( fFlags )               ( (fFlags) & fUTILOPTSIncrBackup )
 #define UTILOPTSSetIncrBackup( fFlags )             ( (fFlags) |= fUTILOPTSIncrBackup )
 #define UTILOPTSResetIncrBackup( fFlags )           ( (fFlags) &= ~fUTILOPTSIncrBackup )
+
+#define FUTILOPTSDetachFile( fFlags )               ( (fFlags) & fUTILOPTSDetachFile )
+#define UTILOPTSSetDetachFile( fFlags )             ( (fFlags) |= fUTILOPTSDetachFile )
+#define UTILOPTSResetDetachFile( fFlags )           ( (fFlags) &= ~fUTILOPTSDetachFile )
 
 #define FUTILOPTSVerbose( fFlags )                  ( (fFlags) & fUTILOPTSVerbose )
 #define UTILOPTSSetVerbose( fFlags )                ( (fFlags) |= fUTILOPTSVerbose )

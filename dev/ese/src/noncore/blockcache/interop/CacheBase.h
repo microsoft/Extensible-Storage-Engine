@@ -28,13 +28,19 @@ namespace Internal
 
                         virtual void Mount();
 
-                        virtual Guid GetCacheType();
+                        virtual bool IsEnabled();
 
                         virtual void GetPhysicalId( [Out] VolumeId% volumeid, [Out] FileId% fileid, [Out] Guid% guid );
 
                         virtual void Close( VolumeId volumeid, FileId fileid, FileSerial fileserial );
 
                         virtual void Flush( VolumeId volumeid, FileId fileid, FileSerial fileserial );
+
+                        virtual void Destage(
+                            VolumeId volumeid, 
+                            FileId fileid, 
+                            FileSerial fileserial,
+                            ICache::DestageStatus^ destageStatus );
 
                         virtual void Invalidate(
                             VolumeId volumeid,
@@ -96,27 +102,9 @@ namespace Internal
                 }
 
                 template< class TM, class TN, class TW >
-                inline Guid CacheBase<TM, TN, TW>::GetCacheType()
+                inline bool CacheBase<TM, TN, TW>::IsEnabled()
                 {
-                    ERR     err             = JET_errSuccess;
-                    GUID    cacheTypeNative = { 0 };
-
-                    Call( Pi->ErrGetCacheType( (BYTE*)&cacheTypeNative ) );
-
-                    return Guid(    cacheTypeNative.Data1,
-                                    cacheTypeNative.Data2,
-                                    cacheTypeNative.Data3,
-                                    cacheTypeNative.Data4[ 0 ],
-                                    cacheTypeNative.Data4[ 1 ],
-                                    cacheTypeNative.Data4[ 2 ],
-                                    cacheTypeNative.Data4[ 3 ],
-                                    cacheTypeNative.Data4[ 4 ],
-                                    cacheTypeNative.Data4[ 5 ],
-                                    cacheTypeNative.Data4[ 6 ],
-                                    cacheTypeNative.Data4[ 7 ] );
-
-                HandleError:
-                    throw EseException( err );
+                    return Pi->FEnabled() ? true : false;
                 }
 
                 template< class TM, class TN, class TW >
@@ -183,6 +171,39 @@ namespace Internal
 
                 HandleError:
                     throw EseException( err );
+                }
+
+                template< class TM, class TN, class TW >
+                inline void CacheBase<TM, TN, TW>::Destage(
+                    VolumeId volumeid, 
+                    FileId fileid, 
+                    FileSerial fileserial,
+                    ICache::DestageStatus^ destageStatus )
+                {
+                    ERR                     err                     = JET_errSuccess;
+                    DestageStatusInverse^   destageStatusInverse    = nullptr;
+
+                    if ( destageStatus != nullptr )
+                    {
+                        destageStatusInverse = gcnew DestageStatusInverse( destageStatus );
+                    }
+
+                    Call( Pi->ErrDestage(   (::VolumeId)volumeid,
+                                            (::FileId)fileid,
+                                            (::FileSerial)fileserial,
+                                            destageStatusInverse == nullptr ?
+                                                NULL :
+                                                destageStatusInverse->PfnDestageStatus,
+                                            destageStatusInverse == nullptr ?
+                                                NULL : 
+                                                destageStatusInverse->KeyDestageStatus) );
+
+                HandleError:
+                    delete destageStatusInverse;
+                    if ( err < JET_errSuccess )
+                    {
+                        throw EseException( err );
+                    }
                 }
 
                 template< class TM, class TN, class TW >

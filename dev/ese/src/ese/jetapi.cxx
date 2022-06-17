@@ -3155,6 +3155,8 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
             fBlockCacheEnabled = fBlockCacheEnabled || BoolParam( JET_paramEnableBlockCache );
 
+            fBlockCacheEnabled = fBlockCacheEnabled || BoolParam( JET_paramEnableBlockCacheDetach );
+
             fBlockCacheEnabled = fBlockCacheEnabled || m_pinst != pinstNil && PvParam( m_pinst, JET_paramBlockCacheConfiguration );
 
             fBlockCacheEnabled = fBlockCacheEnabled || FBlockCacheTestEnabled();
@@ -3196,7 +3198,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
             return fFalse;
         }
 
-        class CInstanceBlockCacheConfiguration : public IBlockCacheConfiguration
+        class CInstanceBlockCacheConfiguration : public CDefaultBlockCacheConfiguration
         {
             public:
 
@@ -3228,6 +3230,11 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
                 HandleError:
                     return err;
+                }
+
+                BOOL FDetachEnabled() override
+                {
+                    return BoolParam( JET_paramEnableBlockCacheDetach );
                 }
 
             private:
@@ -3296,21 +3303,16 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
                     if ( m_fCachingEnabled )
                     {
-                        if (    UtilCmpFileName(    rgwszExt,
-                                                    ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ?
-                                                        wszOldLogExt : 
-                                                        wszNewLogExt ) == 0 ||
-                                UtilCmpFileName( rgwszExt, wszResLogExt ) == 0 ||
+                        if (    UtilCmpFileName( rgwszExt, wszOldLogExt ) == 0 ||
+                                UtilCmpFileName( rgwszExt, wszNewLogExt ) == 0 ||
                                 UtilCmpFileName( rgwszExt, wszSecLogExt ) == 0 ||
                                 UtilCmpFileName( rgwszExt, wszRBSExt ) == 0 )
                         {
                             m_cbBlockSize = cbLogFileHeader;
                             m_ulPinnedHeaderSizeInBytes = 1 * m_cbBlockSize;
                         }
-                        else if ( UtilCmpFileName(  rgwszExt,
-                                                    ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ?
-                                                        wszOldChkExt : 
-                                                        wszNewChkExt ) == 0 )
+                        else if (   UtilCmpFileName( rgwszExt, wszOldChkExt ) == 0 ||
+                                    UtilCmpFileName( rgwszExt, wszNewChkExt ) == 0 )
                         {
                             m_cbBlockSize = cbCheckpoint;
                             m_ulPinnedHeaderSizeInBytes = 2 * m_cbBlockSize;
@@ -3364,6 +3366,11 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
                                                 _Out_   ICacheConfiguration** const ppcconfig ) override
                 {
                     return m_pbcconfig->ErrGetCacheConfiguration( wszKeyPathCachingFile, ppcconfig );
+                }
+
+                BOOL FDetachEnabled() override
+                {
+                    return m_pbcconfig->FDetachEnabled() || BoolParam( JET_paramEnableBlockCacheDetach );
                 }
 
             private:

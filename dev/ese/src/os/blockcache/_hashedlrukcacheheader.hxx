@@ -35,6 +35,7 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
                                 _In_    const QWORD                     cbCachedFilePerSlab,
                                 _In_    const QWORD                     icbwcHash,
                                 _In_    const QWORD                     icbwcJournal,
+                                _In_    const QWORD                     cbMaxConfigured,
                                 _Out_   CHashedLRUKCacheHeader** const  ppch );
         static ERR ErrLoad( _In_    IFileSystemConfiguration* const pfsconfig, 
                             _In_    IFileFilter* const              pff,
@@ -63,6 +64,8 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
         QWORD CbCachedFilePerSlab() const { return m_le_cbCachedFilePerSlab; }
         QWORD IcbwcHash() const { return m_le_icbwcHash; }
         QWORD IcbwcJournal() const { return m_le_icbwcJournal; }
+
+        QWORD CbMaxConfigured() const { return m_le_cbMaxConfigured ? m_le_cbMaxConfigured : IbClustersJournal() + CbClustersJournal(); }
 
         ERR ErrDump( _In_ CPRINTF* const pcprintf );
 
@@ -100,6 +103,7 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
         LittleEndian<QWORD> m_le_cbCachedFilePerSlab;   //  The consecutive bytes of a cached file per cached block slab
         LittleEndian<QWORD> m_le_icbwcHash;             //  Hash table write count base index
         LittleEndian<QWORD> m_le_icbwcJournal;          //  Journal clusters write count base index
+        LittleEndian<QWORD> m_le_cbMaxConfigured;       //  Configured maximum caching size (0 == m_le_ibClustersJournal + m_le_cbClustersJournal)
 
         BYTE                m_rgbPadding[   cbCacheHeader 
                                             - sizeof( m_le_ulChecksum )
@@ -120,7 +124,8 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
                                             - sizeof( m_le_cbCachingFilePerSlab )
                                             - sizeof( m_le_cbCachedFilePerSlab )
                                             - sizeof( m_le_icbwcHash )
-                                            - sizeof( m_le_icbwcJournal ) ];
+                                            - sizeof( m_le_icbwcJournal )
+                                            - sizeof( m_le_cbMaxConfigured ) ];
 };
 
 #include <poppack.h>
@@ -148,6 +153,7 @@ INLINE ERR CHashedLRUKCacheHeader::ErrCreate(   _In_    const QWORD             
                                                 _In_    const QWORD                     cbCachedFilePerSlab,
                                                 _In_    const QWORD                     icbwcHash,
                                                 _In_    const QWORD                     icbwcJournal,
+                                                _In_    const QWORD                     cbMaxConfigured,
                                                 _Out_   CHashedLRUKCacheHeader** const  ppch )
 {
     ERR                     err = JET_errSuccess;
@@ -176,6 +182,7 @@ INLINE ERR CHashedLRUKCacheHeader::ErrCreate(   _In_    const QWORD             
     pch->m_le_cbCachedFilePerSlab = cbCachedFilePerSlab;
     pch->m_le_icbwcHash = icbwcHash;
     pch->m_le_icbwcJournal = icbwcJournal;
+    pch->m_le_cbMaxConfigured = cbMaxConfigured;
 
     pch->m_le_ulChecksum = GenerateChecksum( pch );
 
@@ -276,6 +283,7 @@ INLINE ERR CHashedLRUKCacheHeader::ErrDump( _In_ CPRINTF* const pcprintf )
     (*pcprintf)(    "              Consecutive Cached File Bytes per Slab:  0x%016I64x\n", QWORD( m_le_cbCachedFilePerSlab ) );
     (*pcprintf)(    "                   Hash Table Write Count Base Index:  0x%016I64x\n", QWORD( m_le_icbwcHash) );
     (*pcprintf)(    "             Journal Clusters Write Count Base Index:  0x%016I64x\n", QWORD( m_le_icbwcJournal ) );
+    (*pcprintf)(    "                             Configured Maximum Size:  0x%016I64x\n", QWORD( m_le_cbMaxConfigured ) );
     (*pcprintf)(    "\n" );
 
     return JET_errSuccess;

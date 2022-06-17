@@ -99,6 +99,18 @@ namespace Internal
                     /// </summary>
                     /// <returns>True if asynchronous write back is enabled.</returns>
                     bool IsAsyncWriteBackEnabled();
+
+                    /// <summary>
+                    /// Max concurrent IO for destage.
+                    /// </summary>
+                    /// <returns>The max concurrent IO for destage..</returns>
+                    Int32 MaxConcurrentIODestage();
+
+                    /// <summary>
+                    /// Max concurrent IO size for destage.
+                    /// </summary>
+                    /// <returns>The max concurrent IO size for destage..</returns>
+                    Int32 MaxConcurrentIOSizeDestage();
                 };
             }
         }

@@ -36,9 +36,9 @@ namespace Internal
                             this->target->Mount();
                         }
 
-                        virtual Guid GetCacheType()
+                        virtual bool IsEnabled()
                         {
-                            return this->target->GetCacheType();
+                            return this->target->IsEnabled();
                         }
 
                         virtual void GetPhysicalId( [Out] VolumeId% volumeid, [Out] FileId% fileid, [Out] Guid% guid )
@@ -54,6 +54,15 @@ namespace Internal
                         virtual void Flush( VolumeId volumeid, FileId fileid, FileSerial fileserial )
                         {
                             return this->target->Flush( volumeid, fileid, fileserial );
+                        }
+
+                        virtual void Destage(
+                            VolumeId volumeid, 
+                            FileId fileid, 
+                            FileSerial fileserial,
+                            ICache::DestageStatus^ destageStatus )
+                        {
+                            return this->target->Destage( volumeid, fileid, fileserial, destageStatus );
                         }
 
                         virtual void Invalidate(

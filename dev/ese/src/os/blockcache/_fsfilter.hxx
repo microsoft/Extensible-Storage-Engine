@@ -28,6 +28,7 @@ class CFilePathTableEntry  //  fpte
         void AddRef( _In_ int dref = 1 ) { AtomicExchangeAdd( (LONG*)&m_cref, dref ); }
         BOOL FRelease( _In_ int dref = 1 ) { return AtomicExchangeAdd( (LONG*)&m_cref, -dref ) == dref; }
 
+        BOOL FOwned() const { return m_psemOwner != NULL; }
         ERR ErrAddAsOwnerOrWaiter( _In_ CSemaphore* const psem );
         void AddNextOwner();
         void RemoveAsOwnerOrWaiter( _In_opt_ CSemaphore* const psem );
@@ -416,6 +417,14 @@ class TFileSystemFilter  //  fsf
         void RemoveFileReference(   _In_ CFileFilterReference* const            pffr,
                                     _In_ CFilePathTableEntry::COpenFile* const  pof );
 
+        typedef void (*PfnDetachFileStatus)(    _In_        const int       i,
+                                                _In_        const int       c,
+                                                _In_opt_    const DWORD_PTR keyDetachFileStatus );
+
+        ERR ErrFileDetach(  _In_z_      const WCHAR* const                              wszFilePath,
+                            _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                            _In_opt_    const DWORD_PTR                                 keyDetachFileStatus );
+
     public:  //  IFileSystemFilter
 
         //  configuration
@@ -472,6 +481,7 @@ class TFileSystemFilter  //  fsf
                             _Out_                                   CFilePathTableEntry** const ppfpteDest );
         ERR ErrLockFile(    _In_z_  const WCHAR* const          wszKeyPath,
                             _In_    CSemaphore* const           psem,
+                            _In_    const BOOL                  fCacheOpen,
                             _Out_   CFilePathTableEntry** const ppfpte );
         ERR ErrGetFilePath( _In_z_                                                  const WCHAR* const  wszPath,
                             _Out_bytecap_c_( cbOSFSAPI_MAX_PATHW )                  WCHAR* const        wszAbsPath,
@@ -488,25 +498,41 @@ class TFileSystemFilter  //  fsf
                                                 _In_    const BOOL          fOpenExisting,
                                                 _Out_   BOOL* const         pfMarked );
 
-        ERR ErrFileConfigure(   _In_        CFileFilter* const          pff,
-                                _In_        const BOOL                  fEverEligible,
-                                _In_z_      const WCHAR* const          wszAnyAbsPath );
+        ERR ErrFileConfigure(   _In_        CFileFilter* const                  pff,
+                                _Inout_     ICachedFileConfiguration** const    ppcfconfig,
+                                _In_        const BOOL                          fEverEligibleForCaching,
+                                _In_z_      const WCHAR* const                  wszAnyAbsPath );
 
-        ERR ErrFileOpenInternal(    _In_z_  const WCHAR* const              wszAnyAbsPath,
-                                    _In_z_  const WCHAR* const              wszKeyPath,
-                                    _In_    const IFileAPI::FileModeFlags   fmf,
-                                    _In_    const BOOL                      fCacheOpen,
-                                    _Out_   CFileFilterReference** const    ppffr );
-        ERR ErrFileOpenCacheMiss(   _In_z_  const WCHAR* const              wszAnyAbsPath,
-                                    _In_    const IFileAPI::FileModeFlags   fmf,
-                                    _In_    const BOOL                      fCacheOpen,
-                                    _In_    CFilePathTableEntry* const      pfpte,
-                                    _Out_   CFileFilterReference** const    ppffr );
-        ERR ErrFileOpenAndConfigure(    _In_z_  const WCHAR* const              wszAnyAbsPath,
-                                        _In_    const IFileAPI::FileModeFlags   fmf,
-                                        _In_    CFilePathTableEntry* const      pfpte,
-                                        _Out_   CFileFilter** const             ppff,
-                                        _Out_   BOOL* const                     pfAttached );
+        ERR ErrFileOpenInternal(    _In_z_      const WCHAR* const                              wszPath,
+                                    _In_        const IFileAPI::FileModeFlags                   fmf,
+                                    _In_        const BOOL                                      fDetachFile,
+                                    _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                    _In_opt_    const DWORD_PTR                                 keyDetachFileStatus,
+                                    _Out_       IFileAPI** const                                ppfapi );
+        ERR ErrFileOpenInternal(    _In_z_      const WCHAR* const                              wszAnyAbsPath,
+                                    _In_z_      const WCHAR* const                              wszKeyPath,
+                                    _In_        const IFileAPI::FileModeFlags                   fmf,
+                                    _In_        const BOOL                                      fCacheOpen,
+                                    _In_        const BOOL                                      fDetachFile,
+                                    _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                    _In_opt_    const DWORD_PTR                                 keyDetachFileStatus,
+                                    _Out_       CFileFilterReference** const                    ppffr );
+        ERR ErrFileOpenCacheMiss(   _In_z_      const WCHAR* const                              wszAnyAbsPath,
+                                    _In_        const IFileAPI::FileModeFlags                   fmf,
+                                    _In_        const BOOL                                      fCacheOpen,
+                                    _In_        CFilePathTableEntry* const                      pfpte,
+                                    _In_        const BOOL                                      fDetachFile,
+                                    _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                    _In_opt_    const DWORD_PTR                                 keyDetachFileStatus,
+                                    _Out_       CFileFilterReference** const                    ppffr );
+        ERR ErrFileOpenAndConfigure(    _In_z_      const WCHAR* const                              wszAnyAbsPath,
+                                        _In_        const IFileAPI::FileModeFlags                   fmf,
+                                        _In_        const BOOL                                      fCacheOpen,
+                                        _In_        CFilePathTableEntry* const                      pfpte,
+                                        _In_        const BOOL                                      fDetachFile,
+                                        _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                        _In_opt_    const DWORD_PTR                                 keyDetachFileStatus,
+                                        _Out_       CFileFilter** const                             ppff );
         ERR ErrEverEligibleForCaching(  _In_z_  const WCHAR* const              wszAnyAbsPath,
                                         _In_    const IFileAPI::FileModeFlags   fmf,
                                         _Out_   BOOL* const                     pfEverEligible );
@@ -520,14 +546,24 @@ class TFileSystemFilter  //  fsf
                                             _In_ const FileId       fileid,
                                             _In_ const FileSerial   fileserial );
 
-        ERR ErrCacheOpenFailure(    _In_ ICachedFileConfiguration* const    pcfconfig,
-                                    _In_ const char* const                  szFunction, 
-                                    _In_ const ERR                          errFromCall,
-                                    _In_ const ERR                          errToReturn );
-        ERR ErrGetCache(    _In_    CFileFilter* const              pff,
-                            _In_    const BOOL                      fEverEligible,
-                            _In_z_  const WCHAR* const              wszKeyPath,
-                            _Out_   BOOL* const                     pfAttached );
+        ERR ErrCacheOpenFailure(    _In_ CFileFilter* const pff,
+                                    _In_ const char* const  szFunction, 
+                                    _In_ const ERR          errFromCall,
+                                    _In_ const ERR          errToReturn );
+        ERR ErrGetCache(    _In_        CFileFilter* const                              pff,
+                            _In_        const BOOL                                      fEverEligibleForCaching,
+                            _In_        const BOOL                                      fCacheOpen,
+                            _In_z_      const WCHAR* const                              wszKeyPath,
+                            _In_        const BOOL                                      fDetachFile,
+                            _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                            _In_opt_    const DWORD_PTR                                 keyDetachFileStatus );
+        BOOL FDetachFile(   _In_ CFileFilter* const                 pff,
+                            _In_ IBlockCacheConfiguration* const    pbcconfig,
+                            _In_ ICache* const                      pc,
+                            _In_ const BOOL                         fCacheOpen );
+        ERR ErrDetachFile(  _In_        CFileFilter* const                              pff,
+                            _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                            _In_opt_    const DWORD_PTR                                 keyDetachFileStatus );
 
         ERR ErrGetConfiguration( _Out_ IBlockCacheConfiguration** const ppbcconfig );
         ERR ErrGetConfiguration();
@@ -537,6 +573,38 @@ class TFileSystemFilter  //  fsf
         ERR ErrInitFilePathTable();
         static ERR ErrInitFilePathTable_( _In_ TFileSystemFilter<I>* const pfsf ) { return pfsf->ErrInitFilePathTable(); }
         void TermFilePathTable();
+
+    private:
+
+        class CDestagingFile : public CFileFilterWrapper
+        {
+            public:
+
+                CDestagingFile( _In_ CFileFilter* const pff )
+                    :   CFileFilterWrapper( pff, iomEngine ),
+                        m_volumeid( pff->Pcfh()->Volumeid() ),
+                        m_fileid( pff->Pcfh()->Fileid() ),
+                        m_fileserial( pff->Pcfh()->Fileserial() )
+                {
+                }
+
+                VolumeId Volumeid() const { return m_volumeid; }
+                FileId Fileid() const { return m_fileid; }
+                FileSerial Fileserial() const { return m_fileserial; }
+
+                static SIZE_T OffsetOfILE() { return OffsetOf( CDestagingFile, m_ile ); }
+
+            private:
+
+                const VolumeId                                                                  m_volumeid;
+                const FileId                                                                    m_fileid;
+                const FileSerial                                                                m_fileserial;
+                typename CInvasiveList<CDestagingFile, CDestagingFile::OffsetOfILE>::CElement   m_ile;
+        };
+
+    private:
+
+        const IFileAPI::FileModeFlags fmfReadOnlyMask = IFileAPI::fmfReadOnly | IFileAPI::fmfReadOnlyClient | IFileAPI::fmfReadOnlyPermissive;
 
     private:
 
@@ -550,6 +618,8 @@ class TFileSystemFilter  //  fsf
         CFilePathHash                                                                       m_filePathHash;
         IBlockCacheConfiguration*                                                           m_pbcconfig;
         CInitOnce< ERR, decltype( &ErrGetConfiguration_ ), TFileSystemFilter<I>* const >    m_initOnceAttach;
+        CReaderWriterLock                                                                   m_rwlDestagingFiles;
+        CInvasiveList<CDestagingFile, CDestagingFile::OffsetOfILE>                          m_ilDestagingFiles;
 };
 
 template< class I >
@@ -564,7 +634,8 @@ TFileSystemFilter<I>::TFileSystemFilter(    _In_    IFileSystemConfiguration* co
         m_pctm( pctm ),
         m_pcrep( pcrep ),
         m_filePathHash( rankFilePathHash ),
-        m_pbcconfig( NULL )
+        m_pbcconfig( NULL ),
+        m_rwlDestagingFiles( CLockBasicInfo( CSyncBasicInfo( "TFileFilter<I>::m_rwlRegisterIFilePerfAPI" ), rankDestagingFiles, 0 ) )
 {
 }
 
@@ -607,6 +678,21 @@ void TFileSystemFilter<I>::RemoveFileReference( _In_ CFileFilterReference* const
 }
 
 template< class I >
+ERR TFileSystemFilter<I>::ErrFileDetach(    _In_z_      const WCHAR* const                              wszFilePath,
+                                            _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                            _In_opt_    const DWORD_PTR                                 keyDetachFileStatus )
+{
+    ERR         err     = JET_errSuccess;
+    IFileAPI*   pfapi   = NULL;
+
+    Call( ErrFileOpenInternal( wszFilePath, IFileAPI::fmfNone, fTrue, pfnDetachFileStatus, keyDetachFileStatus, &pfapi ) );
+
+HandleError:
+    delete pfapi;
+    return err;
+}
+
+template< class I >
 ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId                  volumeid,
                                             _In_    const FileId                    fileid,
                                             _In_    const FileSerial                fileserial,
@@ -614,6 +700,7 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
                                             _Out_   IFileAPI** const                ppfapi )
 {
     ERR                     err                                 = JET_errSuccess;
+    BOOL                    fLeave                              = fFalse;
     const DWORD             cwchAnyAbsPathMax                   = IFileSystemAPI::cchPathMax;
     WCHAR                   wszAnyAbsPath[ cwchAnyAbsPathMax ]  = { 0 };
     const DWORD             cwchKeyPathMax                      = IFileIdentification::cwchKeyPathMax;
@@ -641,6 +728,27 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
+
+    //  if we are destaging this file then do the special destaging open
+
+    m_rwlDestagingFiles.EnterAsReader();
+    fLeave = fTrue;
+
+    for (   CDestagingFile* pdestagingfile = m_ilDestagingFiles.PrevMost();
+            pdestagingfile;
+            pdestagingfile = m_ilDestagingFiles.Next( pdestagingfile ) )
+    {
+        if (    pdestagingfile->Volumeid() == volumeid &&
+                pdestagingfile->Fileid() == fileid &&
+                pdestagingfile->Fileserial() == fileserial )
+        {
+            Alloc( *ppfapi = new CFileFilterWrapper( pdestagingfile, iomEngine ) );
+            Error( JET_errSuccess );
+        }
+    }
+
+    m_rwlDestagingFiles.LeaveAsReader();
+    fLeave = fFalse;
 
     //  retry until we have opened a file with the correct physical id
 
@@ -670,7 +778,7 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
         //
         //  NOTE:  we presume any file opened by file id is opened by the cache
 
-        err = ErrFileOpenInternal( wszAnyAbsPath, wszKeyPath, fmf, fTrue, &pffr );
+        err = ErrFileOpenInternal( wszAnyAbsPath, wszKeyPath, fmf, fTrue, fFalse, NULL, NULL, &pffr );
 
         if ( err == JET_errFileNotFound || err == JET_errInvalidPath )
         {
@@ -697,6 +805,10 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
     pffr = NULL;
 
 HandleError:
+    if ( fLeave )
+    {
+        m_rwlDestagingFiles.LeaveAsReader();
+    }
     delete pffr;
     if ( err == JET_errFileNotFound || err == JET_errInvalidPath )
     {
@@ -929,38 +1041,7 @@ ERR TFileSystemFilter<I>::ErrFileOpen(  _In_z_ const WCHAR* const               
                                         _In_   const IFileAPI::FileModeFlags    fmf,
                                         _Out_  IFileAPI** const                 ppfapi )
 {
-    ERR                     err                             = JET_errSuccess;
-    const DWORD             cwchAbsPathMax                  = IFileSystemAPI::cchPathMax;
-    WCHAR                   wszAbsPath[ cwchAbsPathMax ]    = { 0 };
-    const DWORD             cwchKeyPathMax                  = IFileIdentification::cwchKeyPathMax;
-    WCHAR                   wszKeyPath[ cwchKeyPathMax ]    = { 0 };
-    CFileFilterReference*   pffr                            = NULL;
-
-    *ppfapi = NULL;
-
-    //  translate the relative file path into an absolute path and an unambiguous file key path
-
-    Call( ErrGetFilePath( wszPath, wszAbsPath, wszKeyPath ) );
-
-    //  open the file
-    //
-    //  NOTE:  we presume any file opened by path is not opened by the cache
-
-    Call( ErrFileOpenInternal( wszAbsPath, wszKeyPath, fmf, fFalse, &pffr ) );
-
-    //  return the opened file
-
-    *ppfapi = pffr;
-    pffr = NULL;
-
-HandleError:
-    delete pffr;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppfapi;
-        *ppfapi = NULL;
-    }
-    return err;
+    return ErrFileOpenInternal( wszPath, fmf, fFalse, NULL, NULL, ppfapi );
 }
 
 template< class I >
@@ -982,6 +1063,7 @@ ERR TFileSystemFilter<I>::ErrWrapFile( _Inout_ IFileAPI** const ppfapiInner, _Ou
                                         volumeidInvalid,
                                         fileidInvalid,
                                         NULL,
+                                        fFalse,
                                         NULL,
                                         NULL ) );
     }
@@ -1056,7 +1138,7 @@ ERR TFileSystemFilter<I>::ErrLockFile(  _In_z_                                  
     *ppfpte = NULL;
 
     Call( ErrGetFilePath( wszPath, wszAbsPath, wszKeyPath ) );
-    Call( ErrLockFile( wszKeyPath, psem, ppfpte ) );
+    Call( ErrLockFile( wszKeyPath, psem, fFalse, ppfpte ) );
 
 HandleError:
     if ( err < JET_errSuccess )
@@ -1100,8 +1182,8 @@ ERR TFileSystemFilter<I>::ErrLockFiles( _In_z_                                  
         ppfpte2 = ppfpteSrc;
     }
 
-    Call( ErrLockFile( pwszKeyPath1, psem, ppfpte1 ) );
-    Call( ErrLockFile( pwszKeyPath2, psem, ppfpte2 ) );
+    Call( ErrLockFile( pwszKeyPath1, psem, fFalse, ppfpte1 ) );
+    Call( ErrLockFile( pwszKeyPath2, psem, fFalse, ppfpte2 ) );
 
 HandleError:
     return err;
@@ -1110,6 +1192,7 @@ HandleError:
 template< class I >
 ERR TFileSystemFilter<I>::ErrLockFile(  _In_z_  const WCHAR* const          wszKeyPath,
                                         _In_    CSemaphore* const           psem,
+                                        _In_    const BOOL                  fCacheOpen,
                                         _Out_   CFilePathTableEntry** const ppfpte )
 {
     ERR                     err             = JET_errSuccess;
@@ -1139,6 +1222,7 @@ ERR TFileSystemFilter<I>::ErrLockFile(  _In_z_  const WCHAR* const          wszK
     else
     {
         Assert( errFilePathHash == CFilePathHash::ERR::errEntryNotFound );
+
         cwchKeyPath = LOSStrLengthW( wszKeyPath ) + 1;
         Alloc( wszKeyPathCopy = new WCHAR[ cwchKeyPath ] );
         Call( ErrOSStrCbCopyW( wszKeyPathCopy, cwchKeyPath * sizeof( WCHAR ), wszKeyPath ) );
@@ -1153,6 +1237,15 @@ ERR TFileSystemFilter<I>::ErrLockFile(  _In_z_  const WCHAR* const          wszK
         }
         Assert( errFilePathHash == CFilePathHash::ERR::errSuccess );
         fRemove = fTrue;
+    }
+
+    //  if this is a cache open and the entry is already locked then reject the open for now.  the cache will retry.
+    //  we do this to avoid a deadlock on destage due to a race where the cache has already tried to open the file when
+    //  we decide we need to destage it
+
+    if ( fCacheOpen && pfpteExisting->FOwned() )
+    {
+        Error( ErrERRCheck( JET_errFileAccessDenied ) );
     }
 
     Call( pfpteExisting->ErrAddAsOwnerOrWaiter( psem ) );
@@ -1243,14 +1336,14 @@ ERR TFileSystemFilter<I>::ErrFileCreateCacheMiss(   _In_z_  const WCHAR* const  
                                                     _In_    CFilePathTableEntry* const      pfpte,
                                                     _Out_   CFileFilterReference** const    ppffr )
 {
-    ERR                             err             = JET_errSuccess;
-    IBlockCacheConfiguration*       pbcconfig       = NULL;
-    ICachedFileConfiguration*       pcfconfig       = NULL;
-    BOOL                            fCachingEnabled = fFalse;
-    BOOL                            fEverEligible   = fFalse;
-    CFileFilter*                    pff             = NULL;
-    BOOL                            fCreated        = fFalse;
-    CFilePathTableEntry::COpenFile* pof             = NULL;
+    ERR                             err                     = JET_errSuccess;
+    IBlockCacheConfiguration*       pbcconfig               = NULL;
+    ICachedFileConfiguration*       pcfconfig               = NULL;
+    BOOL                            fCachingEnabled         = fFalse;
+    BOOL                            fEverEligibleForCaching = fFalse;
+    CFileFilter*                    pff                     = NULL;
+    BOOL                            fCreated                = fFalse;
+    CFilePathTableEntry::COpenFile* pof                     = NULL;
 
     *ppffr = NULL;
 
@@ -1279,8 +1372,8 @@ ERR TFileSystemFilter<I>::ErrFileCreateCacheMiss(   _In_z_  const WCHAR* const  
         Call( ErrTryMarkAsEverEligibleForCaching(   wszAnyAbsPath,
                                                     ( fmf & IFileAPI::fmfOverwriteExisting ) != 0,
                                                     fFalse,
-                                                    &fEverEligible ) );
-        fCreated = fEverEligible;
+                                                    &fEverEligibleForCaching ) );
+        fCreated = fEverEligibleForCaching;
     }
 
     //  create the file
@@ -1299,7 +1392,7 @@ ERR TFileSystemFilter<I>::ErrFileCreateCacheMiss(   _In_z_  const WCHAR* const  
 
     //  configure the newly created file
 
-    Call( ErrFileConfigure( pff, fEverEligible, wszAnyAbsPath ) );
+    Call( ErrFileConfigure( pff, &pcfconfig, fEverEligibleForCaching, wszAnyAbsPath ) );
 
     //  make the file available for other opens
 
@@ -1404,29 +1497,86 @@ HandleError:
 }
 
 template< class I >
-ERR TFileSystemFilter<I>::ErrFileConfigure( _In_        CFileFilter* const          pff,
-                                            _In_        const BOOL                  fEverEligible,
-                                            _In_z_      const WCHAR* const          wszAnyAbsPath )
+ERR TFileSystemFilter<I>::ErrFileConfigure( _In_        CFileFilter* const                  pff,
+                                            _Inout_     ICachedFileConfiguration** const    ppcfconfig,
+                                            _In_        const BOOL                          fEverEligibleForCaching,
+                                            _In_z_      const WCHAR* const                  wszAnyAbsPath )
 {
-    ERR         err         = JET_errSuccess;
-    VolumeId    volumeid    = volumeidInvalid;
-    FileId      fileid      = fileidInvalid;
+    ERR                         err         = JET_errSuccess;
+    ICachedFileConfiguration*   pcfconfig   = *ppcfconfig;
+    VolumeId                    volumeid    = volumeidInvalid;
+    FileId                      fileid      = fileidInvalid;
+
+    *ppcfconfig = NULL;
 
     Call( m_pfident->ErrGetFileId( wszAnyAbsPath, &volumeid, &fileid ) );
-    pff->SetFileId( volumeid, fileid );
 
-    pff->SetEverEligibleForCaching( fEverEligible );
+    pff->Configure( volumeid, fileid, &pcfconfig, fEverEligibleForCaching );
 
 HandleError:
+    delete pcfconfig;
+    return err;
+}
+
+
+template< class I >
+ERR TFileSystemFilter<I>::ErrFileOpenInternal(  _In_z_      const WCHAR* const                              wszPath,
+                                                _In_        const IFileAPI::FileModeFlags                   fmf,
+                                                _In_        const BOOL                                      fDetachFile,
+                                                _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                                _In_opt_    const DWORD_PTR                                 keyDetachFileStatus,
+                                                _Out_       IFileAPI** const                                ppfapi )
+{
+    ERR                     err                             = JET_errSuccess;
+    const DWORD             cwchAbsPathMax                  = IFileSystemAPI::cchPathMax;
+    WCHAR                   wszAbsPath[ cwchAbsPathMax ]    = { 0 };
+    const DWORD             cwchKeyPathMax                  = IFileIdentification::cwchKeyPathMax;
+    WCHAR                   wszKeyPath[ cwchKeyPathMax ]    = { 0 };
+    CFileFilterReference*   pffr                            = NULL;
+
+    *ppfapi = NULL;
+
+    //  translate the relative file path into an absolute path and an unambiguous file key path
+
+    Call( ErrGetFilePath( wszPath, wszAbsPath, wszKeyPath ) );
+
+    //  open the file
+    //
+    //  NOTE:  we presume any file opened by path is not opened by the cache
+
+    Call( ErrFileOpenInternal(  wszAbsPath,
+                                wszKeyPath, 
+                                fmf, 
+                                fFalse, 
+                                fDetachFile, 
+                                pfnDetachFileStatus,
+                                keyDetachFileStatus,
+                                &pffr ) );
+
+    //  return the opened file
+
+    *ppfapi = pffr;
+    pffr = NULL;
+
+HandleError:
+    delete pffr;
+    if ( err < JET_errSuccess )
+    {
+        delete *ppfapi;
+        *ppfapi = NULL;
+    }
     return err;
 }
 
 template< class I >
-ERR TFileSystemFilter<I>::ErrFileOpenInternal(  _In_z_  const WCHAR* const              wszAnyAbsPath,
-                                                _In_z_  const WCHAR* const              wszKeyPath,
-                                                _In_    const IFileAPI::FileModeFlags   fmf,
-                                                _In_    const BOOL                      fCacheOpen,
-                                                _Out_   CFileFilterReference** const    ppffr )
+ERR TFileSystemFilter<I>::ErrFileOpenInternal(  _In_z_      const WCHAR* const                              wszAnyAbsPath,
+                                                _In_z_      const WCHAR* const                              wszKeyPath,
+                                                _In_        const IFileAPI::FileModeFlags                   fmf,
+                                                _In_        const BOOL                                      fCacheOpen,
+                                                _In_        const BOOL                                      fDetachFile,
+                                                _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                                _In_opt_    const DWORD_PTR                                 keyDetachFileStatus,
+                                                _Out_       CFileFilterReference** const                    ppffr )
 {
     ERR                     err         = JET_errSuccess;
     CSemaphore              sem( CSyncBasicInfo( "TFileSystemFilter<I>::ErrFileOpenInternal" ) );
@@ -1436,13 +1586,20 @@ ERR TFileSystemFilter<I>::ErrFileOpenInternal(  _In_z_  const WCHAR* const      
 
     //  wait to lock the entry for this file
 
-    Call( ErrLockFile( wszKeyPath, &sem, &pfpte ) );
+    Call( ErrLockFile( wszKeyPath, &sem, fCacheOpen, &pfpte ) );
 
     //  if the file isn't open then open it
 
     if ( !pfpte->Pof() )
     {
-        Call( ErrFileOpenCacheMiss( wszAnyAbsPath, fmf, fCacheOpen, pfpte, ppffr ) );
+        Call( ErrFileOpenCacheMiss( wszAnyAbsPath,
+                                    fmf,
+                                    fCacheOpen, 
+                                    pfpte, 
+                                    fDetachFile, 
+                                    pfnDetachFileStatus,
+                                    keyDetachFileStatus,
+                                    ppffr ) );
     }
 
     //  the file is already open
@@ -1473,33 +1630,48 @@ HandleError:
 }
 
 template< class I >
-ERR TFileSystemFilter<I>::ErrFileOpenCacheMiss( _In_z_  const WCHAR* const              wszAnyAbsPath,
-                                                _In_    const IFileAPI::FileModeFlags   fmf,
-                                                _In_    const BOOL                      fCacheOpen,
-                                                _In_    CFilePathTableEntry* const      pfpte,
-                                                _Out_   CFileFilterReference** const    ppffr )
+ERR TFileSystemFilter<I>::ErrFileOpenCacheMiss( _In_z_      const WCHAR* const                              wszAnyAbsPath,
+                                                _In_        const IFileAPI::FileModeFlags                   fmf,
+                                                _In_        const BOOL                                      fCacheOpen,
+                                                _In_        CFilePathTableEntry* const                      pfpte,
+                                                _In_        const BOOL                                      fDetachFile,
+                                                _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                                _In_opt_    const DWORD_PTR                                 keyDetachFileStatus,
+                                                _Out_       CFileFilterReference** const                    ppffr )
 {
     ERR                             err             = JET_errSuccess;
     CFileFilter*                    pff             = NULL;
-    BOOL                            fAttached       = fFalse;
-    const IFileAPI::FileModeFlags   fmfReadOnlyMask = IFileAPI::fmfReadOnly | IFileAPI::fmfReadOnlyClient | IFileAPI::fmfReadOnlyPermissive;
     CFilePathTableEntry::COpenFile* pof             = NULL;
 
     *ppffr = NULL;
 
     //  open the file with the original flags
 
-    Call( ErrFileOpenAndConfigure( wszAnyAbsPath, fmf, pfpte, &pff, &fAttached ) );
+    Call( ErrFileOpenAndConfigure(  wszAnyAbsPath,
+                                    fmf,
+                                    fCacheOpen,
+                                    pfpte,
+                                    fDetachFile,
+                                    pfnDetachFileStatus,
+                                    keyDetachFileStatus,
+                                    &pff ) );
 
     //  if we opened this file read only and it is attached to the cache then open it read write so that the cache can
     //  perform write back to the file due to cache pressure
 
-    if ( fAttached && ( fmf & fmfReadOnlyMask ) != 0 )
+    if ( pff->FAttached() && ( fmf & fmfReadOnlyMask ) != 0 )
     {
         delete pff;
         pff = NULL;
 
-        Call( ErrFileOpenAndConfigure( wszAnyAbsPath, fmf & ~fmfReadOnlyMask, pfpte, &pff, &fAttached ))
+        Call( ErrFileOpenAndConfigure(  wszAnyAbsPath,
+                                        fmf & ~fmfReadOnlyMask, 
+                                        fCacheOpen, 
+                                        pfpte, 
+                                        fDetachFile,
+                                        pfnDetachFileStatus,
+                                        keyDetachFileStatus,
+                                        &pff ) )
     }
 
     //  make the file available for other opens
@@ -1523,36 +1695,36 @@ HandleError:
 }
 
 template< class I >
-ERR TFileSystemFilter<I>::ErrFileOpenAndConfigure(  _In_z_  const WCHAR* const              wszAnyAbsPath,
-                                                    _In_    const IFileAPI::FileModeFlags   fmf,
-                                                    _In_    CFilePathTableEntry* const      pfpte,
-                                                    _Out_   CFileFilter** const             ppff,
-                                                    _Out_   BOOL* const                     pfAttached )
+ERR TFileSystemFilter<I>::ErrFileOpenAndConfigure(  _In_z_      const WCHAR* const                              wszAnyAbsPath,
+                                                    _In_        const IFileAPI::FileModeFlags                   fmf,
+                                                    _In_        const BOOL                                      fCacheOpen,
+                                                    _In_        CFilePathTableEntry* const                      pfpte,
+                                                    _In_        const BOOL                                      fDetachFile,
+                                                    _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                                    _In_opt_    const DWORD_PTR                                 keyDetachFileStatus,
+                                                    _Out_       CFileFilter** const                             ppff )
 {
-    ERR                             err             = JET_errSuccess;
-    IBlockCacheConfiguration*       pbcconfig       = NULL;
-    ICachedFileConfiguration*       pcfconfig       = NULL;
-    const IFileAPI::FileModeFlags   fmfReadOnlyMask = IFileAPI::fmfReadOnly | IFileAPI::fmfReadOnlyClient | IFileAPI::fmfReadOnlyPermissive;
-    BOOL                            fEverEligible   = fFalse;
-    CFileFilter*                    pff             = NULL;
-    BOOL                            fAttached       = fFalse;
+    ERR                             err                     = JET_errSuccess;
+    IBlockCacheConfiguration*       pbcconfig               = NULL;
+    ICachedFileConfiguration*       pcfconfig               = NULL;
+    BOOL                            fEverEligibleForCaching = fFalse;
+    CFileFilter*                    pff                     = NULL;
 
     *ppff = NULL;
-    *pfAttached = fFalse;
+
+    //  get the caching configuration for this file
+
+    Call( ErrGetConfiguration( &pbcconfig ) );
+    Call( pbcconfig->ErrGetCachedFileConfiguration( pfpte->WszKeyPath(), &pcfconfig ) );
 
     //  determine if this file has ever been eligible for caching
 
-    Call( ErrEverEligibleForCaching( wszAnyAbsPath, fmf, &fEverEligible ) );
+    Call( ErrEverEligibleForCaching( wszAnyAbsPath, fmf, &fEverEligibleForCaching ) );
 
     //  if the file has never been eligible for caching then see if it should be marked as such
 
-    if ( !fEverEligible )
+    if ( !fEverEligibleForCaching )
     {
-        //  get the caching configuration for this file
-
-        Call( ErrGetConfiguration( &pbcconfig ) );
-        Call( pbcconfig->ErrGetCachedFileConfiguration( pfpte->WszKeyPath(), &pcfconfig ) );
-
         //  if caching is enabled for this file and we are opening it for RW access then attempt to mark it as ever
         //  cached
         //
@@ -1560,7 +1732,7 @@ ERR TFileSystemFilter<I>::ErrFileOpenAndConfigure(  _In_z_  const WCHAR* const  
 
         if ( pcfconfig->FCachingEnabled() && ( fmf & fmfReadOnlyMask ) == 0 )
         {
-            Call( ErrTryMarkAsEverEligibleForCaching( wszAnyAbsPath, fFalse, fTrue, &fEverEligible ) );
+            Call( ErrTryMarkAsEverEligibleForCaching( wszAnyAbsPath, fFalse, fTrue, &fEverEligibleForCaching ) );
         }
     }
 
@@ -1570,17 +1742,22 @@ ERR TFileSystemFilter<I>::ErrFileOpenAndConfigure(  _In_z_  const WCHAR* const  
 
     //  configure the newly opened file
 
-    Call( ErrFileConfigure( pff, fEverEligible, wszAnyAbsPath ) );
+    Call( ErrFileConfigure( pff, &pcfconfig, fEverEligibleForCaching, wszAnyAbsPath ) );
 
     //  get the file's cache
 
-    Call( ErrGetCache( pff, fEverEligible, pfpte->WszKeyPath(), &fAttached ) );
+    Call( ErrGetCache(  pff, 
+                        fEverEligibleForCaching, 
+                        fCacheOpen, 
+                        pfpte->WszKeyPath(), 
+                        fDetachFile,
+                        pfnDetachFileStatus,
+                        keyDetachFileStatus ) );
 
     //  return the opened file
 
     *ppff = pff;
     pff = NULL;
-    *pfAttached = fAttached;
 
 HandleError:
     delete pff;
@@ -1589,7 +1766,6 @@ HandleError:
     {
         delete *ppff;
         *ppff = NULL;
-        *pfAttached = fFalse;
     }
     return err;
 }
@@ -1686,10 +1862,10 @@ void TFileSystemFilter<I>::ReportCachedFileNotFoundById(    _In_ const VolumeId 
 }
 
 template<class I>
-ERR TFileSystemFilter<I>::ErrCacheOpenFailure(  _In_ ICachedFileConfiguration* const    pcfconfig,
-                                                _In_ const char* const                  szFunction,
-                                                _In_ const ERR                          errFromCall,
-                                                _In_ const ERR                          errToReturn )
+ERR TFileSystemFilter<I>::ErrCacheOpenFailure(  _In_ CFileFilter* const pff,
+                                                _In_ const char* const  szFunction,
+                                                _In_ const ERR          errFromCall,
+                                                _In_ const ERR          errToReturn )
 {
     WCHAR           wszCachingFile[ IFileSystemAPI::cchPathMax ]    = { 0 };
     WCHAR           wszFunction[ 256 ]                              = { 0 };
@@ -1697,7 +1873,7 @@ ERR TFileSystemFilter<I>::ErrCacheOpenFailure(  _In_ ICachedFileConfiguration* c
     WCHAR           wszErrorToReturn[ 64 ]                          = { 0 };
     const WCHAR*    rgpwsz[]                                        = { wszCachingFile, wszFunction, wszErrorFromCall, wszErrorToReturn };
 
-    pcfconfig->CachingFilePath( wszCachingFile );
+    pff->Pcfconfig()->CachingFilePath(wszCachingFile);
     OSStrCbFormatW( wszFunction, sizeof( wszFunction ), L"%hs", szFunction );
     OSStrCbFormatW( wszErrorFromCall, sizeof( wszErrorFromCall ), L"%i (0x%08x)", errFromCall, errFromCall );
     OSStrCbFormatW( wszErrorToReturn, sizeof( wszErrorToReturn ), L"%i (0x%08x)", errToReturn, errToReturn );
@@ -1721,23 +1897,23 @@ ERR TFileSystemFilter<I>::ErrCacheOpenFailure(  _In_ ICachedFileConfiguration* c
 }
 
 template< class I >
-ERR TFileSystemFilter<I>::ErrGetCache(  _In_    CFileFilter* const              pff,
-                                        _In_    const BOOL                      fEverEligible,
-                                        _In_z_  const WCHAR* const              wszKeyPath,
-                                        _Out_   BOOL* const                     pfAttached )
+ERR TFileSystemFilter<I>::ErrGetCache(  _In_        CFileFilter* const                              pff,
+                                        _In_        const BOOL                                      fEverEligibleForCaching,
+                                        _In_        const BOOL                                      fCacheOpen,
+                                        _In_z_      const WCHAR* const                              wszKeyPath,
+                                        _In_        const BOOL                                      fDetachFile,
+                                        _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                        _In_opt_    const DWORD_PTR                                 keyDetachFileStatus )
 {
     ERR                         err         = JET_errSuccess;
     CCachedFileHeader*          pcfh        = NULL;
     IBlockCacheConfiguration*   pbcconfig   = NULL;
-    ICachedFileConfiguration*   pcfconfig   = NULL;
     ICache*                     pc          = NULL;
-
-    *pfAttached = fFalse;
 
     //  determine if this file has ever been eligible for caching.  if it is not marked then open it as if it were not
     //  already cached
 
-    if ( !fEverEligible )
+    if ( !fEverEligibleForCaching )
     {
         Error( JET_errSuccess );
     }
@@ -1757,7 +1933,6 @@ ERR TFileSystemFilter<I>::ErrGetCache(  _In_    CFileFilter* const              
     //  the file is cached so open its associated caching file
 
     Call( ErrGetConfiguration( &pbcconfig ) );
-    Call( pbcconfig->ErrGetCachedFileConfiguration( wszKeyPath, &pcfconfig ) );
     err = m_pcrep->ErrOpenById( this,
                                 m_pfsconfig,
                                 pbcconfig,
@@ -1767,31 +1942,173 @@ ERR TFileSystemFilter<I>::ErrGetCache(  _In_    CFileFilter* const              
                                 &pc );
     if ( err < JET_errSuccess )
     {
-        Call( ErrCacheOpenFailure( pcfconfig, "OpenById", err, ErrERRCheck( JET_errDiskIO ) ) );
-    }
-
-    //  if we didn't get a cache then we're done
-
-    if ( !pc )
-    {
-        Error( JET_errSuccess );
+        Call( ErrCacheOpenFailure( pff, "OpenById", err, ErrERRCheck(JET_errDiskIO)));
     }
 
     //  save the caching state
 
-    pff->SetCacheState( &pcfconfig, &pc, &pcfh );
+    pff->SetCacheState( &pc, &pcfh );
 
-    //  indicate that the file is attached to a cache
+    //  if caching is now disabled or the cache configuration has changed significantly and then detach the file from
+    //  the cache
+    //
+    //  NOTE:  if the detach fails then we will only return an error for an explicit detach file operation
 
-    *pfAttached = fTrue;
+    if ( fDetachFile || FDetachFile( pff, pbcconfig, pc, fCacheOpen ) )
+    {
+        const ERR errT = ErrDetachFile( pff, pfnDetachFileStatus, keyDetachFileStatus );
+        if ( fDetachFile )
+        {
+            Call( errT );
+        }
+    }
 
 HandleError:
     delete pc;
-    delete pcfconfig;
     delete pcfh;
+    return err;
+}
+
+template< class I >
+BOOL TFileSystemFilter<I>::FDetachFile( _In_ CFileFilter* const                 pff,
+                                        _In_ IBlockCacheConfiguration* const    pbcconfig,
+                                        _In_ ICache* const                      pc,
+                                        _In_ const BOOL                         fCacheOpen )
+{
+    //  we cannot detach a file that is being opened by the cache for write back
+
+    if ( fCacheOpen )
+    {
+        return fFalse;
+    }
+
+    //  we cannot detach a RO file (we will reopen as RW shortly and get another chance)
+
+    if ( pff->Fmf() & fmfReadOnlyMask )
+    {
+        return fFalse;
+    }
+
+    //  we cannot detach if it isn't enabled
+    //
+    //  NOTE:  this is what prevents code that isn't EBC aware of detaching cached files on open
+
+    if ( !pbcconfig->FDetachEnabled() )
+    {
+        return fFalse;
+    }
+
+    //  if caching is disabled for the file then we should detach
+
+    if ( !pff->Pcfconfig()->FCachingEnabled() )
+    {
+        return fTrue;
+    }
+
+    //  if the cache is disabled then we should detach
+
+    if ( !pc->FEnabled() )
+    {
+        return fTrue;
+    }
+
+    return fFalse;
+}
+
+template< class I >
+ERR TFileSystemFilter<I>::ErrDetachFile(    _In_        CFileFilter* const                              pff,
+                                            _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
+                                            _In_opt_    const DWORD_PTR                                 keyDetachFileStatus )
+{
+    ERR                 err                                         = JET_errSuccess;
+    const DWORD         cbBlockSize                                 = max( cbCachedBlock, pff->Pcfconfig()->CbBlockSize());
+    CDestagingFile*     pdestagingfile                              = NULL;
+    void*               pvData                                      = NULL;
+    TraceContextScope   tcScope( iorpBlockCache );
+    WCHAR               wszCachedFile[ IFileSystemAPI::cchPathMax ] = { 0 };
+    BOOL                fPresumeDetached                            = fFalse;
+
+    //  allow only the cache to open this partially constructed file
+
+    Alloc( pdestagingfile = new CDestagingFile( pff ) );
+    m_rwlDestagingFiles.EnterAsWriter();
+    m_ilDestagingFiles.InsertAsNextMost( pdestagingfile );
+    m_rwlDestagingFiles.LeaveAsWriter();
+
+    //  ask the cache to destage the file (except for the pinned header data)
+
+    Call( pff->Pc()->ErrDestage(    pff->Pcfh()->Volumeid(),
+                                    pff->Pcfh()->Fileid(),
+                                    pff->Pcfh()->Fileserial(),
+                                    (ICache::PfnDestageStatus)pfnDetachFileStatus,
+                                    keyDetachFileStatus ) );
+
+    //  ensure the destage is committed
+
+    Call( pff->Pc()->ErrFlush( pff->Pcfh()->Volumeid(), pff->Pcfh()->Fileid(), pff->Pcfh()->Fileserial() ) );
+
+    //  read the pinned header data out of the cache
+    //
+    //  NOTE:  if someone shrank this number since the file was attached then we could lose data!
+
+    Alloc( pvData = PvOSMemoryPageAlloc( pff->Pcfh()->CbPinnedHeader(), NULL));
+    Call( pff->Pc()->ErrRead(   *tcScope,
+                                pff->Pcfh()->Volumeid(),
+                                pff->Pcfh()->Fileid(),
+                                pff->Pcfh()->Fileserial(),
+                                0,
+                                pff->Pcfh()->CbPinnedHeader(),
+                                (BYTE*)pvData,
+                                qosIONormal,
+                                cpDontCache,
+                                NULL,
+                                NULL ) );
+
+    //  write the pinned header data out to the file
+    //
+    //  NOTE:  if this write fails then the file may be destroyed!
+
+    Call( pff->ErrPath( wszCachedFile ) );
+    BlockCacheNotableEvent( wszCachedFile, "Detach" );
+
+    Call( pff->ErrWrite(    *tcScope, 
+                            0, 
+                            pff->Pcfh()->CbPinnedHeader(),
+                            (const BYTE*)pvData, 
+                            qosIONormal, 
+                            iomRaw,
+                            NULL, 
+                            NULL, 
+                            NULL ) );
+    fPresumeDetached = fTrue;
+    Call( pff->ErrFlush( iofrBlockCache, iomRaw ) );
+
+    //  ask the cache to close the file
+    //
+    //  NOTE:  if the detach was successful then the cache can no longer open this file and it can evict any remaining
+    //  cached data.  if it wasn't successful then we will continue on with the file still attached
+
+    Call( pff->Pc()->ErrClose( pff->Pcfh()->Volumeid(), pff->Pcfh()->Fileid(), pff->Pcfh()->Fileserial() ) );
+
+HandleError:
+    OSMemoryPageFree( pvData );
+    if ( pdestagingfile )
+    {
+        m_rwlDestagingFiles.EnterAsWriter();
+        m_ilDestagingFiles.Remove( pdestagingfile );
+        m_rwlDestagingFiles.LeaveAsWriter();
+    }
+    err = ErrAccumulateError( err, pff->Pc()->ErrClose( pff->Pcfh()->Volumeid(), pff->Pcfh()->Fileid(), pff->Pcfh()->Fileserial() ) );
+    delete pdestagingfile;
+    if ( fPresumeDetached )
+    {
+        pff->SetCacheState( NULL, NULL );
+    }
     if ( err < JET_errSuccess )
     {
-        *pfAttached = fFalse;
+        OSTraceSuspendGC();
+        BlockCacheNotableEvent( wszCachedFile, OSFormat( "DetachFailed:%i", err ) );
+        OSTraceResumeGC();
     }
     return err;
 }

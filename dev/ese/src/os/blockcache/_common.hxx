@@ -5,6 +5,7 @@
 
 //  Block Cache Lock Ranks
 
+const INT rankDestagingFiles = 0;
 const INT rankThrottleContexts = 0;
 const INT rankThrottleContext = 0;
 const INT rankFileFilterReferences = 0;
@@ -63,6 +64,11 @@ class COffsets
         BOOL FContains( _In_ const COffsets& other ) const
         {
             return IbStart() <= other.IbStart() && other.IbEnd() <= IbEnd();
+        }
+
+        BOOL FAdjacent( _In_ const COffsets& other ) const
+        {
+            return IbEnd() + 1 == other.IbStart() || other.IbEnd() + 1 == IbStart();
         }
 
     private:
