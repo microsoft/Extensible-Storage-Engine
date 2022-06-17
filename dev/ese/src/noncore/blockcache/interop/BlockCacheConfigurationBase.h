@@ -29,6 +29,8 @@ namespace Internal
                         virtual ICachedFileConfiguration^ CachedFileConfiguration( String^ keyPathCachedFile );
 
                         virtual ICacheConfiguration^ CacheConfiguration( String^ keyPathCachingFile );
+
+                        virtual bool IsDetachEnabled();
                 };
 
                 template< class TM, class TN, class TW >
@@ -60,6 +62,12 @@ namespace Internal
                 HandleError:
                     delete pcconfig;
                     throw EseException( err );
+                }
+
+                template< class TM, class TN, class TW >
+                inline bool BlockCacheConfigurationBase<TM, TN, TW>::IsDetachEnabled()
+                {
+                    return Pi->FDetachEnabled() ? true : false;
                 }
             }
         }

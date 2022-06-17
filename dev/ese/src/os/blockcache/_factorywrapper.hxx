@@ -247,6 +247,13 @@ class TBlockCacheFactoryWrapper
             return m_piInner->ErrCreateCachedBlockSlotState( slot, fSlabUpdated, fChunkUpdated, fSlotUpdated, fClusterUpdated, fSuperceded, pslotst );
         }
 
+        ERR ErrDetachFile(  _In_z_      const WCHAR* const                              wszFilePath,
+                            _In_opt_    const IBlockCacheFactory::PfnDetachFileStatus   pfnDetachFileStatus,
+                            _In_opt_    const DWORD_PTR                                 keyDetachFileStatus ) override
+        {
+            return m_piInner->ErrDetachFile( wszFilePath, pfnDetachFileStatus, keyDetachFileStatus );
+        }
+
     private:
 
         I* const   m_piInner;

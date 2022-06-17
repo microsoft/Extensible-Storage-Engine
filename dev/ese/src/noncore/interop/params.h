@@ -238,7 +238,8 @@ MSINTERNAL enum class MJET_PARAM
     PerfmonRefreshInterval = 217, // Interval, in units of msec, used by the Permormance Monitor to refresh values for collection.
     EnableBlockCache = 218, // Indicates that the ESE Block Cache is enabled.  This is sufficient to access files previously attached to the ESE Block Cache but not to attach new files.
     DeferredIndexPopulateRowsPerTransaction = 219, // Number of primary index rows to process in a single transaction when processing
-    MaxValueInvalid = 220, // This is not a valid parameter. It can change from release to release!
+    EnableBlockCacheDetach = 220, // Indicates that ESE Block Cache detach is enabled.  This will allow a file cached by the ESE Block Cache to be detached on open.
+    MaxValueInvalid = 221, // This is not a valid parameter. It can change from release to release!
 };
 
 }

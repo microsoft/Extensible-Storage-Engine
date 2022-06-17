@@ -55,10 +55,10 @@ namespace Internal
                     void Mount();
 
                     /// <summary>
-                    /// Returns the type of the caching file.
+                    /// Indicates if the cache is currently enabled.
                     /// </summary>
-                    /// <returns>The type of the caching file.</returns>
-                    Guid GetCacheType();
+                    /// <returns>True if the cache is currently enabled.</returns>
+                    bool IsEnabled();
 
                     /// <summary>
                     /// Returns the physical identity of the caching file.
@@ -83,6 +83,25 @@ namespace Internal
                     /// <param name="fileid">The file id of the cached file.</param>
                     /// <param name="fileserial">The serial number of the cached file.</param>
                     void Flush( VolumeId volumeid, FileId fileid, FileSerial fileserial );
+
+                    /// <summary>
+                    /// Delegate that will be called during destage to indicate progress.
+                    /// </summary>
+                    /// <param name="i">The amount of work completed.</param>
+                    /// <param name="c">The total amount of work required.</param>
+                    delegate void DestageStatus( int i, int c );
+
+                    /// <summary>
+                    /// Writes all data previously written for the given cached file back to that cached file.
+                    /// </summary>
+                    /// <param name="volumeid">The volume id of the cached file.</param>
+                    /// <param name="fileid">The file id of the cached file.</param>
+                    /// <param name="fileserial">The serial number of the cached file.</param>
+                    void Destage(
+                        VolumeId volumeid, 
+                        FileId fileid,
+                        FileSerial fileserial, 
+                        DestageStatus^ destageStatus );
 
                     /// <summary>
                     /// Invalidates cached data for the specified offset range of the given cached file.

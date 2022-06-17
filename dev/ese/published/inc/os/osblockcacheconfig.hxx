@@ -129,6 +129,14 @@ class ICacheConfiguration  //  cconfig
         //  Indicates if asynchronous write back is enabled.
 
         virtual BOOL FAsyncWriteBackEnabled() = 0;
+
+        //  Max concurrent IO for destage.
+
+        virtual ULONG CIOMaxOutstandingDestage() = 0;
+
+        //  Max concurrent IO size for destage.
+
+        virtual ULONG CbIOMaxOutstandingDestage() = 0;
 };
 
 //  Default Cache Configuration.
@@ -154,6 +162,8 @@ class CDefaultCacheConfiguration : public ICacheConfiguration
         QWORD CbCachedFilePerSlab() override;
         QWORD CbSlabMaximumCacheSize() override;
         BOOL FAsyncWriteBackEnabled() override;
+        ULONG CIOMaxOutstandingDestage() override;
+        ULONG CbIOMaxOutstandingDestage() override;
 
     protected:
 
@@ -170,6 +180,8 @@ class CDefaultCacheConfiguration : public ICacheConfiguration
         QWORD   m_cbCachedFilePerSlab;
         QWORD   m_cbSlabMaximumCacheSize;
         BOOL    m_fAsyncWriteBackEnabled;
+        ULONG   m_cIOMaxOutstandingDestage;
+        ULONG   m_cbIOMaxOutstandingDestage;
 };
 
 class IBlockCacheConfiguration  //  bcconfig
@@ -187,6 +199,12 @@ class IBlockCacheConfiguration  //  bcconfig
 
         virtual ERR ErrGetCacheConfiguration(   _In_z_  const WCHAR* const          wszKeyPathCachingFile,
                                                 _Out_   ICacheConfiguration** const ppcconfig ) = 0;
+
+        //  Indicates if detach is enabled.
+        //
+        //  NOTE:  This is what prevents code that isn't block cache aware of detaching cached files on open.
+
+        virtual BOOL FDetachEnabled() = 0;
 };
 
 class CDefaultBlockCacheConfiguration : public IBlockCacheConfiguration
@@ -201,6 +219,12 @@ class CDefaultBlockCacheConfiguration : public IBlockCacheConfiguration
                                             _Out_   ICachedFileConfiguration** const    ppcfconfig  ) override;
         ERR ErrGetCacheConfiguration(   _In_z_  const WCHAR* const          wszKeyPathCachingFile,
                                         _Out_   ICacheConfiguration** const ppcconfig ) override;
+
+        BOOL FDetachEnabled() override;
+
+    protected:
+
+        BOOL m_fDetachEnabled;
 };
 
 #endif  //  _OSBLOCKCACHECONFIG_HXX_INCLUDED

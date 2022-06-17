@@ -20,7 +20,7 @@ class TCacheBase  //  c
 
     public:  //  ICache
 
-        ERR ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType ) override;
+        BOOL FEnabled() override;
 
         ERR ErrGetPhysicalId(   _Out_                   VolumeId* const pvolumeid,
                                 _Out_                   FileId* const   pfileid,
@@ -532,11 +532,33 @@ TCacheBase<I, CFTE, CTLS>::~TCacheBase()
 }
 
 template< class I, class CFTE, class CTLS >
-ERR TCacheBase<I, CFTE, CTLS>::ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType )
+BOOL TCacheBase<I, CFTE, CTLS>::FEnabled()
 {
-    UtilMemCpy( rgbCacheType, m_pch->RgbCacheType(), cbGuid );
+    BYTE    rgbCacheTypeExpected[ ICacheConfiguration::cbGuid ] = { };
 
-    return JET_errSuccess;
+    //  if the cache is no longer enabled then it is not enabled
+
+    if ( !Pcconfig()->FCacheEnabled() )
+    {
+        return fFalse;
+    }
+
+    //  if the cache is set to zero size then it is not enabled
+
+    if ( !Pcconfig()->CbMaximumSize() )
+    {
+        return fFalse;
+    }
+
+    //  if the cache type has changed then it doesn't match
+
+    Pcconfig()->CacheType( rgbCacheTypeExpected );
+    if ( memcmp( rgbCacheTypeExpected, m_pch->RgbCacheType(), ICacheConfiguration::cbGuid ) )
+    {
+        return fFalse;
+    }
+
+    return fTrue;
 }
 
 template< class I, class CFTE, class CTLS >

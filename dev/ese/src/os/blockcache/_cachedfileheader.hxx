@@ -20,6 +20,7 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
 
         static ERR ErrCreate(   _In_    IFileFilter* const          pffCachedFile,
                                 _In_    ICache* const               pc,
+                                _In_    const DWORD                 cbPinnedHeader,
                                 _Out_   CCachedFileHeader** const   ppcfh );
         static ERR ErrLoad( _In_    IFileSystemConfiguration* const pfsconfig, 
                             _In_    IFileFilter* const              pff,
@@ -38,11 +39,15 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
 
         void operator delete( _In_opt_ void* const pv );
 
+        VolumeId Volumeid() const { return m_le_volumeid; }
+        FileId Fileid() const { return m_le_fileid; }
         FileSerial Fileserial() const { return m_le_serialNumber; }
 
         VolumeId VolumeidCache() const { return m_le_volumeidCache; }
         FileId FileidCache() const { return m_le_fileidCache; }
         const BYTE* RgbUniqueIdCache() const { return m_rgbUniqueIdCache; }
+
+        DWORD CbPinnedHeader() const { return m_le_cbPinnedHeader ? m_le_cbPinnedHeader : 64 * 1024; }
 
     private:
 
@@ -70,6 +75,7 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
         LittleEndian<VolumeId>          m_le_volumeidCache;             //  caching file's volume id
         LittleEndian<FileId>            m_le_fileidCache;               //  caching file's file id
         BYTE                            m_rgbUniqueIdCache[ cbGuid ];   //  caching file's unique id
+        LittleEndian<DWORD>             m_le_cbPinnedHeader;            //  pinned header size (0 == 64KB)
 
         BYTE                            m_rgbPadding1[  ibFileType
                                                         - sizeof( m_le_ulChecksum )
@@ -80,7 +86,8 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
                                                         - sizeof( m_le_serialNumber )
                                                         - sizeof( m_le_volumeidCache )
                                                         - sizeof( m_le_fileidCache )
-                                                        - sizeof( m_rgbUniqueIdCache ) ];
+                                                        - sizeof( m_rgbUniqueIdCache )
+                                                        - sizeof( m_le_cbPinnedHeader ) ];
 
         UnalignedLittleEndian<ULONG>    m_le_filetype;                                      //  offset 667:  file type = JET_filetypeCachedFile
 
@@ -107,6 +114,7 @@ INLINE CCachedFileHeader::CCachedFileHeader()
 
 INLINE ERR CCachedFileHeader::ErrCreate(    _In_    IFileFilter* const          pffCachedFile,
                                             _In_    ICache* const               pc,
+                                            _In_    const DWORD                 cbPinnedHeader,
                                             _Out_   CCachedFileHeader** const   ppcfh )
 {
     ERR                 err                     = JET_errSuccess;
@@ -126,6 +134,7 @@ INLINE ERR CCachedFileHeader::ErrCreate(    _In_    IFileFilter* const          
     pcfh->m_le_volumeidCache = volumeid;
     pcfh->m_le_fileidCache = fileid;
     UtilMemCpy( pcfh->m_rgbUniqueIdCache, rgbUniqueId, cbGuid );
+    pcfh->m_le_cbPinnedHeader = cbPinnedHeader;
     pcfh->m_le_filetype = JET_filetypeCachedFile;
 
     pcfh->m_le_ulChecksum = GenerateChecksum( pcfh );
@@ -243,8 +252,8 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
 
     (*pcprintf)(    "Cached File Header:\n" );
     (*pcprintf)(    "\n" );
-    (*pcprintf)(    "          Checksum:  0x%08lx\n", LONG( pcfh->m_le_ulChecksum ) );
-    (*pcprintf)(    "              Type:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
+    (*pcprintf)(    "              Checksum:  0x%08lx\n", LONG( pcfh->m_le_ulChecksum ) );
+    (*pcprintf)(    "                  Type:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
                     *((DWORD*)&pcfh->m_rgbHeaderType[ 0 ]),
                     *((WORD*)&pcfh->m_rgbHeaderType[ 4 ]),
                     *((WORD*)&pcfh->m_rgbHeaderType[ 6 ]),
@@ -256,9 +265,9 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
                     *((BYTE*)&pcfh->m_rgbHeaderType[ 13 ]),
                     *((BYTE*)&pcfh->m_rgbHeaderType[ 14 ]),
                     *((BYTE*)&pcfh->m_rgbHeaderType[ 15 ]) );
-    (*pcprintf)(    "          VolumeId:  0x%08x\n", DWORD( VolumeId( pcfh->m_le_volumeid ) ) );
-    (*pcprintf)(    "            FileId:  0x%016I64x\n", QWORD( FileId( pcfh->m_le_fileid ) ) );
-    (*pcprintf)(    "          UniqueId:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
+    (*pcprintf)(    "              VolumeId:  0x%08x\n", DWORD( VolumeId( pcfh->m_le_volumeid ) ) );
+    (*pcprintf)(    "                FileId:  0x%016I64x\n", QWORD( FileId( pcfh->m_le_fileid ) ) );
+    (*pcprintf)(    "              UniqueId:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
                     *((DWORD*)&pcfh->m_rgbUniqueId[ 0 ]),
                     *((WORD*)&pcfh->m_rgbUniqueId[ 4 ]),
                     *((WORD*)&pcfh->m_rgbUniqueId[ 6 ]),
@@ -270,11 +279,11 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
                     *((BYTE*)&pcfh->m_rgbUniqueId[ 13 ]),
                     *((BYTE*)&pcfh->m_rgbUniqueId[ 14 ]),
                     *((BYTE*)&pcfh->m_rgbUniqueId[ 15 ]) );
-    (*pcprintf)(    "        FileSerial:  0x%08x\n", DWORD( FileSerial( pcfh->m_le_serialNumber ) ) );
-    (*pcprintf)(    "    Cache VolumeId:  0x%08x\n", DWORD( VolumeId( pcfh->m_le_volumeidCache ) ) );
-    (*pcprintf)(    "      Cache FileId:  0x%016I64x\n", QWORD( FileId( pcfh->m_le_fileidCache ) ) );
-    (*pcprintf)(    "        Cache Path:  %ws\n", wszAnyAbsPath[0] ? wszAnyAbsPath : L"???" );
-    (*pcprintf)(    "    Cache UniqueId:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
+    (*pcprintf)(    "            FileSerial:  0x%08x\n", DWORD( FileSerial( pcfh->m_le_serialNumber ) ) );
+    (*pcprintf)(    "        Cache VolumeId:  0x%08x\n", DWORD( VolumeId( pcfh->m_le_volumeidCache ) ) );
+    (*pcprintf)(    "          Cache FileId:  0x%016I64x\n", QWORD( FileId( pcfh->m_le_fileidCache ) ) );
+    (*pcprintf)(    "            Cache Path:  %ws\n", wszAnyAbsPath[0] ? wszAnyAbsPath : L"???" );
+    (*pcprintf)(    "        Cache UniqueId:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
                     *((DWORD*)&pcfh->m_rgbUniqueIdCache[ 0 ]),
                     *((WORD*)&pcfh->m_rgbUniqueIdCache[ 4 ]),
                     *((WORD*)&pcfh->m_rgbUniqueIdCache[ 6 ]),
@@ -286,12 +295,13 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 13 ]),
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 14 ]),
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 15 ]) );
-    (*pcprintf)(    "         File Type:  %d\n", LONG( pcfh->m_le_filetype ) );
+    (*pcprintf)(    "    Pinned Header Size:  %d\n", LONG( pcfh->CbPinnedHeader() ) );
+    (*pcprintf)(    "             File Type:  %d\n", LONG( pcfh->m_le_filetype ) );
     (*pcprintf)(    "\n" );
     (*pcprintf)(    "Current File Properties:\n" );
-    (*pcprintf)(    "              Path:  %ws\n", wszAbsPath );
-    (*pcprintf)(    "          VolumeId:  0x%08x\n", DWORD( volumeid ) );
-    (*pcprintf)(    "            FileId:  0x%016I64x\n", QWORD( fileid ) );
+    (*pcprintf)(    "                  Path:  %ws\n", wszAbsPath );
+    (*pcprintf)(    "              VolumeId:  0x%08x\n", DWORD( volumeid ) );
+    (*pcprintf)(    "                FileId:  0x%016I64x\n", QWORD( fileid ) );
     (*pcprintf)(    "\n" );
 
 HandleError:

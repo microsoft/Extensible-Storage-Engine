@@ -54,10 +54,12 @@ CDefaultCacheConfiguration::CDefaultCacheConfiguration()
         m_pctJournalSegmentsInUse( 75 ),
         m_cbJournalSegmentsMaximumCacheSize( 1 * 1024 * 1024 ),
         m_cbJournalClustersMaximumSize( 2 * 1024 * 1024 ),
-        m_cbCachingFilePerSlab( 1 * 102 * 4096 ),
+        m_cbCachingFilePerSlab( 1 * 104 * 4096 ),  //  CCachedBlockChunk::Ccbl() == 104
         m_cbCachedFilePerSlab( 0 ),
         m_cbSlabMaximumCacheSize( 1 * 1024 * 1024 ),
-        m_fAsyncWriteBackEnabled( fTrue )
+        m_fAsyncWriteBackEnabled( fTrue ),
+        m_cIOMaxOutstandingDestage( 4 ),
+        m_cbIOMaxOutstandingDestage( (ULONG)( m_cbCachingFilePerSlab / 2 ) )
 {
     memcpy( m_rgbCacheType, CHashedLRUKCache::RgbCacheType(), cbGuid );
 }
@@ -127,7 +129,18 @@ BOOL CDefaultCacheConfiguration::FAsyncWriteBackEnabled()
     return m_fAsyncWriteBackEnabled;
 }
 
+ULONG CDefaultCacheConfiguration::CIOMaxOutstandingDestage()
+{
+    return m_cIOMaxOutstandingDestage;
+}
+
+ULONG CDefaultCacheConfiguration::CbIOMaxOutstandingDestage()
+{
+    return m_cbIOMaxOutstandingDestage;
+}
+
 CDefaultBlockCacheConfiguration::CDefaultBlockCacheConfiguration()
+    :   m_fDetachEnabled( fFalse )
 {
 }
 
@@ -151,6 +164,11 @@ ERR CDefaultBlockCacheConfiguration::ErrGetCacheConfiguration(  _In_z_  const WC
 
 HandleError:
     return err;
+}
+
+BOOL CDefaultBlockCacheConfiguration::FDetachEnabled()
+{
+    return m_fDetachEnabled;
 }
 
 

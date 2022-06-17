@@ -108,6 +108,16 @@ namespace Internal
                         {
                             return Pi->FAsyncWriteBackEnabled() ? true : false;
                         }
+
+                        virtual Int32 MaxConcurrentIODestage()
+                        {
+                            return Pi->CIOMaxOutstandingDestage();
+                        }
+
+                        virtual Int32 MaxConcurrentIOSizeDestage()
+                        {
+                            return Pi->CbIOMaxOutstandingDestage();
+                        }
                 };
             }
         }

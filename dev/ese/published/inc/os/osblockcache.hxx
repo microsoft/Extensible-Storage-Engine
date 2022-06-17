@@ -197,9 +197,9 @@ class ICache  //  c
 
         virtual ERR ErrDump( _In_ CPRINTF* const pcprintf ) = 0;
 
-        //  Returns the type of the caching file.
+        //  Indicates if the cache is currently enabled.
 
-        virtual ERR ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType ) = 0;
+        virtual BOOL FEnabled() = 0;
 
         //  Returns the physical identity of the caching file.
 
@@ -218,6 +218,20 @@ class ICache  //  c
         virtual ERR ErrFlush(   _In_ const VolumeId     volumeid,
                                 _In_ const FileId       fileid,
                                 _In_ const FileSerial   fileserial ) = 0;
+
+        //  Destage completion status.
+
+        typedef void (*PfnDestageStatus)(   _In_        const int       i,
+                                            _In_        const int       c,
+                                            _In_opt_    const DWORD_PTR keyDestageStatus );
+
+        //  Writes all data previously written for the given cached file back to that cached file.
+
+        virtual ERR ErrDestage( _In_        const VolumeId                  volumeid,
+                                _In_        const FileId                    fileid,
+                                _In_        const FileSerial                fileserial,
+                                _In_opt_    const ICache::PfnDestageStatus  pfnDestageStatus,
+                                _In_opt_    const DWORD_PTR                 keyDestageStatus ) = 0;
 
         //  Invalidates cached data for the specified offset range of the given cached file.
 
@@ -1410,6 +1424,14 @@ class IBlockCacheFactory  //  bcf
                                                     _In_    const BOOL              fClusterUpdated,
                                                     _In_    const BOOL              fSuperceded,
                                                     _Out_   CCachedBlockSlotState*  pslotst ) = 0;
+
+        typedef void (*PfnDetachFileStatus)(    _In_        const int       i,
+                                                _In_        const int       c,
+                                                _In_opt_    const DWORD_PTR keyDetachFileStatus );
+
+        virtual ERR ErrDetachFile(  _In_z_      const WCHAR* const                              wszFilePath,
+                                    _In_opt_    const IBlockCacheFactory::PfnDetachFileStatus   pfnDetachFileStatus,
+                                    _In_opt_    const DWORD_PTR                                 keyDetachFileStatus ) = 0;
 };
 
 class COSBlockCacheFactory

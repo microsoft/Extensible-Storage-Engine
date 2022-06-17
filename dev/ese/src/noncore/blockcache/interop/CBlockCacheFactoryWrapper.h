@@ -223,6 +223,13 @@ namespace Internal
                         {
                             return ErrERRCheck( JET_wrnNyi );
                         }
+
+                        ERR ErrDetachFile(  _In_z_      const WCHAR* const                          wszFilePath,
+                                            _In_opt_    ::IBlockCacheFactory::PfnDetachFileStatus   pfnDetachFileStatus,
+                                            _In_opt_    const DWORD_PTR                             keyDetachFileStatus ) override
+                        {
+                            return ErrERRCheck( JET_wrnNyi );
+                        }
                 };
             }
         }

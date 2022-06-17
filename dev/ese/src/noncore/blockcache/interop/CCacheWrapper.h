@@ -28,7 +28,7 @@ namespace Internal
 
                         ERR ErrDump( _In_ CPRINTF* const pcprintf ) override;
 
-                        ERR ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType ) override;
+                        BOOL FEnabled() override;
 
                         ERR ErrGetPhysicalId(   _Out_                   ::VolumeId* const   pvolumeid,
                                                 _Out_                   ::FileId* const     pfileid,
@@ -41,6 +41,12 @@ namespace Internal
                         ERR ErrFlush(   _In_ const ::VolumeId   volumeid,
                                         _In_ const ::FileId     fileid,
                                         _In_ const ::FileSerial fileserial ) override;
+                
+                        ERR ErrDestage( _In_        const ::VolumeId                    volumeid,
+                                        _In_        const ::FileId                      fileid,
+                                        _In_        const ::FileSerial                  fileserial,
+                                        _In_opt_    const ::ICache::PfnDestageStatus    pfnDestageStatus,
+                                        _In_opt_    const DWORD_PTR                     keyDestageStatus ) override;
 
                         ERR ErrInvalidate(  _In_ const ::VolumeId   volumeid,
                                             _In_ const ::FileId     fileid,
@@ -106,23 +112,9 @@ namespace Internal
                 }
 
                 template< class TM, class TN >
-                inline ERR CCacheWrapper<TM, TN>::ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType )
+                inline BOOL CCacheWrapper<TM, TN>::FEnabled()
                 {
-                    ERR     err         = JET_errSuccess;
-                    Guid    cacheType   = Guid::Empty;
-
-                    ExCall( cacheType = I()->GetCacheType() );
-
-                    array<BYTE>^ cacheTypeBytes = cacheType.ToByteArray();
-                    pin_ptr<BYTE> cacheTypeBytesT = &cacheTypeBytes[ 0 ];
-                    UtilMemCpy( rgbCacheType, cacheTypeBytesT, cbGuid );
-
-                HandleError:
-                    if ( err < JET_errSuccess )
-                    {
-                        memset( rgbCacheType, 0, cbGuid );
-                    }
-                    return err;
+                    return I()->IsEnabled() ? fTrue : fFalse;
                 }
 
                 template< class TM, class TN >
@@ -179,6 +171,29 @@ namespace Internal
                     ERR err = JET_errSuccess;
 
                     ExCall( I()->Flush( (VolumeId)volumeid, (FileId)fileid, (FileSerial)fileserial ) );
+
+                HandleError:
+                    return err;
+                }
+
+                template< class TM, class TN >
+                inline ERR CCacheWrapper<TM, TN>::ErrDestage(   _In_        const ::VolumeId                    volumeid,
+                                                                _In_        const ::FileId                      fileid,
+                                                                _In_        const ::FileSerial                  fileserial,
+                                                                _In_opt_    const ::ICache::PfnDestageStatus    pfnDestageStatus,
+                                                                _In_opt_    const DWORD_PTR                     keyDestageStatus )
+                {
+                    ERR             err             = JET_errSuccess;
+                    DestageStatus^  destageStatus   = pfnDestageStatus ?
+                                                        gcnew DestageStatus( pfnDestageStatus, keyDestageStatus ) :
+                                                        nullptr;
+
+                    ExCall( I()->Destage(   (VolumeId)volumeid,
+                                            (FileId)fileid,
+                                            (FileSerial)fileserial,
+                                            pfnDestageStatus ?
+                                                gcnew Internal::Ese::BlockCache::Interop::ICache::DestageStatus( destageStatus, &DestageStatus::DestageStatus_ ) :
+                                                nullptr ) );
 
                 HandleError:
                     return err;

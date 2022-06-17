@@ -35,6 +35,15 @@ namespace Internal
                     /// <param name="absPathCachedFile>The key path for the caching file.</param>
                     /// <returns>A Cache Configuration.</returns>
                     ICacheConfiguration^ CacheConfiguration( String^ keyPathCachingFile );
+
+                    /// <summary>
+                    /// Indicates if detach is enabled.
+                    /// </summary>
+                    /// <remarks>
+                    /// This is what prevents code that isn't block cache aware of detaching cached files on open.
+                    /// </remarks>
+                    /// <returns>True if detach is enabled.</returns>
+                    bool IsDetachEnabled();
                 };
             }
         }

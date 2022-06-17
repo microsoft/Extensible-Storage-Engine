@@ -543,6 +543,33 @@ namespace Internal
                             delete pslotst;
                             throw EseException( err );
                         }
+
+                        virtual void DetachFile( String^ path, IBlockCacheFactory::DetachFileStatus^ status )
+                        {
+                            ERR                         err                     = JET_errSuccess;
+                            DetachFileStatusInverse^    detachFileStatusInverse = nullptr;
+
+                            if ( status != nullptr )
+                            {
+                                detachFileStatusInverse = gcnew DetachFileStatusInverse( status );
+                            }
+
+                            pin_ptr<const Char> wszPath = PtrToStringChars( path );
+                            Call( Pi->ErrDetachFile(    (const WCHAR*)wszPath,
+                                                        detachFileStatusInverse == nullptr ?
+                                                            NULL :
+                                                            detachFileStatusInverse->PfnDetachFileStatus,
+                                                        detachFileStatusInverse == nullptr ?
+                                                            NULL :
+                                                            detachFileStatusInverse->KeyDetachFileStatus ) );
+
+                        HandleError:
+                            delete detachFileStatusInverse;
+                            if ( err < JET_errSuccess )
+                            {
+                                throw EseException( err );
+                            }
+                        }
                 };
             }
         }

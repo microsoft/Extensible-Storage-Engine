@@ -148,9 +148,12 @@ class CHashedLRUKCachedFileTableEntry  //  cfte
 
                 COffsets Offsets() const override { return m_offsets; }
 
+                static SIZE_T OffsetOfILE() { return OffsetOf( CIORangeLock, m_ile ); }
+
             private:
 
-                const COffsets m_offsets;
+                const COffsets                                              m_offsets;
+                typename CInvasiveList<CIORangeLock, OffsetOfILE>::CElement m_ile;
         };
 
     protected:

@@ -36,6 +36,11 @@ namespace Internal
                             return this->target->CacheConfiguration( keyPathCachingFile );
                         }
 
+                        virtual bool IsDetachEnabled()
+                        {
+                            return this->target->IsDetachEnabled();
+                        }
+
                     private:
 
                         IBlockCacheConfiguration^ target;
