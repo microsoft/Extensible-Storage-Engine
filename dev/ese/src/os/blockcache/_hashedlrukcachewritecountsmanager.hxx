@@ -94,7 +94,7 @@ INLINE ERR TCachedBlockWriteCountsManager<I>::ErrLoad()
 
     //  cache all sets of write counts
 
-    Alloc( rgcbwcs = (CCachedBlockWriteCounts*)PvOSMemoryPageAlloc( m_cb, NULL ) );
+    Alloc( rgcbwcs = (CCachedBlockWriteCounts*)PvOSMemoryPageAlloc( (size_t) m_cb, NULL ) );
     Call( m_pff->ErrIORead( *tcScope, m_ib, (DWORD)m_cb, (BYTE*)rgcbwcs, qosIONormal ) );
 
     //  verify each set of write counts and capture the most recent valid copy
@@ -173,7 +173,7 @@ INLINE ERR TCachedBlockWriteCountsManager<I>::ErrGetWriteCount( _In_    const QW
                                                                 _Out_   CachedBlockWriteCount* const pcbwc )
 {
     ERR             err     = JET_errSuccess;
-    const size_t    icbwcs  = icbwc / CCachedBlockWriteCounts::Ccbwc();
+    const size_t    icbwcs  = (size_t)( icbwc / CCachedBlockWriteCounts::Ccbwc() );
     const size_t    icbwcT  = icbwc % CCachedBlockWriteCounts::Ccbwc();
 
     *pcbwc = cbwcNeverWritten;
@@ -202,7 +202,7 @@ INLINE ERR TCachedBlockWriteCountsManager<I>::ErrSetWriteCount( _In_ const QWORD
                                                                 _In_ const CachedBlockWriteCount    cbwc )
 {
     ERR             err     = JET_errSuccess;
-    const size_t    icbwcs  = icbwc / CCachedBlockWriteCounts::Ccbwc();
+    const size_t    icbwcs  = (size_t)( icbwc / CCachedBlockWriteCounts::Ccbwc() );
     const size_t    icbwcT  = icbwc % CCachedBlockWriteCounts::Ccbwc();
 
     if ( icbwcs >= m_ccbwcs )
@@ -301,9 +301,9 @@ INLINE TCachedBlockWriteCountsManager<I>::TCachedBlockWriteCountsManager(   _In_
     :   m_pff( pff ),
         m_ib( ib ),
         m_cb( cb ),
-        m_ccbwcs( ccbwcs ? ccbwcs : m_cb / sizeof( CCachedBlockWriteCounts ) ),
+        m_ccbwcs( (size_t)( ccbwcs ? ccbwcs : m_cb / sizeof( CCachedBlockWriteCounts ) ) ),
         m_cbWriteSet( m_ccbwcs * sizeof( CCachedBlockWriteCounts ) ),
-        m_cWriteSet( cb / m_cbWriteSet ),
+        m_cWriteSet( (size_t)( cb / m_cbWriteSet ) ),
         m_iWriteSet( 0 ),
         m_cbwcWriteSet( cbwcUnknown ),
         m_dwUniqueIdWriteSet( 0 ),

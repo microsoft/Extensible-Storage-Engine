@@ -57,6 +57,11 @@ typedef INT_PTR   (*PFN)();
         inline ENUMTYPE operator ~ (ENUMTYPE a) { return ENUMTYPE(~((INT)a)); }                                     \
     }      
 
+#ifdef ESENT
+#ifndef _countof
+#define _countof(rg)        ( sizeof(rg) / sizeof(rg[0]) )
+#endif
+#endif
 
 // From string.hxx
 #ifndef OSStrCbCopyW  // We might have already picked this one up.

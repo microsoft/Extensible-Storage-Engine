@@ -1101,7 +1101,7 @@ class THashedLRUKCache
                                             OSFormat( m_slot ) ) );
 
                     Call( m_pcbs->ErrReadCluster(   m_slot,
-                                                    m_offsets.Cb(), 
+                                                    (size_t)( m_offsets.Cb() ), 
                                                     m_rgbData, 
                                                     ClusterReadComplete_, 
                                                     DWORD_PTR( this ),
@@ -1126,7 +1126,7 @@ class THashedLRUKCache
 
                     //  verify the read
 
-                    m_errVerify = m_pcbs->ErrVerifyCluster( m_slot, m_offsets.Cb(), m_rgbData );
+                    m_errVerify = m_pcbs->ErrVerifyCluster( m_slot, (size_t)m_offsets.Cb(), m_rgbData );
                     if ( m_errVerify < JET_errSuccess )
                     {
                         m_errVerify = m_pc->ErrUnexpectedDataReadFailure(   m_pcfte,
@@ -3691,7 +3691,7 @@ class THashedLRUKCache
                     _In_ CSlabWriteBack* const      pswb,
                     _In_ ICachedBlockSlab* const    pcbs,
                     _In_ const BOOL                 fReleaseSlabOnSave );
-        static INT CompareIbSlab( _In_ const QWORD* const pibSlab1, _In_ const QWORD* const pibSlab2 )
+        static INT __cdecl CompareIbSlab( _In_ const QWORD* const pibSlab1, _In_ const QWORD* const pibSlab2 )
         {
             if ( *pibSlab1 > * pibSlab2 )
             {
@@ -4676,7 +4676,7 @@ ERR THashedLRUKCache<I>::ErrInvalidate( _In_ const VolumeId     volumeid,
     //  relationship between the cached blocks and the slabs
 
     cSlab = m_pch->CbChunkHash() / cbSlab;
-    cSlabBitmap = roundup( cSlab, CHAR_BIT );
+    cSlabBitmap = roundup( (size_t)cSlab, CHAR_BIT );
     cbSlabBitmap = (size_t)CbFromCbit( cSlabBitmap );
     Alloc( rgbSlabBitmap = new BYTE[ cbSlabBitmap ] );
     Alloc( pbmSlab = new CFixedBitmap( rgbSlabBitmap, cbSlabBitmap ) );
@@ -5345,7 +5345,7 @@ ERR THashedLRUKCache<I>::ErrInit()
 
     //  save our initialized resources
 
-    m_ccrefJournalSlab = m_pch->CbChunkJournal() / CbChunkPerSlab();
+    m_ccrefJournalSlab = (size_t)( m_pch->CbChunkJournal() / CbChunkPerSlab() );
     Alloc( (void*)( m_rgcrefJournalSlab = new volatile int[ m_ccrefJournalSlab ] ) );
     for ( size_t icrefJournalSlab = 0; icrefJournalSlab < m_ccrefJournalSlab; icrefJournalSlab++ )
     {
@@ -5379,7 +5379,7 @@ ERR THashedLRUKCache<I>::ErrMountJournal( _In_ CHashedLRUKCacheHeader* const pch
 {
     ERR                             err             = JET_errSuccess;
     IJournalSegmentManager*         pjsm            = NULL;
-    const size_t                    cbJournalCache  = Pcconfig()->CbJournalSegmentsMaximumCacheSize();
+    const size_t                    cbJournalCache  = (size_t)Pcconfig()->CbJournalSegmentsMaximumCacheSize();
     IJournal*                       pj              = NULL;
 
     *ppj = NULL;
@@ -6216,8 +6216,8 @@ template<class I>
 void THashedLRUKCache<I>::PerformOpportunisticSlabWriteBacks()
 {
     ERR                     err                     = JET_errSuccess;
-    const size_t            cbSlabCacheMax          = Pcconfig()->CbSlabMaximumCacheSize();
-    const size_t            cbSlab                  = CbChunkPerSlab();
+    const size_t            cbSlabCacheMax          = (size_t)( Pcconfig()->CbSlabMaximumCacheSize() );
+    const size_t            cbSlab                  = (size_t)CbChunkPerSlab();
     const size_t            cSlabCacheMax           = cbSlabCacheMax / cbSlab;
     JournalPosition         jposReplay              = jposInvalid;
     JournalPosition         jposFull                = jposInvalid;
@@ -8427,7 +8427,7 @@ HandleError:
 template<class I>
 size_t THashedLRUKCache<I>::IcrefJournalSlab( _In_ const QWORD ibSlab )
 {
-    return ( ibSlab - m_pch->IbChunkJournal() ) / CbChunkPerSlab();
+    return (size_t)( ( ibSlab - m_pch->IbChunkJournal() ) / CbChunkPerSlab() );
 }
 
 template<class I>
