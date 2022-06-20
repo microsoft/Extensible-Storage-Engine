@@ -3107,7 +3107,7 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
 
     //  read the data to be displaced by the cached file header, if any
 
-    Alloc( pvData = PvOSMemoryPageAlloc( m_offsetsCachedFileHeader.Cb(), NULL ) );
+    Alloc( pvData = PvOSMemoryPageAlloc( (size_t)( m_offsetsCachedFileHeader.Cb() ), NULL ) );
     if ( cbSize > 0 )
     {
         Call( ErrRead(  *tcScope, 
@@ -3154,7 +3154,7 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
     //  we will remove the ability of the cache to open this already open file for write through / write back.  so we 
     //  are not at risk of writing this stale data back to the file
 
-    memset( pvData, 0, m_offsetsCachedFileHeader.Cb() );
+    memset( pvData, 0, (size_t)( m_offsetsCachedFileHeader.Cb() ) );
     UtilMemCpy( pvData, pcfh, sizeof( *pcfh ) );
 
     Call( ErrWrite( *tcScope, 

@@ -2304,7 +2304,7 @@ LOCAL ERR ErrLGRIMacroClearRedoMapDbtimeRevert( PIB* const ppib, const DBTIME db
     {
         size_t  cfmppgnofreed = prgfmppgnoFreed->Size();
 
-        for ( int i = 0; i < cfmppgnofreed; ++i )
+        for ( size_t i = 0; i < cfmppgnofreed; ++i )
         {
             CFMPPage fmppage = prgfmppgnoFreed->Entry( i );
 

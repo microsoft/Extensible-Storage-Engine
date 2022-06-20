@@ -347,7 +347,7 @@ class TCachedBlockSlab  //  cbs
 
             if ( err >= JET_errSuccess )
             {
-                const size_t                icbc    = ( ibOffset - m_ibSlab ) / sizeof( CCachedBlockChunk );
+                const size_t                icbc    = (size_t)( ( ibOffset - m_ibSlab ) / sizeof( CCachedBlockChunk ) );
                 CCachedBlockChunk* const    pcbc    = Pcbc( icbc );
 
                 Call( m_pcbwcm->ErrSetWriteCount( m_icbwcBase + icbc, pcbc->Cbwc() ) );
@@ -1630,7 +1630,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrInit()
 
     //  read in all the cached block chunks in the slab
 
-    Alloc( m_rgcbc = (CCachedBlockChunk*)PvOSMemoryPageAlloc( m_cbSlab, NULL ) );
+    Alloc( m_rgcbc = (CCachedBlockChunk*)PvOSMemoryPageAlloc( (size_t)m_cbSlab, NULL ) );
     Alloc( m_rgerrChunk = new ERR[ m_ccbc ] );
     errRead = m_pff->ErrIORead( *tcScope, m_ibSlab, (DWORD)m_cbSlab, (BYTE*)m_rgcbc, qosIONormal );
     Call( ErrIgnoreVerificationErrors( errRead ) );
@@ -3019,7 +3019,7 @@ class CCachedBlockSlab  //  cbsm
                             _Inout_ CCachedBlockSlab** const                ppcbs )
         {
             ERR                 err     = JET_errSuccess;
-            const size_t        ccbc    = cbSlab / sizeof( CCachedBlockChunk );
+            const size_t        ccbc    = (size_t)( cbSlab / sizeof( CCachedBlockChunk ) );
             CCachedBlockSlab*   pcbs    = NULL;
             ERR                 errSlab = JET_errSuccess;
 
