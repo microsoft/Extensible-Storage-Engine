@@ -92,6 +92,7 @@ class TFileFilter  //  ff
     public:  //  IFileAPI
 
         ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr ) override;
+        void SetNoFlushNeeded() override;
 
         ERR ErrSetSize( _In_ const TraceContext&    tc,
                         _In_ const QWORD            cbSize,
@@ -131,6 +132,8 @@ class TFileFilter  //  ff
         ERR ErrIOIssue() override;
 
         void RegisterIFilePerfAPI( _In_ IFilePerfAPI* const pfpapi ) override;
+
+        LONG64 CioNonFlushed() const override;
 
     public:  //  IFileFilter
 
@@ -463,7 +466,8 @@ class TFileFilter  //  ff
                             _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
                             _Inout_                 CMeteredSection::Group* const   pgroup,
                             _Inout_                 CSemaphore** const              ppsem );
-        ERR ErrWriteThrough(    _In_                    const TraceContext&             tc,
+        ERR ErrWriteThrough(    _In_                    const IFileFilter::IOMode       iom,
+                                _In_                    const TraceContext&             tc,
                                 _In_                    const QWORD                     ibOffset,
                                 _In_                    const DWORD                     cbData,
                                 _In_reads_( cbData )    const BYTE* const               pbData,
@@ -485,7 +489,8 @@ class TFileFilter  //  ff
                             _In_opt_                const DWORD_PTR                 keyIOComplete,
                             _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
                             _In_                    CWriteBack* const               pwriteback );
-        ERR ErrWriteCommon( _In_                    const TraceContext&             tc,
+        ERR ErrWriteCommon( _In_                    const IFileFilter::IOMode       iom,
+                            _In_                    const TraceContext&             tc,
                             _In_                    const QWORD                     ibOffset,
                             _In_                    const DWORD                     cbData,
                             _In_reads_( cbData )    const BYTE* const               pbData,
@@ -2015,6 +2020,8 @@ class TFileFilter  //  ff
         volatile int                                                m_cCacheWriteBackForIssue;
         CInitOnceAttach                                             m_initOnceAttach;
         CSemaphore                                                  m_semCachedFileHeader;
+        volatile LONG64                                             m_cioUnflushed;
+        volatile LONG64                                             m_cioFlushing;
 
     private:
 
@@ -2083,6 +2090,7 @@ class TFileFilter  //  ff
 
                 CIOComplete(    _In_                    const BOOL                      fIsHeapAlloc,
                                 _In_                    TFileFilter<I>* const           pff,
+                                _In_                    const IFileFilter::IOMode       iom,
                                 _In_                    const BOOL                      fWrite,
                                 _In_                    const OSFILEQOS                 grbitQOS,
                                 _Inout_opt_             CMeteredSection::Group* const   pgroupPendingWriteBacks,
@@ -2104,6 +2112,7 @@ class TFileFilter  //  ff
                                                         pfnIOHandoff,
                                                         keyIOComplete ),
                         m_pff( pff ),
+                        m_iom( iom ),
                         m_fAsync( pfnIOComplete != NULL ),
                         m_fWrite( fWrite ),
                         m_grbitQOS( grbitQOS ),
@@ -2225,6 +2234,13 @@ class TFileFilter  //  ff
                                     _In_ const FullTraceContext&    tc,
                                     _In_ const OSFILEQOS            grbitQOS )
                 {
+                    //  note any unflushed async engine write
+                    
+                    if ( m_fAsync && m_iom == iomEngine && m_fWrite )
+                    {
+                        AtomicAdd( (QWORD*)&m_pff->m_cioUnflushed, 1 );
+                    }
+                    
                     //  pass on the return signals from the lower layer
 
                     OSFILEQOS grbitQOSOutput = m_grbitQOS & qosIOInMask;
@@ -2258,17 +2274,18 @@ class TFileFilter  //  ff
 
             private:
 
-                TFileFilter<I>* const   m_pff;
-                const BOOL              m_fAsync;
-                const BOOL              m_fWrite;
-                const OSFILEQOS         m_grbitQOS;
-                CMeteredSection::Group  m_groupPendingWriteBacks;
-                CSemaphore*             m_psemCachedFileHeader;
-                CWriteBack* const       m_pwriteback;
-                BOOL                    m_fReleaseWriteback;
-                BOOL                    m_fThrottleReleaser;
-                volatile BOOL           m_fReleaseResources;
-                CIORequestPending       m_iorequestpending;
+                TFileFilter<I>* const       m_pff;
+                const IFileFilter::IOMode   m_iom;
+                const BOOL                  m_fAsync;
+                const BOOL                  m_fWrite;
+                const OSFILEQOS             m_grbitQOS;
+                CMeteredSection::Group      m_groupPendingWriteBacks;
+                CSemaphore*                 m_psemCachedFileHeader;
+                CWriteBack* const           m_pwriteback;
+                BOOL                        m_fReleaseWriteback;
+                BOOL                        m_fThrottleReleaser;
+                volatile BOOL               m_fReleaseResources;
+                CIORequestPending           m_iorequestpending;
         };
 };
 
@@ -2310,7 +2327,9 @@ TFileFilter<I>::TFileFilter(    _Inout_     IFileAPI** const                    
         m_semRequestWriteBacks( CSyncBasicInfo( "TFileFilter<I>::m_semRequestWriteBacks" ) ),
         m_cCacheWriteForFlush( 0 ),
         m_cCacheWriteBackForIssue( 0 ),
-        m_semCachedFileHeader( CSyncBasicInfo( "TFileFilter<I>::m_semCachedFileHeader" ) )
+        m_semCachedFileHeader( CSyncBasicInfo( "TFileFilter<I>::m_semCachedFileHeader" ) ),
+        m_cioUnflushed( 0 ),
+        m_cioFlushing( 0 )
 {
     SetCacheParameters();
     m_rgparrayPendingWriteBacks[ 0 ] = &m_rgarrayOffsets[ 0 ];
@@ -2363,7 +2382,28 @@ ERR TFileFilter<I>::ErrGetPhysicalId(   _Out_ VolumeId* const   pvolumeid,
 template< class I >
 ERR TFileFilter<I>::ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr )
 {
-    return ErrFlush( iofr, iomEngine );
+    ERR err = JET_errSuccess;
+
+    const LONG64 ciosDelta = AtomicExchange( &m_cioUnflushed, 0 );
+    AtomicAdd( (QWORD*)&m_cioFlushing, ciosDelta );
+
+    Call( ErrFlush( iofr, iomEngine ) );
+
+HandleError:
+    if ( err < JET_errSuccess )
+    {
+        AtomicAdd( (QWORD*)&m_cioUnflushed, ciosDelta );
+    }
+    AtomicAdd( (QWORD*)&m_cioFlushing, -ciosDelta );
+    return err;
+}
+
+template< class I >
+void TFileFilter<I>::SetNoFlushNeeded()
+{
+    AtomicExchange( &m_cioUnflushed, 0 );
+
+    TFileWrapper<I>::SetNoFlushNeeded();
 }
 
 template< class I >
@@ -2574,6 +2614,12 @@ void TFileFilter<I>::RegisterIFilePerfAPI( _In_ IFilePerfAPI* const pfpapi )
 }
 
 template< class I >
+LONG64 TFileFilter<I>::CioNonFlushed() const
+{
+    return AtomicRead( (QWORD*)&m_cioUnflushed ) + AtomicRead( (QWORD*)&m_cioFlushing );
+}
+
+template< class I >
 ERR TFileFilter<I>::ErrRead(    _In_                    const TraceContext&             tc,
                                 _In_                    const QWORD                     ibOffset,
                                 _In_                    const DWORD                     cbData,
@@ -2686,7 +2732,7 @@ ERR TFileFilter<I>::ErrWrite(   _In_                    const TraceContext&     
     else if ( iom == iomCacheWriteThrough )
     {
         Call( ErrVerifyAccess( offsets ) );
-        Call( ErrWriteThrough( tc, ibOffset, cbData, pbData, grbitQOS, grbitQOS, grbitQOS, pfnIOComplete, keyIOComplete, pfnIOHandoff, &group, &psem, NULL ) );
+        Call( ErrWriteThrough( iomCacheWriteThrough, tc, ibOffset, cbData, pbData, grbitQOS, grbitQOS, grbitQOS, pfnIOComplete, keyIOComplete, pfnIOHandoff, &group, &psem, NULL ) );
     }
     else if ( iom == iomCacheWriteBack )
     {
@@ -3699,6 +3745,7 @@ ERR TFileFilter<I>::ErrCacheRead(   _In_                    const TraceContext& 
         {
             Alloc( piocomplete = new CIOComplete(   fTrue,
                                                     this,
+                                                    iomEngine,
                                                     fFalse, 
                                                     grbitQOSOutput,
                                                     pgroup, 
@@ -3841,6 +3888,7 @@ ERR TFileFilter<I>::ErrCacheMiss(   _In_                    const TraceContext& 
         Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this,
+                            iomCacheMiss,
                             fFalse, 
                             grbitQOSOutputActual,
                             pgroup, 
@@ -3954,6 +4002,7 @@ ERR TFileFilter<I>::ErrCacheWrite(  _In_                    const TraceContext& 
         {
             Alloc( piocomplete = new CIOComplete(   fTrue,
                                                     this, 
+                                                    iomEngine,
                                                     fTrue,
                                                     grbitQOSOutput,
                                                     pgroup, 
@@ -4012,7 +4061,8 @@ ERR TFileFilter<I>::ErrCacheWrite(  _In_                    const TraceContext& 
             m_pctm->Write( filenumber, blocknumber, true );
         }
 
-        err = ErrWriteThrough(  tc,
+        err = ErrWriteThrough(  iomEngine,
+                                tc,
                                 ibOffset,
                                 cbData,
                                 pbData,
@@ -4042,7 +4092,8 @@ HandleError:
 }
 
 template< class I >
-ERR TFileFilter<I>::ErrWriteThrough(    _In_                    const TraceContext&             tc,
+ERR TFileFilter<I>::ErrWriteThrough(    _In_                    const IFileFilter::IOMode       iom,
+                                        _In_                    const TraceContext&             tc,
                                         _In_                    const QWORD                     ibOffset,
                                         _In_                    const DWORD                     cbData,
                                         _In_reads_( cbData )    const BYTE* const               pbData,
@@ -4056,7 +4107,7 @@ ERR TFileFilter<I>::ErrWriteThrough(    _In_                    const TraceConte
                                         _Inout_                 CSemaphore** const              ppsem,
                                         _Inout_opt_             BOOL* const                     pfThrottleReleaser )
 {
-    return ErrWriteCommon( tc, ibOffset, cbData, pbData, grbitQOS, grbitQOSInput, grbitQOSOutput, pfnIOComplete, keyIOComplete, pfnIOHandoff, pgroup, ppsem, NULL, pfThrottleReleaser );
+    return ErrWriteCommon( iom, tc, ibOffset, cbData, pbData, grbitQOS, grbitQOSInput, grbitQOSOutput, pfnIOComplete, keyIOComplete, pfnIOHandoff, pgroup, ppsem, NULL, pfThrottleReleaser );
 }
 
 template< class I >
@@ -4070,11 +4121,12 @@ ERR TFileFilter<I>::ErrWriteBack(   _In_                    const TraceContext& 
                                     _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
                                     _In_                    CWriteBack* const               pwriteback )
 {
-    return ErrWriteCommon( tc, ibOffset, cbData, pbData, grbitQOS, grbitQOS, grbitQOS, pfnIOComplete, keyIOComplete, pfnIOHandoff, NULL, NULL, pwriteback, NULL );
+    return ErrWriteCommon( iomCacheWriteBack, tc, ibOffset, cbData, pbData, grbitQOS, grbitQOS, grbitQOS, pfnIOComplete, keyIOComplete, pfnIOHandoff, NULL, NULL, pwriteback, NULL );
 }
 
 template< class I >
-ERR TFileFilter<I>::ErrWriteCommon( _In_                    const TraceContext&             tc,
+ERR TFileFilter<I>::ErrWriteCommon( _In_                    const IFileFilter::IOMode       iom,
+                                    _In_                    const TraceContext&             tc,
                                     _In_                    const QWORD                     ibOffset,
                                     _In_                    const DWORD                     cbData,
                                     _In_reads_( cbData )    const BYTE* const               pbData,
@@ -4106,6 +4158,7 @@ ERR TFileFilter<I>::ErrWriteCommon( _In_                    const TraceContext& 
         Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this, 
+                            iom,
                             fTrue,
                             grbitQOSOutput,
                             pgroup, 
@@ -4129,6 +4182,13 @@ ERR TFileFilter<I>::ErrWriteCommon( _In_                    const TraceContext& 
                     pfnIOComplete ? CIOComplete::IOComplete_ : NULL,
                     DWORD_PTR( piocomplete ),
                     piocomplete ? CIOComplete::IOHandoff_ : NULL ) );
+
+    //  note any unflushed sync engine write
+
+    if ( !pfnIOComplete && iom == iomEngine )
+    {
+        AtomicAdd( (QWORD*)&m_cioUnflushed, 1 );
+    }
 
 HandleError:
     if ( piocomplete )
