@@ -74,10 +74,10 @@ class TFileIdentification  //  fident
 
     private:
 
-        ERR ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
-                            _Out_   HANDLE* const       phFile,
-                            _Out_   VolumeId* const     pvolumeid,
-                            _Out_   FileId* const       pfileid );
+        ERR ErrGetFileId(   _In_z_      const WCHAR* const  wszPath,
+                            _Out_       HANDLE* const       phFile,
+                            _Out_       VolumeId* const     pvolumeid,
+                            _Out_opt_   FileId* const       pfileid     = NULL );
 
         ERR ErrMakeKeyPath( _In_z_                                                  WCHAR* const    wszAnyAbsPath,
                             _Out_bytecap_c_( IFileIdentification::cbKeyPathMax )    WCHAR* const    wszKeyPath );
@@ -157,7 +157,6 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
     WCHAR                       wchTargetSave                               = 0;
     HANDLE                      hContainer                                  = NULL;
     VolumeId                    volumeid                                    = volumeidInvalid;
-    FileId                      fileid                                      = fileidInvalid;
     CVolumeHandleCacheEntry*    pvhce                                       = NULL;
     const DWORD                 cwchFinalPathMax                            = IFileSystemAPI::cchPathMax;
     WCHAR                       wszFinalPath[ cwchFinalPathMax ]            = { 0 };
@@ -173,7 +172,7 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
     cwchContainerPath = GetFullPathNameW( wszPath, cwchContainerPathMax, wszContainerPath, &wszFileName );
     if ( cwchContainerPath == 0 )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
     if ( cwchContainerPath >= cwchContainerPathMax )
     {
@@ -209,13 +208,15 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
 
     //  get the volume id of the container which must exist.  the target if any doesn't need to exist
 
-    err = ErrGetFileId( wszContainerPath, &hContainer, &volumeid, &fileid );
+    err = ErrGetFileId( wszContainerPath, &hContainer, &volumeid );
     err = err == JET_errFileNotFound ? ErrERRCheck( JET_errInvalidPath ) : err;
     Call( err );
 
-    //  get the volume handle for the volume id
+    //  try to get the volume handle for the volume id. this will only work if it is a local volume
 
-    Call( ErrOpenVolumeById( volumeid, &pvhce ) );
+    err = ErrOpenVolumeById( volumeid, &pvhce );
+    err = err == JET_errInvalidPath ? JET_errSuccess : err;
+    Call( err );
 
     //  generate an absolute path to the target using the volume guid root path to remove ambiguity
     //  created by possible multiple paths to the same volume
@@ -223,14 +224,30 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
     cwchFinalPath = GetFinalPathNameByHandleW( hContainer, wszFinalPath, cwchFinalPathMax, VOLUME_NAME_NONE );
     if ( cwchFinalPath == 0 )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
     if ( cwchFinalPath >= cwchFinalPathMax )
     {
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
     }
 
-    Call( ErrOSStrCbCopyW( wszVolumePath, cbVolumePathMax, pvhce->WszPath() ) );
+    if ( pvhce )
+    {
+        Call( ErrOSStrCbCopyW( wszVolumePath, cbVolumePathMax, pvhce->WszPath() ) );
+    }
+    else
+    {
+        if ( !GetVolumePathNameW( wszContainerPath, wszVolumePath, cwchVolumePathMax ) )
+        {
+            Error( ErrGetLastError() );
+        }
+
+        const size_t cwchVolumePath = wcslen( wszVolumePath );
+        if ( wszVolumePath[ cwchVolumePath - 1 ] == L'\\' )
+        {
+            wszVolumePath[ cwchVolumePath - 1 ] = 0;
+        }
+    }
     Call( ErrOSStrCbAppendW( wszVolumePath, cbVolumePathMax, wszFinalPath ) );
     Call( ErrOSStrCbAppendW( wszVolumePath, cbVolumePathMax, L"\\" ) );
     if ( wszTarget )
@@ -308,14 +325,14 @@ ERR TFileIdentification<I>::ErrGetFilePathById( _In_                            
                             NULL,
                             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS );
 
-    if ( !hFile || hFile == INVALID_HANDLE_VALUE )
+    if ( hFile == NULL || hFile == INVALID_HANDLE_VALUE )
     {
         if ( GetLastError() == ERROR_INVALID_PARAMETER )
         {
             Error( ErrERRCheck( JET_errFileNotFound ) );
         }
 
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
 
     //  compute an absolute path to the file.  there may be more than one.  also remove the "\\?\" prefix
@@ -323,7 +340,7 @@ ERR TFileIdentification<I>::ErrGetFilePathById( _In_                            
     cwchFinalPath = GetFinalPathNameByHandleW( hFile, wszFinalPath, cwchFinalPathMax, VOLUME_NAME_DOS );
     if ( cwchFinalPath == 0 )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
     if ( cwchFinalPath >= cwchFinalPathMax )
     {
@@ -338,7 +355,7 @@ ERR TFileIdentification<I>::ErrGetFilePathById( _In_                            
     cwchFinalPath = GetFinalPathNameByHandleW( hFile, wszFinalPath, cwchFinalPathMax, VOLUME_NAME_NONE );
     if ( cwchFinalPath == 0 )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
     if ( cwchFinalPath >= cwchFinalPathMax )
     {
@@ -366,22 +383,29 @@ HandleError:
 }
 
 template< class I >
-ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
-                                            _Out_   HANDLE* const       phFile,
-                                            _Out_   VolumeId* const     pvolumeid,
-                                            _Out_   FileId* const       pfileid )
+ERR TFileIdentification<I>::ErrGetFileId(   _In_z_      const WCHAR* const  wszPath,
+                                            _Out_       HANDLE* const       phFile,
+                                            _Out_       VolumeId* const     pvolumeid,
+                                            _Out_opt_   FileId* const       pfileid )
 {
-    ERR             err         = JET_errSuccess;
-    BOOL            fSuccess    = FALSE;
-    FILE_ID_INFO    fileIdInfo  = { 0 };
+    ERR                         err         = JET_errSuccess;
+    HANDLE                      hObject     = NULL;
+    BOOL                        fSuccess    = FALSE;
+    FILE_ID_INFO                fileIdInfo  = { 0 };
+    VolumeId                    volumeid    = volumeidInvalid;
+    CVolumeHandleCacheEntry*    pvhce       = NULL;
+    FileId                      fileid      = fileidInvalid;
 
     *phFile = NULL;
     *pvolumeid = volumeidInvalid;
-    *pfileid = fileidInvalid;
+    if ( pfileid )
+    {
+        *pfileid = fileidInvalid;
+    }
 
-    //  open the file by path
+    //  open the object by path
 
-    *phFile = CreateFileW(  wszPath,
+    hObject = CreateFileW(  wszPath,
                             0,
                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                             NULL,
@@ -389,50 +413,93 @@ ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
                             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
                             NULL );
 
-    if ( !*phFile || *phFile == INVALID_HANDLE_VALUE )
+    if ( hObject == NULL || hObject == INVALID_HANDLE_VALUE )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
 
     //  get the file id of the opened file
 
-    fSuccess = GetFileInformationByHandleEx(    *phFile,
+    fSuccess = GetFileInformationByHandleEx(    hObject,
                                                 FileIdInfo,
                                                 &fileIdInfo,
                                                 sizeof( fileIdInfo ) );
     if ( !fSuccess )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
 
-    //  return the volume id and file id
+    //  get the volume id
 
-    *pvolumeid = (VolumeId)fileIdInfo.VolumeSerialNumber;
-    *pfileid = *((FileId*)fileIdInfo.FileId.Identifier);
+    volumeid = (VolumeId)fileIdInfo.VolumeSerialNumber;
 
-    //  defend against illegal values for the volumeid and fileid
+    //  defend against illegal values for the volumeid
 
-    if ( *pvolumeid == volumeidInvalid )
+    if ( volumeid == volumeidInvalid )
     {
         Error( ErrBlockCacheInternalError( wszPath, "InvalidVolumeId" ) );
     }
-    if ( *pfileid == fileidInvalid )
+
+    //  try to get the volume handle for the volume id. this will only work if it is a local volume
+
+    err = ErrOpenVolumeById( volumeid, &pvhce );
+    err = err == JET_errInvalidPath ? JET_errSuccess : err;
+    Call( err );
+
+    //  get the file id if requested
+
+    if ( pfileid )
     {
-        Error( ErrBlockCacheInternalError( wszPath, "InvalidFileId" ) );
+        //  if this is a local volume then return a normal file id
+
+        if ( pvhce )
+        {
+            //  extract the file id
+
+            fileid = *( (FileId*)fileIdInfo.FileId.Identifier );
+
+            //  defend against illegal values for the file id
+
+            if ( fileid == fileidInvalid )
+            {
+                Error( ErrBlockCacheInternalError( wszPath, "InvalidFileId" ) );
+            }
+
+            //  defend against truncation of the file id because we cannot handle that
+
+            FILE_ID_128 fileId;
+            memset( fileId.Identifier, 0, _cbrg( fileId.Identifier ) );
+            *( (FileId*)fileId.Identifier ) = fileid;
+            if ( memcmp( fileIdInfo.FileId.Identifier, fileId.Identifier, sizeof( fileId.Identifier ) ) )
+            {
+                Error( ErrBlockCacheInternalError( wszPath, "TruncatedFileId" ) );
+            }
+        }
+
+        //  if this is not a local volume then return an invalid file id to prevent caching
+
+        else
+        {
+            volumeid = volumeidInvalid;
+            fileid = fileidInvalid;
+        }
     }
 
-    //  defend against truncation of the file id because we cannot handle that
+    //  return the object, volume id, and file id
 
-    FILE_ID_128 fileId;
-    memset( fileId.Identifier, 0, _cbrg( fileId.Identifier ) );
-    *((FileId*)fileId.Identifier) = *pfileid;
-    if ( memcmp( fileIdInfo.FileId.Identifier, fileId.Identifier, sizeof( fileId.Identifier) ) )
+    *phFile = hObject;
+    hObject = NULL;
+    *pvolumeid = volumeid;
+    if ( pfileid )
     {
-        Error( ErrBlockCacheInternalError( wszPath, "TruncatedFileId" ) );
+        *pfileid = fileid;
     }
-
 
 HandleError:
+    if ( hObject && hObject != INVALID_HANDLE_VALUE )
+    {
+        CloseHandle( hObject );
+    }
     if ( err < JET_errSuccess )
     {
         if ( *phFile && *phFile != INVALID_HANDLE_VALUE )
@@ -441,7 +508,10 @@ HandleError:
         }
         *phFile = NULL;
         *pvolumeid = volumeidInvalid;
-        *pfileid = fileidInvalid;
+        if ( pfileid )
+        {
+            *pfileid = fileidInvalid;
+        }
     }
     return err;
 }
@@ -469,7 +539,7 @@ ERR TFileIdentification<I>::ErrMakeKeyPath( _In_z_                              
                                     0 );
     if ( cwchKeyPath == 0 )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
     if ( cwchKeyPath > IFileIdentification::cwchKeyPathMax )
     {
@@ -528,9 +598,9 @@ ERR TFileIdentification<I>::ErrOpenVolumeByIdCacheMiss( _In_                cons
 
     hFindVolume = FindFirstVolumeW( wszVolume, cwchVolumeMax );
 
-    if ( !hFindVolume || hFindVolume == INVALID_HANDLE_VALUE )
+    if ( hFindVolume == NULL || hFindVolume == INVALID_HANDLE_VALUE )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
 
     do {
@@ -580,7 +650,7 @@ ERR TFileIdentification<I>::ErrOpenVolumeByIdCacheMiss( _In_                cons
 
     if ( !hVolume || hVolume == INVALID_HANDLE_VALUE )
     {
-        Call( ErrGetLastError() );
+        Error( ErrGetLastError() );
     }
 
     //  return the volume we found
@@ -616,7 +686,14 @@ HandleError:
 template< class I >
 ERR TFileIdentification<I>::ErrGetLastError()
 {
-    return ErrOSErrFromWin32Err( GetLastError(), JET_errDiskIO );
+    ERR err = JET_errSuccess;
+
+    Call( ErrOSErrFromWin32Err( GetLastError(), JET_errDiskIO ) );
+
+    Error( ErrERRCheck( JET_errInternalError ) );
+
+HandleError:
+    return err;
 }
 
 template< class I >
@@ -683,11 +760,11 @@ typename ERR TFileIdentification<I>::ErrAddVolumeByID(  _In_    const VolumeId  
     *ppvhce = pvhceCached;
 
 HandleError:
-    delete pvhceNew;
     if ( !pvhceNew && !pvhceCached )
     {
         CloseHandle( hVolume );
     }
+    delete pvhceNew;
     if ( err < JET_errSuccess )
     {
         delete *ppvhce;
