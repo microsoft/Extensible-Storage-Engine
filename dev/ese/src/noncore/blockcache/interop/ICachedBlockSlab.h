@@ -209,12 +209,12 @@ namespace Internal
                     /// The delegate must return true to continue visiting more slots.
                     /// </remarks>
                     /// <param name="ex">An EsentErrorException or null if the chunk containing the slot is valid.</param>
-                    /// <param name="acceptedSlot">The accepted state of the slot.</param>
+                    /// <param name="acceptedSlotState">The accepted state of the slot.</param>
                     /// <param name="currentSlotState">The current state of the slot.</param>
                     /// <returns>True to continue visiting more slots.</returns>
                     delegate bool VisitSlot(
                         EsentErrorException^ ex,
-                        CachedBlockSlot^ acceptedSlot,
+                        CachedBlockSlotState^ acceptedSlotState,
                         CachedBlockSlotState^ currentSlotState );
 
                     /// <summary>

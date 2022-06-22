@@ -69,20 +69,52 @@ inline USHORT UsBits( const DWORD dw )
     return (USHORT)ret;
 }
 
+#pragma warning (push)
+#pragma warning (disable: 4293)  //  '>>': shift count negative or too big, undefined behavior
+
+template<class T>
+inline T NextPowerOf2( _In_ const T x )
+{
+    C_ASSERT( sizeof( T ) <= 8 );
+
+    T n = x;
+
+    if ( n == 0 )
+    {
+        return 1;
+    }
+
+    n--;
+
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+
+    if ( sizeof( T ) >= 2 )
+    {
+        n |= n >> 8;
+    }
+    if ( sizeof( T ) >= 4 )
+    {
+        n |= n >> 16;
+    }
+    if ( sizeof( T ) >= 8 )
+    {
+        n |= n >> 32;
+    }
+
+    n++;
+
+    //  return -1 on overflow
+
+    return n >= x ? n : ( (T)0 - 1 );
+}
+
+#pragma warning (pop)
+
 inline LONG LNextPowerOf2( LONG l )
 {
-    LONG i = 0;
-
-    if ( !FPowerOf2( lMax / 2 + 1 ) || ( l > lMax / 2 + 1 ) )
-    {
-        return -1;
-    }
-    
-    for ( i = 1; i < l; i += i )
-    {
-    }
-
-    return i;
+    return NextPowerOf2( l );
 }
 
 //  Returns fTrue if ibQuestionable is in the range [ibLow, ibLow+cbRange).

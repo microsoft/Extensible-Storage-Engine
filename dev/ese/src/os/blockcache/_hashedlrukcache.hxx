@@ -617,7 +617,7 @@ class THashedLRUKCache
 
                 ERR ErrVisitSlot_(  _In_ ICachedBlockSlab* const        pcbs,
                                     _In_ const ERR                      errChunk,
-                                    _In_ const CCachedBlockSlot&        slotAccepted,
+                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
                                     _In_ const CCachedBlockSlotState&   slotstCurrent )
                 {
                     ERR     err     = JET_errSuccess;
@@ -652,9 +652,9 @@ class THashedLRUKCache
 
                     if (    m_pc->FHashSlab( ibSlab ) &&
                             slotstCurrent.FSlotUpdated() &&
-                            slotAccepted.FValid() && !slotstCurrent.FValid() )
+                            slotstAccepted.FValid() && !slotstCurrent.FValid() )
                     {
-                        if ( slotAccepted.Clno() == slotstCurrent.Clno() )
+                        if ( slotstAccepted.Clno() == slotstCurrent.Clno() )
                         {
                             Error( m_pc->ErrBlockCacheInternalError( "ClusterMustBeSwappedOnEvictOrInvalidate" ) );
                         }
@@ -662,14 +662,14 @@ class THashedLRUKCache
 
                     //  accumulate any cluster swaps made for this slot
 
-                    if ( slotAccepted.Clno() != slotstCurrent.Clno() )
+                    if ( slotstAccepted.Clno() != slotstCurrent.Clno() )
                     {
                         BOOL fMatched = fFalse;
 
                         for ( int i = 0; !fMatched && i < m_arrayClusterSwap.Size(); i++ )
                         {
                             if (    slotstCurrent.Clno() == m_arrayClusterSwap[ i ].ClnoA() &&
-                                    slotAccepted.Clno() == m_arrayClusterSwap[ i ].ClnoB() )
+                                    slotstAccepted.Clno() == m_arrayClusterSwap[ i ].ClnoB() )
                             {
                                 Call( ErrToErr<CArray<CClusterSwap>>( m_arrayClusterSwap.ErrSetEntry( i, CClusterSwap() ) ) );
                                 fMatched = fTrue;
@@ -679,7 +679,7 @@ class THashedLRUKCache
                         if ( !fMatched )
                         {
                             Call( ErrToErr<CArray<CClusterSwap>>( m_arrayClusterSwap.ErrSetEntry(   m_arrayClusterSwap.Size(),
-                                                                                                    CClusterSwap(   slotAccepted.Clno(),
+                                                                                                    CClusterSwap(   slotstAccepted.Clno(),
                                                                                                                     slotstCurrent.Clno() ) ) ) );
                         }
                     }
@@ -695,14 +695,14 @@ class THashedLRUKCache
 
                 BOOL FVisitSlot(    _In_ ICachedBlockSlab* const        pcbs,
                                     _In_ const ERR                      errChunk,
-                                    _In_ const CCachedBlockSlot&        slotAccepted,
+                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
                                     _In_ const CCachedBlockSlotState&   slotstCurrent )
                 {
                     ERR err = JET_errSuccess;
 
                     //  visit the slot
 
-                    Call( ErrVisitSlot_( pcbs, errChunk, slotAccepted, slotstCurrent ) );
+                    Call( ErrVisitSlot_( pcbs, errChunk, slotstAccepted, slotstCurrent ) );
 
                     //  continue visiting slots if we didn't fail
                     //
@@ -749,7 +749,7 @@ class THashedLRUKCache
                     private:
         
                         static BOOL FVisitSlot_(    _In_ const ERR                      errChunk,
-                                                    _In_ const CCachedBlockSlot&        slotAccepted,
+                                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
                                                     _In_ const CCachedBlockSlotState&   slotstCurrent,
                                                     _In_ const DWORD_PTR                keyVisitSlot )
                         {
@@ -757,7 +757,7 @@ class THashedLRUKCache
                             Unused( pfnVisitSlot );
 
                             CVisitContext* const pvc = (CVisitContext*)keyVisitSlot;
-                            return pvc->m_pusv->FVisitSlot( pvc->m_pcbs, errChunk, slotAccepted, slotstCurrent );
+                            return pvc->m_pusv->FVisitSlot( pvc->m_pcbs, errChunk, slotstAccepted, slotstCurrent );
                         }
 
                     private:
@@ -1671,7 +1671,7 @@ class THashedLRUKCache
                 }
 
                 BOOL FVisitSlot(    _In_ const ERR                      errChunk,
-                                    _In_ const CCachedBlockSlot&        slotAccepted,
+                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
                                     _In_ const CCachedBlockSlotState&   slotstCurrent )
                 {
                     ERR                     err             = JET_errSuccess;
@@ -1741,7 +1741,7 @@ class THashedLRUKCache
                 }
 
                 static BOOL FVisitSlot_(    _In_ const ERR                      errChunk,
-                                            _In_ const CCachedBlockSlot&        slotAccepted,
+                                            _In_ const CCachedBlockSlotState&   slotstAccepted,
                                             _In_ const CCachedBlockSlotState&   slotstCurrent,
                                             _In_ const DWORD_PTR                keyVisitSlot )
                 {
@@ -1749,7 +1749,7 @@ class THashedLRUKCache
                     Unused( pfnVisitSlot );
 
                     CVerifyDestageSlabVisitor* const pvdsv = (CVerifyDestageSlabVisitor*)keyVisitSlot;
-                    return pvdsv->FVisitSlot( errChunk, slotAccepted, slotstCurrent );
+                    return pvdsv->FVisitSlot( errChunk, slotstAccepted, slotstCurrent );
                 }
 
             private:
@@ -2577,7 +2577,7 @@ class THashedLRUKCache
                     private:
 
                         BOOL FVisitSlot(    _In_ const ERR                      errChunk,
-                                            _In_ const CCachedBlockSlot&        slotAccepted,
+                                            _In_ const CCachedBlockSlotState&   slotstAccepted,
                                             _In_ const CCachedBlockSlotState&   slotstCurrent )
                         {
                             m_cbTotal += cbCachedBlock;
@@ -2588,7 +2588,7 @@ class THashedLRUKCache
                         }
 
                         static BOOL FVisitSlot_(    _In_ const ERR                      errChunk,
-                                                    _In_ const CCachedBlockSlot&        slotAccepted,
+                                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
                                                     _In_ const CCachedBlockSlotState&   slotstCurrent,
                                                     _In_ const DWORD_PTR                keyVisitSlot )
                         {
@@ -2596,7 +2596,7 @@ class THashedLRUKCache
                             Unused( pfnVisitSlot );
 
                             CInspectSlabVisitor* const pisv = (CInspectSlabVisitor*)keyVisitSlot;
-                            return pisv->FVisitSlot( errChunk, slotAccepted, slotstCurrent );
+                            return pisv->FVisitSlot( errChunk, slotstAccepted, slotstCurrent );
                         }
 
                     private:
@@ -3448,6 +3448,914 @@ class THashedLRUKCache
                 }
         };
 
+        //  Cached Block Presence Filter
+
+        class CCachedBlockPresenceFilter
+        {
+            public:
+
+                static ERR ErrInit( _In_    THashedLRUKCache<I>* const          pc,
+                                    _Out_   CCachedBlockPresenceFilter** const  ppcbpf )
+                {
+                    ERR                         err                 = JET_errSuccess;
+                    const QWORD                 cbSlab              = pc->CbChunkPerSlab();
+                    const QWORD                 ibSlabMin           = pc->m_pch->IbChunkHash();
+                    const QWORD                 cSlab               = pc->m_pch->CbChunkHash() / cbSlab;
+                    const size_t                cBitmap             = roundup( cSlab, CHAR_BIT );
+                    const size_t                cbBitmap            = (size_t)CbFromCbit( cBitmap );
+                    BYTE*                       rgbBitmap           = NULL;
+                    IBitmapAPI*                 pbmLoaded           = NULL;
+                    LONG*                       rgCount             = NULL;
+                    const QWORD                 cCluster            = pc->m_pch->CbClustersHash() / cbCachedBlock;
+                    const double                dblLoadFactorMax    = 0.94;
+                    const QWORD                 cBucketRaw          = roundup( cCluster, CBucket::C() ) / CBucket::C();
+                    const QWORD                 cBucket             = cBucketRaw < NextPowerOf2( cBucketRaw ) * dblLoadFactorMax ?
+                                                                        NextPowerOf2( (QWORD)( cBucketRaw / dblLoadFactorMax ) ) :
+                                                                        NextPowerOf2( cBucketRaw );
+                    CBucket*                    rgBucket            = NULL;
+                    const QWORD                 cCuckooMax          = min( cBucket, 500 );
+                    const size_t                cStandby            = 1;
+                    DWORD*                      rgdwStandby         = NULL;
+                    CCachedBlockPresenceFilter* pcbpf               = NULL;
+
+                    *ppcbpf = NULL;
+
+                    Alloc( rgbBitmap = new BYTE[ cbBitmap ] );
+                    Alloc( pbmLoaded = new CFixedBitmap( rgbBitmap, cbBitmap ) );
+                    OnDebug( Alloc( rgCount = new LONG[ cSlab ] ) );
+                    if ( rgCount )
+                    {
+                        memset( rgCount, 0, cSlab * sizeof( rgCount[ 0 ] ) );
+                    }
+                    Alloc( rgBucket = new CBucket[ cBucket ] );
+                    Alloc( rgdwStandby = new DWORD[ cStandby ] );
+                    memset( rgdwStandby, 0, cStandby * sizeof( rgdwStandby[ 0 ] ) );
+                    Alloc( pcbpf = new CCachedBlockPresenceFilter(  pc,
+                                                                    ibSlabMin, 
+                                                                    cbSlab, 
+                                                                    &rgbBitmap,
+                                                                    &pbmLoaded,
+                                                                    &rgCount,
+                                                                    cCluster,
+                                                                    cBucket,
+                                                                    &rgBucket,
+                                                                    cCuckooMax,
+                                                                    cStandby,
+                                                                    &rgdwStandby ) );
+
+                    *ppcbpf = pcbpf;
+                    pcbpf = NULL;
+
+                HandleError:
+                    delete pcbpf;
+                    delete[] rgdwStandby;
+                    delete[] rgBucket;
+                    delete[] rgCount;
+                    delete pbmLoaded;
+                    delete[] rgbBitmap;
+                    if ( err < JET_errSuccess )
+                    {
+                        delete *ppcbpf;
+                        *ppcbpf = NULL;
+                    }
+                    return err;
+                }
+
+                ~CCachedBlockPresenceFilter()
+                {
+                    delete[] m_rgdwStandby;
+                    delete[] m_rgBucket;
+                    delete[] m_rgCount;
+                    delete m_pbmLoaded;
+                    delete[] m_rgbBitmap;
+                }
+
+                BOOL FPossiblyContains( _In_ const QWORD ibSlab, _In_ const CCachedBlockId& cbid )
+                {
+                    //  if this slab is out of range then claim we have the cached block.  this will cause us to try to
+                    //  access the slab which will fail
+
+                    if ( !FValidSlab( ibSlab ) )
+                    {
+                        return fTrue;
+                    }
+
+                    //  if the contents of this slab haven't been loaded yet then claim we have the cached block.  this
+                    //  will cause us to access the slab which will then cause us to load the slab's cached blocks
+                    //  which will allow us to make a better decision next time
+
+                    if ( !FSlabLoaded( ibSlab ) )
+                    {
+                        return fTrue;
+                    }
+
+                    //  determine if we probably have this cached block.  false positives are possible.  false
+                    //  false negatives are disallowed
+
+                    return FPossiblyContains( cbid );
+                }
+
+                ERR ErrLoad( _In_ ICachedBlockSlab* const pcbs )
+                {
+                    ERR     err         = JET_errSuccess;
+                    BOOL    fSlabLoaded = fFalse;
+                    BOOL    fLeave      = fFalse;
+                    QWORD   ibSlab      = 0;
+
+                    //  if this is not a valid slab then ignore it
+
+                    if ( !FValidSlab( pcbs ) )
+                    {
+                        Error( JET_errSuccess );
+                    }
+
+                    //  determine if we already loaded the info for this slab.  if we have then don't load it again
+
+                    if ( ErrIsSlabLoaded( pcbs, &fSlabLoaded ) < JET_errSuccess )
+                    {
+                        Error( JET_errSuccess );
+                    }
+
+                    if ( fSlabLoaded )
+                    {
+                        Error( JET_errSuccess );
+                    }
+
+                    //  if this slab contains changes that aren't accepted then ignore it
+
+                    if ( pcbs->FUpdated() )
+                    {
+                        Error( JET_errSuccess );
+                    }
+
+                    //  visit all slots in the slab and load what is cached
+
+                    Call( pcbs->ErrVisitSlots( FLoadSlot_, (DWORD_PTR)this ) );
+
+                    //  mark the slab as loaded
+
+                    m_critPresenceFilterSlabs.Enter();
+                    fLeave = fTrue;
+
+                    Call( pcbs->ErrGetPhysicalId( &ibSlab ) );
+
+                    Call( ErrToErr<IBitmapAPI>( m_pbmLoaded->ErrSet( Islab( ibSlab ), fTrue ) ) );
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s Presence Filter 0x%016I64x SlabLoaded",
+                                            OSFormatFileId( m_pc ),
+                                            ibSlab ) );
+
+                    m_critPresenceFilterSlabs.Leave();
+                    fLeave = fFalse;
+
+                HandleError:
+                    if ( fLeave )
+                    {
+                        m_critPresenceFilterSlabs.Leave();
+                    }
+                    return err;
+                }
+
+                void Update( _In_ ICachedBlockSlab* const pcbs )
+                {
+                    BOOL    fSlabLoaded = fFalse;
+
+                    //  if this is not a valid slab then ignore it
+
+                    if ( !FValidSlab( pcbs ) )
+                    {
+                        return;
+                    }
+
+                    //  determine if we already loaded the info for this slab.  if we have not then ignore it
+
+                    if ( ErrIsSlabLoaded( pcbs, &fSlabLoaded ) < JET_errSuccess )
+                    {
+                        return;
+                    }
+
+                    if ( !fSlabLoaded )
+                    {
+                        return;
+                    }
+
+                    //  visit all slots in the slab and update our caching state
+
+                    CallS( pcbs->ErrVisitSlots( FUpdateSlot_, (DWORD_PTR)this ) );
+                }
+
+            protected:
+
+                class CBucket;
+
+                CCachedBlockPresenceFilter( _In_    THashedLRUKCache<I>* const  pc,
+                                            _In_    const QWORD                 ibSlabMin,
+                                            _In_    const QWORD                 cbSlab,
+                                            _Inout_ BYTE** const                prgbBitmap,
+                                            _Inout_ IBitmapAPI** const          ppbmLoaded,
+                                            _Inout_ LONG** const                prgCount,
+                                            _In_    const QWORD                 cCluster,
+                                            _In_    const QWORD                 cBucket,
+                                            _Inout_ CBucket** const             prgBucket,
+                                            _In_    const QWORD                 cCuckooMax,
+                                            _In_    const size_t                cStandby,
+                                            _Inout_ DWORD** const               prgdwStandby )
+                    :   m_pc( pc ),
+                        m_ibSlabMin( ibSlabMin ),
+                        m_cbSlab( cbSlab ),
+                        m_rgbBitmap( *prgbBitmap ),
+                        m_pbmLoaded( *ppbmLoaded ),
+                        m_rgCount( *prgCount ),
+                        m_cCluster( cCluster ),
+                        m_cBucket( cBucket ),
+                        m_maskBucket( ( 1LL << Log2( cBucket ) ) - 1 ),
+                        m_rgBucket( *prgBucket ),
+                        m_cCuckooMax( max( 2, cCuckooMax ) ),
+                        m_cStandby( cStandby ),
+                        m_rgdwStandby( *prgdwStandby ),
+                        m_cChunkPerSlab( m_cbSlab / sizeof( CCachedBlockChunk ) ),
+                        m_cSlotPerChunk( CCachedBlockChunk::Ccbl() ),
+                        m_critPresenceFilterSlabs( CLockBasicInfo( CSyncBasicInfo( "CCachedBlockPresenceFilter::m_critPresenceFilterSlabs" ), rankPresenceFilterSlabs, 0 ) ),
+                        m_cTotal( 0 ),
+                        m_rwlPresenceFilter( CLockBasicInfo( CSyncBasicInfo( "CCachedBlockPresenceFilter::m_rwlPresenceFilter" ), rankPresenceFilter, 0 ) )
+                {
+                    *prgbBitmap = NULL;
+                    *ppbmLoaded = NULL;
+                    *prgCount = NULL;
+                    *prgBucket = NULL;
+                    *prgdwStandby = NULL;
+                }
+
+            private:
+
+                BOOL FValidSlab( _In_ ICachedBlockSlab* const pcbs )
+                {
+                    ERR     err         = JET_errSuccess;
+                    QWORD   ibSlab      = 0;
+
+                    //  get the slab id
+
+                    Call( pcbs->ErrGetPhysicalId( &ibSlab ) );
+
+                    //  determine if this slab id is valid
+
+                    return FValidSlab( ibSlab );
+
+                HandleError:
+                    return err >= JET_errSuccess;
+                }
+
+                BOOL FValidSlab( _In_ const QWORD ibSlab )
+                {
+                    //  determine if this slab is a hash slab
+
+                    return m_pc->FHashSlab( ibSlab );
+                }
+
+                ERR ErrIsSlabLoaded( _In_ ICachedBlockSlab* const pcbs, _Out_ BOOL* const pfSlabLoaded )
+                {
+                    ERR     err         = JET_errSuccess;
+                    QWORD   ibSlab      = 0;
+                    BOOL    fSlabLoaded = fFalse;
+
+                    *pfSlabLoaded = fFalse;
+
+                    //  get the slab id and compute the slab index
+
+                    Call( pcbs->ErrGetPhysicalId( &ibSlab ) );
+
+                    //  determine if we already loaded the info for this slab
+
+                    fSlabLoaded = FSlabLoaded( ibSlab );
+
+                    *pfSlabLoaded = fSlabLoaded;
+
+                HandleError:
+                    if ( err < JET_errSuccess )
+                    {
+                        *pfSlabLoaded = fFalse;
+                    }
+                    return err;
+                }
+
+                BOOL FSlabLoaded( _In_ const QWORD ibSlab )
+                {
+                    BOOL    fSlabLoaded = fFalse;
+
+                    CallS( ErrToErr<IBitmapAPI>( m_pbmLoaded->ErrGet( Islab( ibSlab ), &fSlabLoaded ) ) );
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s Presence Filter 0x%016I64x IsSlabLoaded %s",
+                                            OSFormatFileId( m_pc ),
+                                            ibSlab,
+                                            fSlabLoaded ? "fTrue" : "fFalse" ) );
+
+                    return fSlabLoaded;
+                }
+
+                BOOL FLoadSlot( _In_ const ERR                      errChunk,
+                                _In_ const CCachedBlockSlotState&   slotstAccepted,
+                                _In_ const CCachedBlockSlotState&   slotstCurrent )
+                {
+                    //  ignore invalid slots
+
+                    if ( !slotstCurrent.FValid() )
+                    {
+                        return fTrue;
+                    }
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s Presence Filter %s Load Current",
+                                            OSFormatFileId( m_pc ),
+                                            OSFormat( slotstCurrent ) ) );
+
+                    //  ignore any slot that is superceded
+
+                    if ( slotstCurrent.FSuperceded() )
+                    {
+                        //  except if the slot is clean, to match the tracking in FUpdateSlot
+
+                        if ( !slotstCurrent.FDirty() )
+                        {
+                        }
+                        else
+                        {
+                            return fTrue;
+                        }
+                    }
+
+                    //  remember that the cached block in this slot is cached
+
+                    Add( slotstCurrent.IbSlab(), slotstCurrent.Cbid() );
+
+                    //  if we just finished the entire slab then verify that the counts are correct
+
+                    Assert( slotstCurrent.Chno() < (ChunkNumber)( m_cChunkPerSlab - 1 ) ||
+                            slotstCurrent.Slno() < (SlotNumber)( m_cSlotPerChunk - 1 ) ||
+                            FValidCounts( slotstCurrent.IbSlab() ) );
+
+                    return fTrue;
+                }
+
+                static BOOL FLoadSlot_( _In_ const ERR                      errChunk,
+                                        _In_ const CCachedBlockSlotState&   slotstAccepted,
+                                        _In_ const CCachedBlockSlotState&   slotstCurrent,
+                                        _In_ const DWORD_PTR                keyVisitSlot )
+                {
+                    ICachedBlockSlab::PfnVisitSlot pfnVisitSlot = FLoadSlot_;
+                    Unused( pfnVisitSlot );
+ 
+                    CCachedBlockPresenceFilter* const pcbpf = (CCachedBlockPresenceFilter*)keyVisitSlot;
+                    return pcbpf->FLoadSlot( errChunk, slotstAccepted, slotstCurrent );
+                }
+
+                BOOL FUpdateSlot(   _In_ const ERR                      errChunk,
+                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
+                                    _In_ const CCachedBlockSlotState&   slotstCurrent )
+                {
+                    //  ignore chunks that are in an error state
+
+                    if ( errChunk < JET_errSuccess )
+                    {
+                        return fTrue;
+                    }
+
+                    //  ignore slots that haven't been updated
+
+                    if ( !slotstCurrent.FSlotUpdated() )
+                    {
+                        return fTrue;
+                    }
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s Presence Filter %s Update Accepted",
+                                            OSFormatFileId( m_pc ),
+                                            OSFormat( slotstAccepted ) ) );
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s Presence Filter %s Update Current",
+                                            OSFormatFileId( m_pc ),
+                                            OSFormat( slotstCurrent ) ) );
+
+                    //  track cached blocks removed from the cache
+                    //
+                    //  -  any clean block
+                    //  -  the current version of a dirty block (!FSuperceded)
+                    //
+                    //  we track clean blocks due to a limitation with add below
+
+                    if ( slotstAccepted.FValid() && !slotstCurrent.FValid() )
+                    {
+                        if (    slotstAccepted.Cbid().Volumeid() != volumeidInvalid &&
+                                slotstAccepted.Cbid().Fileid() != fileidInvalid && 
+                                slotstAccepted.Cbid().Fileserial() != fileserialInvalid )
+                        {
+                            if ( !slotstAccepted.FDirty() || !slotstAccepted.FSuperceded() )
+                            {
+                                Remove( slotstAccepted.IbSlab(), slotstAccepted.Cbid() );
+                            }
+                        }
+                    }
+
+                    //  track cached blocks added to the cache
+                    //
+                    //  -  any clean block
+                    //  -  the first update of a block (FFirstUpdate)
+                    //
+                    //  we track both clean blocks and blocks that are first updated because we don't have enough state
+                    //  to only track either the clean block or the first dirty if the clean block was not previously
+                    //  cached just by looking at this one slot.  ideally we would detect this and track only one
+
+                    if ( !slotstAccepted.FValid() && slotstCurrent.FValid() )
+                    {
+                        if (    slotstCurrent.Cbid().Volumeid() != volumeidInvalid &&
+                                slotstCurrent.Cbid().Fileid() != fileidInvalid && 
+                                slotstCurrent.Cbid().Fileserial() != fileserialInvalid )
+                        {
+                            if ( !slotstCurrent.FDirty() || slotstCurrent.FFirstUpdate() )
+                            {
+                                Add( slotstCurrent.IbSlab(), slotstCurrent.Cbid() );
+                            }
+                        }
+                    }
+
+                    //  if we just finished the entire slab then verify that the counts are correct
+
+                    Assert( slotstCurrent.Chno() < (ChunkNumber)( m_cChunkPerSlab - 1 ) ||
+                            slotstCurrent.Slno() < (SlotNumber)( m_cSlotPerChunk - 1 ) ||
+                            FValidCounts( slotstCurrent.IbSlab() ) );
+
+                    return fTrue;
+                }
+
+                static BOOL FUpdateSlot_(   _In_ const ERR                      errChunk,
+                                            _In_ const CCachedBlockSlotState&   slotstAccepted,
+                                            _In_ const CCachedBlockSlotState&   slotstCurrent,
+                                            _In_ const DWORD_PTR                keyVisitSlot )
+                {
+                    ICachedBlockSlab::PfnVisitSlot pfnVisitSlot = FUpdateSlot_;
+                    Unused( pfnVisitSlot );
+ 
+                    CCachedBlockPresenceFilter* const pcbpf = (CCachedBlockPresenceFilter*)keyVisitSlot;
+                    return pcbpf->FUpdateSlot( errChunk, slotstAccepted, slotstCurrent );
+                }
+
+                void Add( _In_ const QWORD ibSlab, _In_ const CCachedBlockId& cbid )
+                {
+                    //  convert the item into a hash
+
+                    const DWORD dwHash = DwHash( cbid );
+
+                    //  track the count of entries by slab
+
+                    IncrementCount( ibSlab );
+
+                    //  add the cached block to the presence filter
+
+                    m_rwlPresenceFilter.EnterAsWriter();
+
+                    Add( dwHash );
+
+                    //  we should think that the cache contains this cached block
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s Presence Filter %s,0x%08x Add 0x%02x",
+                                            OSFormatFileId( m_pc ),
+                                            OSFormat(   cbid.Volumeid(),
+                                                        cbid.Fileid(),
+                                                        cbid.Fileserial() ),
+                                            cbid.Cbno(),
+                                            WFingerprint( dwHash ) ) );
+
+                    EnforceSz( FPossiblyContains( dwHash ), "HashedLRUKCachePresenceFilterAdd" );
+
+                    m_rwlPresenceFilter.LeaveAsWriter();
+                }
+
+                void Remove( _In_ const QWORD ibSlab, _In_ const CCachedBlockId& cbid )
+                {
+                    //  convert the item into a hash
+
+                    const DWORD dwHash = DwHash( cbid );
+
+                    //  track the count of entries by slab
+
+                    DecrementCount( ibSlab );
+
+                    //  we should think that the cache contains this cached block
+
+                    m_rwlPresenceFilter.EnterAsWriter();
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s Presence Filter %s,0x%08x Remove 0x%02x",
+                                            OSFormatFileId( m_pc ),
+                                            OSFormat(   cbid.Volumeid(),
+                                                        cbid.Fileid(),
+                                                        cbid.Fileserial() ),
+                                            cbid.Cbno(),
+                                            WFingerprint( dwHash ) ) );
+
+                    EnforceSz( FPossiblyContains( dwHash ), "HashedLRUKCachePresenceFilterRemove" );
+
+                    //  remove the cached block from the presence filter
+
+                    Remove( dwHash );
+
+                    m_rwlPresenceFilter.LeaveAsWriter();
+                }
+
+                BOOL FPossiblyContains( _In_ const CCachedBlockId& cbid )
+                {
+                    //  convert the item into a hash
+
+                    const DWORD dwHash = DwHash( cbid );
+
+                    //  determine if the cached block is present via the presence filter
+
+                    m_rwlPresenceFilter.EnterAsReader();
+
+                    BOOL fPossiblyContains = FPossiblyContains( dwHash );
+
+                    OSTrace(    JET_tracetagBlockCacheOperations,
+                                OSFormat(   "C=%s Presence Filter %s,0x%08x Contains 0x%02x %s",
+                                            OSFormatFileId( m_pc ),
+                                            OSFormat(   cbid.Volumeid(),
+                                                        cbid.Fileid(),
+                                                        cbid.Fileserial() ),
+                                            cbid.Cbno(),
+                                            WFingerprint( dwHash ),
+                                            fPossiblyContains ? "fTrue" : "fFalse" ) );
+
+                    m_rwlPresenceFilter.LeaveAsReader();
+
+                    return fPossiblyContains;
+                }
+
+                size_t Islab( _In_ const QWORD ibSlab ) const
+                {
+                    return (size_t)( ( ibSlab - m_ibSlabMin ) / m_cbSlab );
+                }
+
+                DWORD DwHash( _In_ const CCachedBlockId& cbid ) const
+                {
+                    //  we will hash the CachedBlockNumber
+
+                    const DWORD dwHashInput = (DWORD)cbid.Cbno();
+
+                    //  use a mixed tabulation hash based on cryptographically random numbers to hash the CachedBlockNumber.  this
+                    //  allows us to get a good hash function though the input is an integer with non-uniformly used values that are
+                    //  close to zero
+
+                    DWORD dwHash = CMixedTabulationHash::DwHash( dwHashInput );
+
+                    //  combine the hash with the FileSerial which is a cryptographically random number
+
+                    dwHash ^= (DWORD)cbid.Fileserial();
+
+                    //  we cannot return zero for the hash
+
+                    return dwHash ? dwHash : 0x12345678;
+                }
+
+                void IncrementCount( _In_ const QWORD ibSlab )
+                {
+                    OnDebug( AtomicAdd( (QWORD*)&m_cTotal, 1 ) );
+                    OnDebug( AtomicIncrement( (LONG*)&m_rgCount[ Islab( ibSlab ) ] ) );
+                }
+
+                void DecrementCount( _In_ const QWORD ibSlab )
+                {
+                    OnDebug( AtomicAdd( (QWORD*)&m_cTotal, (QWORD)-1LL ) );
+                    OnDebug( AtomicDecrement( (LONG*)&m_rgCount[ Islab( ibSlab ) ] ) );
+                }
+
+                BOOL FValidCounts( _In_ const QWORD ibSlab ) const
+                {
+                    const LONGLONG  cTotal      = OnDebugOrRetail( (LONGLONG)AtomicRead( (QWORD*)&m_cTotal ), 0 );
+                    const BOOL      fValidTotal = cTotal >= 0 && cTotal <= (LONGLONG)m_cCluster;
+                    const size_t    iSlab       = Islab( ibSlab );
+                    const LONG      cSlab       = OnDebugOrRetail( AtomicRead( (LONG*)&m_rgCount[ iSlab ] ), 0 );
+                    const QWORD     cSlabMost   = m_cChunkPerSlab * m_cSlotPerChunk;
+                    const BOOL      fValidSlab  = cSlab >= 0 && cSlab <= cSlabMost;
+
+                    return fValidTotal && fValidSlab;
+                }
+
+            private:
+
+                //  the presence filter is implemented as a Cuckoo Filter
+
+                void Add( _In_ const DWORD dwHash )
+                {
+                    //  compute the fingerprint and primary location for this item
+
+                    WORD    wFingerprint    = 0;
+                    QWORD   qwIndex         = 0;
+
+                    ComputeProperties( dwHash, &wFingerprint, &qwIndex );
+
+                    //  try to add this item
+
+                    BOOL fSucceeded = FAdd( qwIndex, wFingerprint );
+
+                    //  if we didn't succeed then try to put the item on the standby list
+
+                    if ( !fSucceeded )
+                    {
+                        fSucceeded = FAddStandbyItem( dwHash );
+                    }
+
+                    //  we must succeed
+
+                    EnforceSz( fSucceeded, "HashedLRUKCachePresenceFilterAdd2" );
+                }
+
+                BOOL FAdd( _In_ const QWORD qwIndexInitial, _In_ const WORD wFingerprintInitial )
+                {
+                    BOOL    fSucceeded              = fFalse;
+                    QWORD   qwIndex                 = qwIndexInitial;
+                    WORD    wFingerprint            = wFingerprintInitial;
+                    WORD    wFingerprintReplaced    = wFingerprintInitial;
+
+                    //  try to add this item to the primary or alternate location, recursively pushing out entries
+                    //  until we can find room or we hit our retry limit
+
+                    for ( int i = 0; !fSucceeded && i < m_cCuckooMax; i++ )
+                    {
+                        fSucceeded = Bucket( qwIndex ).FTryAdd( wFingerprint, i > 0 ? &wFingerprintReplaced : NULL );
+
+                        if ( !fSucceeded )
+                        {
+                            qwIndex = QwIndexAlternate( qwIndex, wFingerprintReplaced );
+                            wFingerprint = wFingerprintReplaced;
+                            wFingerprintReplaced = 0;
+                        }
+                    }
+
+                    return fSucceeded;
+                }
+
+                void Remove( _In_ const DWORD dwHash )
+                {
+                    //  compute the fingerprint and primary location for this item
+
+                    WORD    wFingerprint    = 0;
+                    QWORD   qwIndex         = 0;
+
+                    ComputeProperties( dwHash, &wFingerprint, &qwIndex );
+
+                    //  try to remove this item from the primary location or the alternate location
+
+                    BOOL fSucceeded = fFalse;
+
+                    for ( int i = 0; !fSucceeded && i < 2; i++ )
+                    {
+                        fSucceeded = Bucket( qwIndex ).FTryRemove( wFingerprint );
+
+                        if ( !fSucceeded )
+                        {
+                            qwIndex = QwIndexAlternate( qwIndex, wFingerprint );
+                        }
+                    }
+
+                    //  this must succeed
+
+                    EnforceSz( fSucceeded, "HashedLRUKCachePresenceFilterRemove2" );
+
+                    //  try to retire an item from the standby list
+
+                    RetireStandbyItem();
+                }
+
+                BOOL FPossiblyContains( _In_ const DWORD dwHash )
+                {
+                    //  compute the fingerprint and primary location for this item
+
+                    WORD    wFingerprint    = 0;
+                    QWORD   qwIndex         = 0;
+
+                    ComputeProperties( dwHash, &wFingerprint, &qwIndex );
+
+                    //  try to find this item in the primary location or the alternate location
+
+                    BOOL fSucceeded = fFalse;
+
+                    for ( int i = 0; !fSucceeded && i < 2; i++ )
+                    {
+                        fSucceeded = Bucket( qwIndex ).FContains( wFingerprint );
+
+                        if ( !fSucceeded )
+                        {
+                            qwIndex = QwIndexAlternate( qwIndex, wFingerprint );
+                        }
+                    }
+
+                    return fSucceeded;
+                }
+
+            private:
+
+                QWORD QwIndex( _In_ const QWORD qw ) const
+                {
+                    return qw & m_maskBucket;
+                }
+
+                WORD WFingerprint( _In_ const DWORD dwHash ) const
+                {
+                    const WORD wFingerprintMin  = 1;
+                    const WORD wFingerprintMax  = 1 << CBucket::CbitFingerprint();
+                    const WORD wFingerprint     = wFingerprintMin + dwHash % ( wFingerprintMax - wFingerprintMin );
+
+                    Assert( wFingerprintMin <= wFingerprint && wFingerprint < wFingerprintMax );
+
+                    return wFingerprint;
+                }
+
+                QWORD QwIndexAlternate_( _In_ const QWORD qwIndex, _In_ const WORD wFingerprint ) const
+                {
+                    return QwIndex( qwIndex ^ CMixedTabulationHash::DwHash( wFingerprint ) );
+                }
+
+                QWORD QwIndexAlternate( _In_ const QWORD qwIndex, _In_ const WORD wFingerprint ) const
+                {
+                    const QWORD qwIndexAlternate = QwIndexAlternate_( qwIndex, wFingerprint );
+
+                    //  we must be able to find the primary bucket index from the alternate bucket index and the
+                    //  fingerprint.  in other words, this computation must be reversible
+                    //
+                    //  NOTE:  this only works if the bucket count is a power of 2
+
+                    Assert( FPowerOf2( m_cBucket ) );
+                    Assert( qwIndex == QwIndexAlternate_( qwIndexAlternate, wFingerprint ) );
+
+                    return qwIndexAlternate;
+                }
+
+                void ComputeProperties( _In_    const DWORD     dwHash,
+                                        _Out_   WORD* const     pwFingerprint,
+                                        _Out_   QWORD* const    pqwIndex )
+                {
+                    //  compute the fingerprint 
+
+                    *pwFingerprint = WFingerprint( dwHash );
+
+                    //  compute the primary location
+
+                    *pqwIndex = QwIndex( dwHash >> CBucket::CbitFingerprint() );
+                }
+
+                BOOL FAddStandbyItem( _In_ const DWORD dwHash )
+                {
+                    BOOL fSucceeded = fFalse;
+
+                    for ( int iStandby = 0; !fSucceeded && iStandby < m_cStandby; iStandby++ )
+                    {
+                        fSucceeded = AtomicCompareExchange( (LONG*)&m_rgdwStandby[ iStandby ], 0, dwHash ) == 0;
+                    }
+
+                    return fSucceeded;
+                }
+
+                void RetireStandbyItem()
+                {
+                    DWORD   dwHash      = 0;
+                    BOOL    fSucceeded  = fFalse;
+
+                    fSucceeded = FRemoveStandbyItem( &dwHash );
+
+                    if ( fSucceeded )
+                    {
+                        QWORD   qwIndex         = QwIndex( dwHash );
+                        WORD    wFingerprint    = WFingerprint( dwHash );
+
+                        fSucceeded = FAdd( qwIndex, wFingerprint );
+                    }
+
+                    if ( !fSucceeded )
+                    {
+                        fSucceeded = FAddStandbyItem( dwHash );
+                    }
+
+                    EnforceSz( fSucceeded, "HashedLRUKCachePresenceFilterRetireStandbyItem" );
+                }
+
+                BOOL FRemoveStandbyItem( _Out_ DWORD* const pdwHash )
+                {
+                    BOOL fSucceeded = fFalse;
+
+                    *pdwHash = 0;
+
+                    for ( int iStandby = 0; !fSucceeded && iStandby < m_cStandby; iStandby++ )
+                    {
+                        *pdwHash = AtomicExchange( (LONG*)&m_rgdwStandby[ iStandby ], 0 );
+                        fSucceeded = *pdwHash != 0;
+                    }
+
+                    return fSucceeded;
+                }
+
+                CBucket& Bucket( _In_ const QWORD i ) const { return m_rgBucket[ (size_t)i ]; }
+
+#include <pshpack1.h>
+
+                class CBucket
+                {
+                    public:
+
+                        CBucket()
+                        {
+                            C_ASSERT( sizeof( *this ) == sizeof( m_rgbFingerprint ) );
+                            memset( this, 0, sizeof( *this ) );
+                        }
+
+                        static size_t C() { return _countof( m_rgbFingerprint ); }
+                        static size_t CbitFingerprint() { return sizeof( m_rgbFingerprint[0] ) * 8; }
+
+                        BOOL FTryAdd(   _In_        const WORD  wFingerprint,
+                                        _Out_opt_   WORD* const pwFingerprintReplaced = NULL )
+                        {
+                            if ( pwFingerprintReplaced )
+                            {
+                                *pwFingerprintReplaced = 0;
+                            }
+
+                            for ( int i = 0; i < _countof( m_rgbFingerprint ); i++ )
+                            {
+                                if ( m_rgbFingerprint[ i ] == 0 )
+                                {
+                                    m_rgbFingerprint[ i ] = (BYTE)wFingerprint;
+                                    return fTrue;
+                                }
+                            }
+
+                            if ( pwFingerprintReplaced )
+                            {
+                                const size_t    iRandom = rand();
+                                const size_t    iVictim = iRandom % _countof( m_rgbFingerprint );
+
+                                *pwFingerprintReplaced = m_rgbFingerprint[ iVictim ];
+                                m_rgbFingerprint[ iVictim ] = (BYTE)wFingerprint;
+                            }
+
+                            return fFalse;
+                        }
+
+                        BOOL FTryRemove( _In_ const WORD wFingerprint )
+                        {
+                            for ( int i = 0; i < _countof( m_rgbFingerprint ); i++ )
+                            {
+                                if ( m_rgbFingerprint[ i ] == wFingerprint )
+                                {
+                                    m_rgbFingerprint[ i ] = 0;
+                                    return fTrue;
+                                }
+                            }
+
+                            return fFalse;
+                        }
+
+                        BOOL FContains( _In_ const WORD wFingerprint )
+                        {
+                            for ( int i = 0; i < _countof( m_rgbFingerprint ); i++ )
+                            {
+                                if ( m_rgbFingerprint[ i ] == wFingerprint )
+                                {
+                                    return fTrue;
+                                }
+                            }
+
+                            return fFalse;
+                        }
+
+                    private:
+
+                        BYTE    m_rgbFingerprint[ 4 ];
+                };
+
+#include <poppack.h>
+
+            private:
+
+                THashedLRUKCache<I>* const  m_pc;
+                const QWORD                 m_ibSlabMin;
+                const QWORD                 m_cbSlab;
+                BYTE* const                 m_rgbBitmap;
+                IBitmapAPI* const           m_pbmLoaded;
+                volatile LONG* const        m_rgCount;
+                const QWORD                 m_cCluster;
+                const QWORD                 m_cBucket;
+                const QWORD                 m_maskBucket;
+                CBucket* const              m_rgBucket;
+                const QWORD                 m_cCuckooMax;
+                const size_t                m_cStandby;
+                DWORD* const                m_rgdwStandby;
+                const QWORD                 m_cChunkPerSlab;
+                const QWORD                 m_cSlotPerChunk;
+                CCriticalSection            m_critPresenceFilterSlabs;
+                volatile LONGLONG           m_cTotal;
+                CReaderWriterLock           m_rwlPresenceFilter;
+        };
+
     private:
 
         ERR ErrDumpJournalMetadata( _In_ CPRINTF* const pcprintf );
@@ -3494,7 +4402,7 @@ class THashedLRUKCache
                 }
 
                 BOOL FVisitSlot(    _In_ const ERR                      errChunk,
-                                    _In_ const CCachedBlockSlot&        slotAccepted,
+                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
                                     _In_ const CCachedBlockSlotState&   slotstCurrent )
                 {
                     if ( slotstCurrent.Chno() == m_chno )
@@ -3507,7 +4415,7 @@ class THashedLRUKCache
                 }
  
                 static BOOL FVisitSlot_(    _In_ const ERR                      errChunk,
-                                            _In_ const CCachedBlockSlot&        slotAccepted,
+                                            _In_ const CCachedBlockSlotState&   slotstAccepted,
                                             _In_ const CCachedBlockSlotState&   slotstCurrent,
                                             _In_ const DWORD_PTR                keyVisitSlot )
                 {
@@ -3515,7 +4423,7 @@ class THashedLRUKCache
                     Unused( pfnVisitSlot );
  
                     CChunkStatus* const pcs = (CChunkStatus*)keyVisitSlot;
-                    return pcs->FVisitSlot( errChunk, slotAccepted, slotstCurrent );
+                    return pcs->FVisitSlot( errChunk, slotstAccepted, slotstCurrent );
                 }
  
             private:
@@ -3583,11 +4491,11 @@ class THashedLRUKCache
                 }
 
                 BOOL FVisitSlot(    _In_ const ERR                      errChunk,
-                                    _In_ const CCachedBlockSlot&        slotAccepted,
+                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
                                     _In_ const CCachedBlockSlotState&   slotstCurrent );
  
                 static BOOL FVisitSlot_(    _In_ const ERR                      errChunk,
-                                            _In_ const CCachedBlockSlot&        slotAccepted,
+                                            _In_ const CCachedBlockSlotState&   slotstAccepted,
                                             _In_ const CCachedBlockSlotState&   slotstCurrent,
                                             _In_ const DWORD_PTR                keyVisitSlot )
                 {
@@ -3595,7 +4503,7 @@ class THashedLRUKCache
                     Unused( pfnVisitSlot );
  
                     CChunkDumper* const pcd = (CChunkDumper*)keyVisitSlot;
-                    return pcd->FVisitSlot( errChunk, slotAccepted, slotstCurrent );
+                    return pcd->FVisitSlot( errChunk, slotstAccepted, slotstCurrent );
                 }
  
             private:
@@ -3643,7 +4551,7 @@ class THashedLRUKCache
                                             _In_ const QWORD                    ibSlab );
         void ReleaseJournalEntries();
 
-        ERR ErrChangeSlabs( _In_        const CCachedBlockId&       cbid,
+        ERR ErrChangeSlabs( _In_        const QWORD                 ibSlab,
                             _Inout_     ICachedBlockSlab** const    ppcbs,
                             _Out_opt_   BOOL* const                 pfChangedSlab = NULL );
 
@@ -3653,8 +4561,8 @@ class THashedLRUKCache
             return ErrUpdateSlabs( ppcbs, &pcbsEmpty );
         }
 
-        ERR ErrUpdateSlabs( _Inout_ ICachedBlockSlab** const    ppcbsA,
-                            _Inout_ ICachedBlockSlab** const    ppcbsB );
+        ERR ErrUpdateSlabs( _Inout_opt_ ICachedBlockSlab** const    ppcbsA,
+                            _Inout_opt_ ICachedBlockSlab** const    ppcbsB );
 
         ERR ErrScheduleSlabForWriteBack(    _In_opt_    ICachedBlockSlab* const pcbs,
                                             _In_        const JournalPosition   jpos,
@@ -3759,6 +4667,11 @@ class THashedLRUKCache
                             _In_    const QWORD                 ib,
                             _Inout_ QWORD* const                pcbClean );
 
+        ERR ErrIsPossiblyCached(    _In_    CHashedLRUKCachedFileTableEntry<I>* pcfte,
+                                    _In_    const QWORD                         ibCachedBlock,
+                                    _Out_   QWORD* const                        pibSlab,
+                                    _Out_   CCachedBlockId* const               pcbid,
+                                    _Out_   BOOL* const                         pfPossiblyCached );
         void FailIO( _In_ CRequest* const prequestIO, _In_ const ERR err );
 
         ERR ErrEnsureInitSlabWriteBackHash() { return m_initOnceSlabWriteBackHash.Init( ErrInitSlabWriteBackHash_, this ); };
@@ -3778,7 +4691,6 @@ class THashedLRUKCache
             return m_pch->IbChunkJournal() <= ibSlab && ibSlab < m_pch->IbChunkJournal() + m_pch->CbChunkJournal();
         }
 
-        ERR ErrGetSlab( _In_ const CCachedBlockId& cbid, _Out_ ICachedBlockSlab** const ppcbs );
         ERR ErrGetSlab( _In_ const QWORD ibSlab, _Out_ ICachedBlockSlab** const ppcbs )
         {
             return ErrGetSlabInternal( ibSlab, fFalse, fFalse, ppcbs );
@@ -3899,6 +4811,7 @@ class THashedLRUKCache
 
         CHashedLRUKCacheHeader*                                                             m_pch;
         CCachingFileWrapper                                                                 m_ffCaching;
+        CCachedBlockPresenceFilter*                                                         m_pcbpf;
         IJournal*                                                                           m_pj;
         ICachedBlockWriteCountsManager*                                                     m_pcbwcm;
         ICachedBlockSlabManager*                                                            m_pcbsmHash;
@@ -3932,6 +4845,7 @@ class THashedLRUKCache
         JournalPosition                                                                     m_jposRepairActual;
         CInvasiveList<CQueuedJournalEntry, CQueuedJournalEntry::OffsetOfILE>                m_ilQueuedJournalEntry;
         JournalPosition                                                                     m_jposRedo;
+        BOOL                                                                                m_fRecovered;
 
         CInitOnce<ERR, decltype( &ErrInitSlabWriteBackHash_ ), THashedLRUKCache<I>* const>  m_initOnceSlabWriteBackHash;
         CSlabWriteBackHash                                                                  m_slabWriteBackHash;
@@ -3974,6 +4888,7 @@ THashedLRUKCache<I>::~THashedLRUKCache()
     delete m_pcbsmHash;
     delete m_pcbwcm;
     delete m_pj;
+    delete m_pcbpf;
     delete m_pch;
 
     PffCaching()->SetNoFlushNeeded();
@@ -4687,27 +5602,34 @@ ERR THashedLRUKCache<I>::ErrInvalidate( _In_ const VolumeId     volumeid,
             ibCachedBlock <= offsets.IbEnd() && cSlabInvalidated < cSlab;
             ibCachedBlock += cbCachedBlock )
     {
-        //  compute the cached block id for this offset
+        QWORD               ibSlab          = 0;
+        CCachedBlockId      cbid;
+        BOOL                fPossiblyCached = fFalse;
 
-        const CCachedBlockId cbid(  pcfte->Volumeid(),
-                                    pcfte->Fileid(),
-                                    pcfte->Fileserial(),
-                                    (CachedBlockNumber)( ibCachedBlock / cbCachedBlock ) );
+        //  determine if we are likely to have this cached block
+
+        Call( ErrIsPossiblyCached( pcfte, ibCachedBlock, &ibSlab, &cbid, &fPossiblyCached ) );
+
+        //  if the cached block is not possibly cached then skip this offset
+
+        if ( !fPossiblyCached )
+        {
+            //  except if our offset range is so large that it is cheaper to visit every slab
+
+            if ( offsets.Cb() / cbCachedBlock < cSlab )
+            {
+                continue;
+            }
+        }
 
         //  change to the slab containing this block
-        //
-        //  NOTE:  this may experience sync reads from the caching file
-        //  NOTE:  this may wait for another request to finish accessing the slab
 
-        Call( ErrChangeSlabs( cbid, &pcbs ) );
+        Call( ErrChangeSlabs( ibSlab, &pcbs ) );
 
         //  determine if we have invalidated this slab previously
 
-        QWORD   ibSlab;
         size_t  iSlab;
         BOOL    fSlabInvalidated;
-
-        Call( pcbs->ErrGetPhysicalId( &ibSlab ) );
 
         iSlab = (size_t)( ( ibSlab - m_pch->IbChunkHash() ) / cbSlab );
         Call( ErrToErr<IBitmapAPI>( pbmSlab->ErrGet( iSlab, &fSlabInvalidated ) ) );
@@ -4913,6 +5835,7 @@ THashedLRUKCache<I>::THashedLRUKCache(  _In_    IFileSystemFilter* const        
                                         ppch ),
                 m_pch( NULL ),
                 m_ffCaching( THashedLRUKCacheBase<I>::PffCaching() ),
+                m_pcbpf( NULL ),
                 m_pj( NULL ),
                 m_pcbwcm( NULL ),
                 m_pcbsmHash( NULL ),
@@ -4947,6 +5870,7 @@ THashedLRUKCache<I>::THashedLRUKCache(  _In_    IFileSystemFilter* const        
                 m_jposRepair( jposInvalid ),
                 m_jposRepairActual( jposInvalid ),
                 m_jposRedo( jposInvalid ),
+                m_fRecovered( fFalse ),
                 m_slabWriteBackHash( rankSlabWriteBackHash ),
                 m_critSlabsToWriteBack( CLockBasicInfo( CSyncBasicInfo( "THashedLRUKCache<I>::m_critSlabsToWriteBack" ), rankSlabsToWriteBack, 0 ) ),
                 m_ptpwSlabWriteBack( NULL ),
@@ -5253,7 +6177,7 @@ HandleError:
 
 template< class I >
 BOOL THashedLRUKCache<I>::CChunkDumper::FVisitSlot( _In_ const ERR                      errChunk,
-                                                    _In_ const CCachedBlockSlot&        slotAccepted,
+                                                    _In_ const CCachedBlockSlotState&   slotstAccepted,
                                                     _In_ const CCachedBlockSlotState&   slotstCurrent )
 {
     ERR             err         = JET_errSuccess;
@@ -5297,6 +6221,10 @@ ERR THashedLRUKCache<I>::ErrInit()
     //  read the header
 
     Call( CHashedLRUKCacheHeader::ErrLoad( Pfsconfig(), PffCaching(), sizeof( CCacheHeader ), &m_pch ) );
+
+    //  init the cached block presence filter
+
+    Call( CCachedBlockPresenceFilter::ErrInit( this, &m_pcbpf ) );
 
     //  mount the journal
 
@@ -5368,6 +6296,10 @@ ERR THashedLRUKCache<I>::ErrRecover()
     //  redo any remaining queued journal entries that we know will not be destroyed by the repair
 
     Call( ErrRedoJournalEntries() );
+
+    //  indicate that recovery is successful
+
+    m_fRecovered = fTrue;
 
 HandleError:
     ReleaseJournalEntries();
@@ -5830,14 +6762,14 @@ void THashedLRUKCache<I>::ReleaseJournalEntries()
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrChangeSlabs(    _In_        const CCachedBlockId&       cbid,
+ERR THashedLRUKCache<I>::ErrChangeSlabs(    _In_        const QWORD                 ibSlab,
                                             _Inout_     ICachedBlockSlab** const    ppcbs,
                                             _Out_opt_   BOOL* const                 pfChangedSlab )
 {
-    ERR                 err                     = JET_errSuccess;
-    ICachedBlockSlab*   pcbs                    = *ppcbs;
-    BOOL                fIsSlabForCachedBlock   = fFalse;
-    BOOL                fChangedSlab            = fFalse;
+    ERR                 err             = JET_errSuccess;
+    ICachedBlockSlab*   pcbs            = *ppcbs;
+    QWORD               ibSlabCurrent   = 0;
+    BOOL                fChangedSlab    = fFalse;
 
     *ppcbs = NULL;
     if ( pfChangedSlab )
@@ -5851,9 +6783,9 @@ ERR THashedLRUKCache<I>::ErrChangeSlabs(    _In_        const CCachedBlockId&   
     {
         //  if this slab cannot contain this cached block then we need to move to the correct one
 
-        Call( m_pcbsmHash->ErrIsSlabForCachedBlock( pcbs, cbid, &fIsSlabForCachedBlock ) );
+        Call( pcbs->ErrGetPhysicalId( &ibSlabCurrent ) );
 
-        if ( !fIsSlabForCachedBlock )
+        if ( ibSlab != ibSlabCurrent )
         {
             //  update this slab
 
@@ -5869,7 +6801,7 @@ ERR THashedLRUKCache<I>::ErrChangeSlabs(    _In_        const CCachedBlockId&   
 
     if ( !pcbs )
     {
-        Call( ErrGetSlab( cbid, &pcbs ) );
+        Call( ErrGetSlab( ibSlab, &pcbs ) );
         fChangedSlab = fTrue;
     }
 
@@ -5896,8 +6828,8 @@ HandleError:
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrUpdateSlabs(    _Inout_ ICachedBlockSlab** const    ppcbsA,
-                                            _Inout_ ICachedBlockSlab** const    ppcbsB )
+ERR THashedLRUKCache<I>::ErrUpdateSlabs(    _Inout_opt_ ICachedBlockSlab** const    ppcbsA,
+                                            _Inout_opt_ ICachedBlockSlab** const    ppcbsB )
 {
     ERR                         err             = JET_errSuccess;
     const size_t                cpcbs           = 2;
@@ -5950,6 +6882,10 @@ ERR THashedLRUKCache<I>::ErrUpdateSlabs(    _Inout_ ICachedBlockSlab** const    
     //  emit a journal entry describing the final state of the affected chunks in the updated slabs
     //
     //  NOTE:  a single journal entry describing multiple updated slabs provides atomicity of that update
+    //
+    //  NOTE:  once this journal entry is appended then the rest of this method must succeed to ensure that the state
+    //  of the journal and slabs cannot diverge (e.g. we cannot allow a subsequent call to
+    //  ICachedBlockSlab::RevertChanges to undo a change we put in the journal)
 
     Call( CCacheUpdateJournalEntry::ErrCreate( usv.Ccbu(), usv.Rgcbu(), &pcuje ) );
     Call( CCompressedJournalEntry::ErrCreate( pcuje, &pjeCompressed ) );
@@ -5977,10 +6913,17 @@ ERR THashedLRUKCache<I>::ErrUpdateSlabs(    _Inout_ ICachedBlockSlab** const    
                                 OSFormat( *pcbu ) ) );
     }
 
+    //  update our cached block presence filter if necessary
+
+    for ( size_t ipcbs = 0; ipcbs < cpcbs; ipcbs++ )
+    {
+        if ( rgpcbs[ ipcbs ] && rgpcbs[ ipcbs ]->FUpdated() )
+        {
+            m_pcbpf->Update( rgpcbs[ ipcbs ] );
+        }
+    }
+
     //  schedule slabs for write back
-    //
-    //  NOTE:  this must succeed to ensure that the state of the journal and slabs cannot diverge (e.g. we cannot allow
-    //  a subsequent call to ICachedBlockSlab::RevertChanges to undo a change we put in the journal)
 
     for ( size_t ipcbs = 0; ipcbs < cpcbs; ipcbs++ )
     {
@@ -7380,29 +8323,34 @@ void THashedLRUKCache<I>::RequestRead(  _In_    CRequest* const             preq
             ibCachedBlock <= prequest->Offsets().IbEnd();
             ibCachedBlock += cbCachedBlock )
     {
+        QWORD               ibSlab          = 0;
+        CCachedBlockId      cbid;
+        BOOL                fPossiblyCached = fFalse;
         CCachedBlockSlot    slot;
         BOOL                fCached         = fFalse;
 
         BYTE* const         pbCachedBlock   = (BYTE*)prequest->PbData() + ibCachedBlock - prequest->Offsets().IbStart();
 
-        //  compute the cached block id for this offset
+        //  determine if we are likely to have this cached block
 
-        const CCachedBlockId cbid(  prequest->Pcfte()->Volumeid(),
-                                    prequest->Pcfte()->Fileid(),
-                                    prequest->Pcfte()->Fileserial(),
-                                    (CachedBlockNumber)( ibCachedBlock / cbCachedBlock ) );
+        Call( ErrIsPossiblyCached( prequest->Pcfte(), ibCachedBlock, &ibSlab, &cbid, &fPossiblyCached ) );
 
-        //  change to the slab containing this block
-        //
-        //  NOTE:  this may experience sync reads from the caching file
-        //  NOTE:  this may wait for another request to finish accessing the slab
+        //  if the cached block is possibly cached then determine if it is cached
 
-        Call( ErrChangeSlabs( cbid, &pcbs ) );
+        if ( fPossiblyCached )
+        {
+            //  change to the slab containing this block
+            //
+            //  NOTE:  this may experience sync reads from the caching file
+            //  NOTE:  this may wait for another request to finish accessing the slab
 
-        //  determine if the block is already cached
+            Call( ErrChangeSlabs( ibSlab, &pcbs ) );
 
-        Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
-        fCached = slot.FValid();
+            //  determine if the block is already cached
+
+            Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
+            fCached = slot.FValid();
+        }
 
         //  emit telemetry
 
@@ -7501,28 +8449,34 @@ void THashedLRUKCache<I>::RequestFinalizeRead(  _In_    CRequest* const         
             ibCachedBlock <= prequest->Offsets().IbEnd();
             ibCachedBlock += cbCachedBlock )
     {
-        CCachedBlockSlot        slot;
-        BOOL                    fCached         = fFalse;
+        QWORD               ibSlab          = 0;
+        CCachedBlockId      cbid;
+        BOOL                fPossiblyCached = fFalse;
+        CCachedBlockSlot    slot;
+        BOOL                fCached         = fFalse;
 
-        BYTE* const             pbCachedBlock   = (BYTE*)prequest->PbData() + ibCachedBlock - prequest->Offsets().IbStart();
+        BYTE* const         pbCachedBlock   = (BYTE*)prequest->PbData() + ibCachedBlock - prequest->Offsets().IbStart();
 
-        //  compute the cached block id for this offset
+        //  determine if we are likely to have this cached block
 
-        const CCachedBlockId    cbid(   prequest->Pcfte()->Volumeid(),
-                                        prequest->Pcfte()->Fileid(),
-                                        prequest->Pcfte()->Fileserial(),
-                                        (CachedBlockNumber)( ibCachedBlock / cbCachedBlock ) );
+        Call( ErrIsPossiblyCached( prequest->Pcfte(), ibCachedBlock, &ibSlab, &cbid, &fPossiblyCached ) );
 
-        //  get the slab for this cluster
+        //  if the cached block is possibly cached then determine if it is cached.  otherwise, if we want to cache it
+        //  then ensure that we check to see if it is already cached
 
-        Call( ErrChangeSlabs( cbid, &pcbs, &fChangedSlab ) );
+        if ( fPossiblyCached || fCacheIfPossible )
+        {
+            //  get the slab for this cluster
 
-        cbClean = fChangedSlab ? 0 : cbClean;
+            Call( ErrChangeSlabs( ibSlab, &pcbs, &fChangedSlab ) );
 
-        //  determine if the block is already cached
+            cbClean = fChangedSlab ? 0 : cbClean;
 
-        Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
-        fCached = slot.FValid();
+            //  determine if the block is already cached
+
+            Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
+            fCached = slot.FValid();
+        }
 
         //  if the block is already cached then verify the read
 
@@ -7637,46 +8591,52 @@ void THashedLRUKCache<I>::RequestWrite( _In_    CRequest* const             preq
             ibCachedBlock <= prequest->Offsets().IbEnd();
             ibCachedBlock += cbCachedBlock )
     {
-        CCachedBlockSlot        slot;
-        BOOL                    fCached         = fFalse;
+        QWORD               ibSlab = 0;
+        CCachedBlockId      cbid;
+        BOOL                fPossiblyCached = fFalse;
+        CCachedBlockSlot    slot;
+        BOOL                fCached         = fFalse;
 
-        const BYTE* const       pbCachedBlock   = prequest->PbData() + ibCachedBlock - prequest->Offsets().IbStart();
+        const BYTE* const   pbCachedBlock   = prequest->PbData() + ibCachedBlock - prequest->Offsets().IbStart();
 
         //  determine if we should cache this block
         //
         //  NOTE:  we do not cache writes to sparse regions of a file to force them to be reallocated.  this is
         //  required to maintain file meta-data parity with uncached files
 
-        const BOOL              fCacheIfPossible =   (  prequest->Cp() != cpDontCache &&
-                                                        Pcconfig()->PctWrite() > 0 &&
-                                                        !prequest->Pcfte()->FSparse( ibCachedBlock, cbCachedBlock ) ) ||
-                                                    prequest->Cp() == cpPinned;
+        const BOOL          fCacheIfPossible =   (  prequest->Cp() != cpDontCache &&
+                                                    Pcconfig()->PctWrite() > 0 &&
+                                                    !prequest->Pcfte()->FSparse( ibCachedBlock, cbCachedBlock ) ) ||
+                                                prequest->Cp() == cpPinned;
 
-        //  compute the cached block id for this offset
+        //  determine if we are likely to have this cached block
 
-        const CCachedBlockId    cbid(   prequest->Pcfte()->Volumeid(),
-                                        prequest->Pcfte()->Fileid(),
-                                        prequest->Pcfte()->Fileserial(),
-                                        (CachedBlockNumber)( ibCachedBlock / cbCachedBlock ) );
+        Call( ErrIsPossiblyCached( prequest->Pcfte(), ibCachedBlock, &ibSlab, &cbid, &fPossiblyCached ) );
 
-        //  change to the slab containing this block
-        //
-        //  NOTE:  this may experience sync reads from the caching file
-        //  NOTE:  this may wait for another request to finish accessing the slab
+        //  if the cached block is possibly cached then determine if it is cached.  otherwise, if we want to cache it
+        //  then ensure that we check to see if it is already cached
 
-        Call( ErrChangeSlabs( cbid, &pcbs, &fChangedSlab ) );
-
-        if ( fChangedSlab && ibCachedBlock % min( m_pch->CbCachedFilePerSlab(), prequest->Pcfte()->CbBlockSize() ) )
+        if ( fPossiblyCached || fCacheIfPossible )
         {
-            BlockCacheNotableEvent( "TornWriteOpportunity" );
+            //  change to the slab containing this block
+            //
+            //  NOTE:  this may experience sync reads from the caching file
+            //  NOTE:  this may wait for another request to finish accessing the slab
+
+            Call( ErrChangeSlabs( ibSlab, &pcbs, &fChangedSlab ) );
+
+            if ( fChangedSlab && ibCachedBlock % min( m_pch->CbCachedFilePerSlab(), prequest->Pcfte()->CbBlockSize() ) )
+            {
+                BlockCacheNotableEvent( "TornWriteOpportunity" );
+            }
+
+            cbClean = fChangedSlab ? 0 : cbClean;
+
+            //  determine if the block is already cached
+
+            Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
+            fCached = slot.FValid();
         }
-
-        cbClean = fChangedSlab ? 0 : cbClean;
-
-        //  determine if the block is already cached
-
-        Call( pcbs->ErrGetSlotForRead( cbid, &slot ) );
-        fCached = slot.FValid();
 
         //  emit telemetry
 
@@ -7880,6 +8840,52 @@ HandleError:
 }
 
 template<class I>
+ERR THashedLRUKCache<I>::ErrIsPossiblyCached(   _In_    CHashedLRUKCachedFileTableEntry<I>* pcfte,
+                                                _In_    const QWORD                         ibCachedBlock,
+                                                _Out_   QWORD* const                        pibSlab,
+                                                _Out_   CCachedBlockId* const               pcbid,
+                                                _Out_   BOOL* const                         pfPossiblyCached )
+{
+    ERR     err             = JET_errSuccess;
+    QWORD   ibSlab          = 0;
+    BOOL    fPossiblyCached = fFalse;
+
+    *pibSlab = 0;
+    new( pcbid ) CCachedBlockId();
+    *pfPossiblyCached = fFalse;
+
+    //  compute the cached block id for this offset
+
+    const CCachedBlockId cbid(  pcfte->Volumeid(),
+                                pcfte->Fileid(),
+                                pcfte->Fileserial(),
+                                (CachedBlockNumber)( ibCachedBlock / cbCachedBlock ) );
+
+    //  determine the slab that should hold this cached block
+
+    Call( m_pcbsmHash->ErrGetSlabForCachedBlock( cbid, &ibSlab ) );
+
+    //  determine if it is possible that we have this cached block in the cache
+
+    fPossiblyCached = m_pcbpf->FPossiblyContains( ibSlab, cbid );
+
+    //  return the results
+
+    *pibSlab = ibSlab;
+    new( pcbid ) CCachedBlockId( cbid.Volumeid(), cbid.Fileid(), cbid.Fileserial(), cbid.Cbno() );
+    *pfPossiblyCached = fPossiblyCached;
+
+HandleError:
+    if ( err < JET_errSuccess )
+    {
+        *pibSlab = 0;
+        new( pcbid ) CCachedBlockId();
+        *pfPossiblyCached = fFalse;
+    }
+    return err;
+}
+
+template<class I>
 void THashedLRUKCache<I>::FailIO( _In_ CRequest* const prequestIO, _In_ const ERR err )
 {
     //  loop through every request in this IO
@@ -7945,40 +8951,6 @@ void THashedLRUKCache<I>::ReleaseCompletedSlabWriteBacks()
 }
 
 template<class I>
-ERR THashedLRUKCache<I>::ErrGetSlab( _In_ const CCachedBlockId& cbid, _Out_ ICachedBlockSlab** const ppcbs )
-{
-    ERR                 err     = JET_errSuccess;
-    ICachedBlockSlab*   pcbs    = NULL;
-
-    *ppcbs = NULL;
-
-    //  get the slab
-
-    err = m_pcbsmHash->ErrGetSlab( cbid, &pcbs );
-    if ( err < JET_errSuccess )
-    {
-        Call( ErrUnexpectedMetadataReadFailure( "GetSlabByCbid", err, ErrERRCheck( JET_errDiskIO ) ) );
-    }
-
-    //  register our open slab
-
-    Call( ErrRegisterOpenSlab( pcbs ) );
-
-    //  return the slab
-
-    *ppcbs = pcbs;
-    pcbs = NULL;
-
-HandleError:
-    ReleaseSlab( err, &pcbs );
-    if ( err < JET_errSuccess )
-    {
-        ReleaseSlab( err, ppcbs );
-    }
-    return err;
-}
-
-template<class I>
 ERR THashedLRUKCache<I>::ErrGetSlabInternal(    _In_    const QWORD                 ibSlab,
                                                 _In_    const BOOL                  fIgnoreVerificationErrors,
                                                 _In_    const BOOL                  fForSlabWriteBack,
@@ -8038,6 +9010,18 @@ ERR THashedLRUKCache<I>::ErrGetSlabInternal(    _In_    const QWORD             
     }
 
     fRelease = fRelease && !pcbs;
+
+    //  update our cached block presence filter if necessary
+
+    if ( pcbsm == m_pcbsmHash && pcbs )
+    {
+        //  only update if we are not in recovery where we unilaterally overwrite slab state
+
+        if ( m_fRecovered )
+        {
+            Call( m_pcbpf->ErrLoad( pcbs ) );
+        }
+    }
 
     //  unregister as a waiter for the slab
 

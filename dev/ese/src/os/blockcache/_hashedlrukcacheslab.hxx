@@ -679,9 +679,9 @@ class TCachedBlockSlab  //  cbs
         typedef int( __cdecl* PfnCompare )( _In_ void* pvContext, _In_ const void* pvA, _In_ const void* pvB );
 
 
-        ERR ErrCreateSortedIslotArray(  _In_                                    const PfnCompare    pfnCompare,
-                                        _Out_                                   size_t* const       pcislot,
-                                        _Outptr_opt_result_buffer_( *pcislot )  ISlot** const       prgislot );
+        ERR ErrCreateSortedIslotArray(  _In_                                const PfnCompare    pfnCompare,
+                                        _Out_                               size_t* const       pcislot,
+                                        _Outptr_result_buffer_( *pcislot )  ISlot** const       prgislot );
 
         int CompareSlotsForInit( _In_ const ISlot islotA, _In_ const ISlot islotB );
         int CompareSlotsForEvict( _In_ const ISlot islotA, _In_ const ISlot islotB );
@@ -981,12 +981,13 @@ INLINE ERR TCachedBlockSlab<I>::ErrUpdateSlot( _In_ const CCachedBlockSlot& slot
         //  if we did find the youngest existing version of this cached block then it had better be younger than the
         //  new image
 
-        if (    slotstSuperceded.FValid() &&
+        if (    slotstSuperceded.Chno() != chnoInvalid && slotstSuperceded.Slno() != slnoInvalid &&
                 !( slotstSuperceded.Chno() == slotNew.Chno() && slotstSuperceded.Slno() == slotNew.Slno() ) )
         {
             //  the youngest existing version of this cached block had better be younger than the new image
 
-            if ( slotNew.Updno() == updnoInvalid || slotstSuperceded.Updno() >= slotNew.Updno() )
+            if (    slotstSuperceded.FValid() && 
+                    ( slotNew.Updno() == updnoInvalid || slotstSuperceded.Updno() >= slotNew.Updno() ) )
             {
                 //  however, this is allowed during recovery
 
@@ -1411,7 +1412,14 @@ INLINE ERR TCachedBlockSlab<I>::ErrVisitSlots(  _In_ const ICachedBlockSlab::Pfn
             //  visit the slot
 
             if ( !pfnVisitSlot( m_rgerrChunk[ icbc ],
-                                pupdateFirst ? pupdateFirst->SlotBefore() : slotst,
+                                pupdateFirst ?
+                                    CCachedBlockSlotState(  pupdateFirst->SlotBefore(),
+                                                            fFalse,
+                                                            fFalse,
+                                                            fFalse,
+                                                            fFalse,
+                                                            pupdateFirst->FSupercededBefore() ) :
+                                    slotst,
                                 slotst,
                                 keyVisitSlot ) )
             {
@@ -1774,7 +1782,7 @@ ERR TCachedBlockSlab<I>::ErrComputeSupercededState()
 
         m_rgfSlotSuperceded[ (size_t)islotThis ] = fFalse;
 
-        if (    pcblThis->FValid() &&
+        if (    pcblThis->FValid() && pcblNext->FValid() &&
                 pcblThis->Cbid().Cbno() == pcblNext->Cbid().Cbno() &&
                 pcblThis->Cbid().Fileserial() == pcblNext->Cbid().Fileserial() &&
                 pcblThis->Cbid().Fileid() == pcblNext->Cbid().Fileid() &&
@@ -2125,11 +2133,11 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotState(    _In_    const CCachedBlockId
         {
             Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlabGetSlotState" ) );
         }
+
+        //  return the slot we found
+
+        UtilMemCpy( pslotst, &slotstCurrent, sizeof( *pslotst ) );
     }
-
-    //  return the slot we found
-
-    UtilMemCpy( pslotst, &slotstCurrent, sizeof( *pslotst ) );
 
 HandleError:
     if ( err < JET_errSuccess )
@@ -2793,9 +2801,9 @@ HandleError:
 }
 
 template<class I>
-INLINE ERR TCachedBlockSlab<I>::ErrCreateSortedIslotArray(  _In_                                    const PfnCompare    pfnCompare,
-                                                            _Out_                                   size_t* const       pcislot,
-                                                            _Outptr_opt_result_buffer_( *pcislot )  ISlot** const       prgislot )
+INLINE ERR TCachedBlockSlab<I>::ErrCreateSortedIslotArray(  _In_                                const PfnCompare    pfnCompare,
+                                                            _Out_                               size_t* const       pcislot,
+                                                            _Outptr_result_buffer_( *pcislot )  ISlot** const       prgislot )
 {
     ERR             err     = JET_errSuccess;
     const size_t    cislot  = m_ccbc * CCachedBlockChunk::Ccbl();

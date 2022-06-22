@@ -5,6 +5,8 @@
 
 //  Block Cache Lock Ranks
 
+const INT rankPresenceFilterSlabs = 0;
+const INT rankPresenceFilter = 0;
 const INT rankDestagingFiles = 0;
 const INT rankThrottleContexts = 0;
 const INT rankThrottleContext = 0;

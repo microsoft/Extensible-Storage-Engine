@@ -1003,12 +1003,14 @@ class CCachedBlockSlotState : public CCachedBlockSlot
         BOOL FSlotUpdated() const { return m_fSlotUpdated; }
         BOOL FClusterUpdated() const { return m_fClusterUpdated; }
         BOOL FSuperceded() const { return m_fSuperceded; }
+        BOOL FFirstUpdate() const { return Updno() == (UpdateNumber)1; }
 
     protected:
 
         friend class CCachedBlockSlab;
         template<class I> friend class TCachedBlockSlab;
         friend class COSBlockCacheFactoryImpl;
+        friend const char* OSFormat( _In_ const CCachedBlockSlotState& slotst );
 
         CCachedBlockSlotState(  _In_ const CCachedBlockSlot&    slot,
                                 _In_ const BOOL                 fSlabUpdated,
@@ -1033,6 +1035,8 @@ class CCachedBlockSlotState : public CCachedBlockSlot
         const BOOL  m_fClusterUpdated;
         const BOOL  m_fSuperceded;
 };
+
+const char* OSFormat( _In_ const CCachedBlockSlotState& slotst );
 
 //  Cached Block Slab
 
@@ -1186,7 +1190,7 @@ class ICachedBlockSlab  //  cbs
         //  The callback must return true to continue visiting more slots.
 
         typedef BOOL (*PfnVisitSlot)(   _In_ const ERR                      err,
-                                        _In_ const CCachedBlockSlot&        slotAccepted,
+                                        _In_ const CCachedBlockSlotState&   slotstAccepted,
                                         _In_ const CCachedBlockSlotState&   slotstCurrent,
                                         _In_ const DWORD_PTR                keyVisitSlot );
 
@@ -1239,18 +1243,10 @@ class ICachedBlockSlabManager  //  cbsm
 
         virtual ~ICachedBlockSlabManager() {}
 
-        //  Gets exclusive access to the slab that may contain a cached block.
-        //
-        //  The slab must be released to allow future access.
+        //  Determines the physical id of the slab that may hold the given cached block.
 
-        virtual ERR ErrGetSlab( _In_    const CCachedBlockId&       cbid,
-                                _Out_   ICachedBlockSlab** const    ppcbs ) = 0;
-
-        //  Indicates if the slab can hold a given cached block.
-
-        virtual ERR ErrIsSlabForCachedBlock(    _In_    ICachedBlockSlab* const pcbs,
-                                                _In_    const CCachedBlockId&   cbid,
-                                                _Out_   BOOL* const             pfIsSlabForCachedBlock ) = 0;
+        virtual ERR ErrGetSlabForCachedBlock(   _In_    const CCachedBlockId&   cbid,
+                                                _Out_   QWORD* const            pib ) = 0;
 
         //  Gets exclusive access to a particular slab by its physical id.
         //

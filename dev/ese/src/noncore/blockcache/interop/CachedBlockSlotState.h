@@ -139,6 +139,17 @@ namespace Internal
                             }
                         }
 
+                        /// <summary>
+                        /// Indicates if the cached block held in the slot contains the first update of that cached block.
+                        /// </summary>
+                        property bool IsFirstUpdate
+                        {
+                            bool get()
+                            {
+                                return this->pslotst->FFirstUpdate() ? true : false;
+                            }
+                        }
+
                         /// <inheritdoc/>
                         static bool operator==( CachedBlockSlotState^ a, CachedBlockSlotState^ b )
                         {
