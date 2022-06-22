@@ -55,6 +55,11 @@ class TFileFilter  //  ff
         {
             m_volumeid = volumeid;
             m_fileid = fileid;
+            m_fileserial = fileserialInvalid;
+            if ( m_volumeid == volumeidInvalid || m_fileid == fileidInvalid )
+            {
+                rand_s( (unsigned int*)&m_fileserial );
+            }
             m_pcfconfig = *ppcfconfig;
             *ppcfconfig = NULL;
             m_fEverEligibleForCaching = fEverEligibleForCaching;
@@ -3108,6 +3113,13 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
     CCachedFileHeader*          pcfh                        = NULL;
     BOOL                        fPresumeCached              = fFalse;
     BOOL                        fPresumeAttached            = fFalse;
+
+    //  if the file has an invalid file id then it is not eligible for caching
+
+    if ( m_volumeid == volumeidInvalid || m_fileid == fileidInvalid )
+    {
+        Error( JET_errSuccess );
+    }
 
     //  we do not currently support caching files opened for write through
 
