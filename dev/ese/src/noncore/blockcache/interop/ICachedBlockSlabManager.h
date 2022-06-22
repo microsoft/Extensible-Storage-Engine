@@ -23,22 +23,11 @@ namespace Internal
                 public interface class ICachedBlockSlabManager : IDisposable
                 {
                     /// <summary>
-                    /// Gets exclusive access to the slab that may contain a cached block.
+                    /// Determines the physical id of the slab that may hold the given cached block.
                     /// </summary>
-                    /// <remarks>
-                    /// The slab must be released to allow future access.
-                    /// </remarks>
                     /// <param name="cachedBlockId">The unique id of the cached block.</param>
-                    /// <returns>A slab with exclusive access.</returns>
-                    ICachedBlockSlab^ GetSlab( CachedBlockId^ cachedBlockId );
-
-                    /// <summary>
-                    /// Indicates if the slab can hold a given cached block.
-                    /// </summary>
-                    /// <param name="slab">The slab.</param>
-                    /// <param name="cachedBlockId">The unique id of the cached block.</param>
-                    /// <returns>True if the slab can hold the given cached block.</returns>
-                    bool IsSlabForCachedBlock( CachedBlockSlab^ slab, CachedBlockId^ cachedBlockId );
+                    /// <returns>The physical id of the slab that may hold the given cached block.</returns>
+                    UInt64 GetSlabForCachedBlock( CachedBlockId^ cachedBlockId );
 
                     /// <summary>
                     /// Gets exclusive access to a particular slab by its physical id.

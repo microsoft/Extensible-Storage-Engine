@@ -26,7 +26,7 @@ namespace Internal
 
                         bool VisitSlot_(
                             EsentErrorException^ ex,
-                            CachedBlockSlot^ acceptedSlot,
+                            CachedBlockSlotState^ acceptedSlotState,
                             CachedBlockSlotState^ currentSlotState )
                         {
                             if ( !pfnVisitSlot )
@@ -35,7 +35,7 @@ namespace Internal
                             }
 
                             return pfnVisitSlot(    ex == nullptr ? JET_errSuccess : (ERR)(int)ex->Error,
-                                                    *acceptedSlot->Pslot(),
+                                                    *acceptedSlotState->Pslotst(),
                                                     *currentSlotState->Pslotst(),
                                                     keyVisitSlot );
                         }

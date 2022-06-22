@@ -248,6 +248,16 @@ const char* OSFormat( _In_ const CCachedBlockSlot& slot )
                         slot.Updno() );
 }
 
+const char* OSFormat( _In_ const CCachedBlockSlotState& slotst )
+{
+    return OSFormat(    "%s %c%c%c%c",
+                        OSFormat( (CCachedBlockSlot&)slotst ),
+                        slotst.FSlotUpdated() ? 'U' : '_',
+                        slotst.FClusterUpdated() ? 'R' : '_',
+                        slotst.FSuperceded() ? 'S' : '_',
+                        slotst.FFirstUpdate() ? 'F' : '_' );
+}
+
 void CCachedBlockSlot::Dump(    _In_ const CCachedBlockSlot&    slot,
                                 _In_ CPRINTF* const             pcprintf,
                                 _In_ IFileIdentification* const pfident )

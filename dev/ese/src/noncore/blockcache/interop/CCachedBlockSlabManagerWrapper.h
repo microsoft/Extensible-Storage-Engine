@@ -22,12 +22,8 @@ namespace Internal
 
                     public:
 
-                        ERR ErrGetSlab( _In_    const ::CCachedBlockId&     cbid,
-                                        _Out_   ::ICachedBlockSlab** const  ppcbs ) override;
-
-                        ERR ErrIsSlabForCachedBlock(    _In_    ::ICachedBlockSlab* const   pcbs,
-                                                        _In_    const ::CCachedBlockId&     cbid,
-                                                        _Out_   BOOL* const                 pfIsSlabForCachedBlock ) override;
+                        ERR ErrGetSlabForCachedBlock(   _In_    const ::CCachedBlockId& cbid,
+                                                        _Out_   QWORD* const            pib ) override;
 
                         ERR ErrGetSlab( _In_    const QWORD                 ib,
                                         _In_    const BOOL                  fWait,
@@ -39,57 +35,26 @@ namespace Internal
                 };
 
                 template<class TM, class TN>
-                inline ERR CCachedBlockSlabManagerWrapper<TM, TN>::ErrGetSlab(  _In_    const ::CCachedBlockId&     cbid,
-                                                                                _Out_   ::ICachedBlockSlab** const  ppcbs )
+                inline ERR CCachedBlockSlabManagerWrapper<TM, TN>::ErrGetSlabForCachedBlock(    _In_    const ::CCachedBlockId& cbid,
+                                                                                                _Out_   QWORD* const            pib )
                 {
                     ERR                 err     = JET_errSuccess;
                     ::CCachedBlockId*   pcbid   = NULL;
-                    ICachedBlockSlab^   cbs     = nullptr;
+                    QWORD               ib      = 0;
 
-                    *ppcbs = NULL;
-
-                    Alloc( pcbid = new ::CCachedBlockId() );
-                    UtilMemCpy( pcbid, &cbid, sizeof( *pcbid ) );
-
-                    ExCall( cbs = I()->GetSlab( gcnew CachedBlockId( &pcbid ) ) );
-
-                    Call( CachedBlockSlab::ErrWrap( cbs, ppcbs ) );
-
-                HandleError:
-                    delete cbs;
-                    delete pcbid;
-                    if ( err < JET_errSuccess )
-                    {
-                        delete *ppcbs;
-                        *ppcbs = NULL;
-                    }
-                    return err;
-                }
-
-                template<class TM, class TN>
-                inline ERR CCachedBlockSlabManagerWrapper<TM, TN>::ErrIsSlabForCachedBlock( _In_    ::ICachedBlockSlab* const   pcbs,
-                                                                                            _In_    const ::CCachedBlockId&     cbid,
-                                                                                            _Out_   BOOL* const                 pfIsSlabForCachedBlock )
-                {
-                    ERR                 err                     = JET_errSuccess;
-                    ::CCachedBlockId*   pcbid                   = NULL;
-                    bool                isSlabForCachedBlock    = false;
-
-                    *pfIsSlabForCachedBlock = fFalse;
+                    *pib = 0;
 
                     Alloc( pcbid = new ::CCachedBlockId() );
                     UtilMemCpy( pcbid, &cbid, sizeof( *pcbid ) );
 
-                    ExCall( isSlabForCachedBlock = I()->IsSlabForCachedBlock(   pcbs ? gcnew CachedBlockSlab( pcbs ) : nullptr,
-                                                                                gcnew CachedBlockId( &pcbid ) ) );
+                    ExCall( ib = I()->GetSlabForCachedBlock( gcnew CachedBlockId( &pcbid ) ) );
 
-                    *pfIsSlabForCachedBlock = isSlabForCachedBlock ? fTrue : fFalse;
+                    *pib = ib;
 
                 HandleError:
-                    delete pcbid;
                     if ( err < JET_errSuccess )
                     {
-                        *pfIsSlabForCachedBlock = fFalse;
+                        *pib = 0;
                     }
                     return err;
                 }

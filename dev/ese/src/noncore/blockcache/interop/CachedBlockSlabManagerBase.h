@@ -26,9 +26,7 @@ namespace Internal
 
                     public:
 
-                        virtual ICachedBlockSlab^ GetSlab( CachedBlockId^ cachedBlockId );
-
-                        virtual bool IsSlabForCachedBlock( CachedBlockSlab^ slab, CachedBlockId^ cachedBlockId );
+                        virtual UInt64 GetSlabForCachedBlock( CachedBlockId^ cachedBlockId );
 
                         virtual ICachedBlockSlab^ GetSlab(  UInt64 offsetInBytes, 
                                                             bool wait, 
@@ -39,33 +37,14 @@ namespace Internal
                 };
 
                 template<class TM, class TN, class TW>
-                inline ICachedBlockSlab^ CachedBlockSlabManagerBase<TM, TN, TW>::GetSlab( CachedBlockId^ cachedBlockId )
+                inline UInt64 CachedBlockSlabManagerBase<TM, TN, TW>::GetSlabForCachedBlock( CachedBlockId^ cachedBlockId )
                 {
-                    ERR                 err     = JET_errSuccess;
-                    ::ICachedBlockSlab* pcbs    = NULL;
+                    ERR     err = JET_errSuccess;
+                    QWORD   ib  = 0;
 
-                    Call( Pi->ErrGetSlab( *cachedBlockId->Pcbid(), &pcbs ) );
+                    Call( Pi->ErrGetSlabForCachedBlock( *cachedBlockId->Pcbid(), &ib ) );
 
-                    return pcbs ? gcnew CachedBlockSlab( &pcbs ) : nullptr;
-
-                HandleError:
-                    delete pcbs;
-                    throw EseException( err );
-                }
-
-                template<class TM, class TN, class TW>
-                inline bool CachedBlockSlabManagerBase<TM, TN, TW>::IsSlabForCachedBlock(
-                    CachedBlockSlab^ slab,
-                    CachedBlockId^ cachedBlockId )
-                {
-                    ERR     err                     = JET_errSuccess;
-                    BOOL    fIsSlabForCachedBlock   = fFalse;
-
-                    Call( Pi->ErrIsSlabForCachedBlock( slab == nullptr ? NULL : slab->Pi,
-                                                        *cachedBlockId->Pcbid(),
-                                                        &fIsSlabForCachedBlock ) );
-
-                    return fIsSlabForCachedBlock;
+                    return ib;
 
                 HandleError:
                     throw EseException( err );

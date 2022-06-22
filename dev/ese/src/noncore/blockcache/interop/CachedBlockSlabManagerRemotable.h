@@ -26,14 +26,9 @@ namespace Internal
 
                     public:
 
-                        virtual ICachedBlockSlab^ GetSlab( CachedBlockId^ cachedBlockId )
+                        virtual UInt64 GetSlabForCachedBlock( CachedBlockId^ cachedBlockId )
                         {
-                            return this->target->GetSlab( cachedBlockId );
-                        }
-
-                        virtual bool IsSlabForCachedBlock( CachedBlockSlab^ slab, CachedBlockId^ cachedBlockId )
-                        {
-                            return this->target->IsSlabForCachedBlock( slab, cachedBlockId );
+                            return this->target->GetSlabForCachedBlock( cachedBlockId );
                         }
 
                         virtual ICachedBlockSlab^ GetSlab(  UInt64 offsetInBytes,

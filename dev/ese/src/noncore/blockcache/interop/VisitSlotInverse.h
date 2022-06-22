@@ -63,12 +63,12 @@ namespace Internal
 
                         [UnmanagedFunctionPointer( CallingConvention::Cdecl )]
                         delegate BOOL VisitSlotDelegate(    _In_ const ERR                      err,
-                                                            _In_ const ::CCachedBlockSlot&      slotAccepted,
+                                                            _In_ const ::CCachedBlockSlotState& slotstAccepted,
                                                             _In_ const ::CCachedBlockSlotState& slotstCurrent,
                                                             _In_ const DWORD_PTR                keyVisitSlot );
 
                         BOOL FVisitSlot(    _In_ const ERR                      err,
-                                            _In_ const ::CCachedBlockSlot&      slotAccepted,
+                                            _In_ const ::CCachedBlockSlotState& slotstAccepted,
                                             _In_ const ::CCachedBlockSlotState& slotstCurrent,
                                             _In_ const DWORD_PTR                keyVisitSlot )
                         {
@@ -79,7 +79,7 @@ namespace Internal
                             
                             return this->visitSlot(
                                 EseException( err ),
-                                gcnew CachedBlockSlot( &slotAccepted ),
+                                gcnew CachedBlockSlotState( &slotstAccepted ),
                                 gcnew CachedBlockSlotState( &slotstCurrent ) );
                         }
 

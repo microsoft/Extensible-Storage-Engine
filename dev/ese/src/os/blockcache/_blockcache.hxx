@@ -14,6 +14,7 @@
 
 
 #include "blockcache\_common.hxx"
+#include "blockcache\_hash.hxx"
 #include "blockcache\_headerhelpers.hxx"
 #include "blockcache\_cachetelemetry.hxx"
 #include "blockcache\_cachedfiletableentrybase.hxx"
