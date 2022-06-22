@@ -559,7 +559,6 @@ class TFileSystemFilter  //  fsf
                             _In_opt_    const DWORD_PTR                                 keyDetachFileStatus );
         BOOL FDetachFile(   _In_ CFileFilter* const                 pff,
                             _In_ IBlockCacheConfiguration* const    pbcconfig,
-                            _In_ ICache* const                      pc,
                             _In_ const BOOL                         fCacheOpen );
         ERR ErrDetachFile(  _In_        CFileFilter* const                              pff,
                             _In_opt_    const TFileSystemFilter<I>::PfnDetachFileStatus pfnDetachFileStatus,
@@ -1954,7 +1953,7 @@ ERR TFileSystemFilter<I>::ErrGetCache(  _In_        CFileFilter* const          
     //
     //  NOTE:  if the detach fails then we will only return an error for an explicit detach file operation
 
-    if ( fDetachFile || FDetachFile( pff, pbcconfig, pc, fCacheOpen ) )
+    if ( fDetachFile || FDetachFile( pff, pbcconfig, fCacheOpen ) )
     {
         const ERR errT = ErrDetachFile( pff, pfnDetachFileStatus, keyDetachFileStatus );
         if ( fDetachFile )
@@ -1972,7 +1971,6 @@ HandleError:
 template< class I >
 BOOL TFileSystemFilter<I>::FDetachFile( _In_ CFileFilter* const                 pff,
                                         _In_ IBlockCacheConfiguration* const    pbcconfig,
-                                        _In_ ICache* const                      pc,
                                         _In_ const BOOL                         fCacheOpen )
 {
     //  we cannot detach a file that is being opened by the cache for write back
@@ -2007,7 +2005,7 @@ BOOL TFileSystemFilter<I>::FDetachFile( _In_ CFileFilter* const                 
 
     //  if the cache is disabled then we should detach
 
-    if ( !pc->FEnabled() )
+    if ( pff->Pc() && !pff->Pc()->FEnabled() )
     {
         return fTrue;
     }
