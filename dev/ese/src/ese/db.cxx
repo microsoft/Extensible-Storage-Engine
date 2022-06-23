@@ -1184,7 +1184,9 @@ ERR ErrDBUpdateAndFlushVersion(
 
     {
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
-    
+
+    pfmp->ResetEfvHighestSupported();
+
     //  Post logging dbv should not have been updated by any other method ...
 
     OnDebug( if ( ( rand() % 5 ) == 0 ) UtilSleep( 20 ) );
@@ -1198,6 +1200,7 @@ ERR ErrDBUpdateAndFlushVersion(
         DBISetVersion( pinst, wszDbFullName, ifmp, pfmtversDesired->dbv, pdbfilehdr.get(), fDbNeedsUpdate, fCreateDbUpgradeDoNotLog );
     }
 
+    Assert( pfmp->EfvHighestSupported() == 0 ); // shouldn't cache efv during this version update
     } // .dtor release dbfilehdr lock
 
     Assert( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), pfmtversDesired->dbv ) >= 0 );
@@ -1246,6 +1249,7 @@ ERR ErrDBRedoSetDbVersion(
     {
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
 
+    pfmp->ResetEfvHighestSupported();
     dbvBefore = pdbfilehdr->Dbv();
 
     //  First we check if updating with this SetDbVersion LR would push us past what we allow
@@ -1292,6 +1296,8 @@ ERR ErrDBRedoSetDbVersion(
         // doesn't make sense - AND is potentially dangerous / a lie.
         Enforce( !fRedo );
     }
+
+    Assert( pfmp->EfvHighestSupported() == 0 ); // shouldn't cache efv during this version update
     } // PdbfilehdrReadWrite
 
     if ( fRedo )
@@ -4221,6 +4227,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             {
             PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable(); // .ctor acquires header lock
 
+            pfmp->ResetEfvHighestSupported();
+
             //  Bunch of stuff normally done by DBISetHeaderAfterAttach below
 
             pdbfilehdr->le_lGenRecovering = 0;
@@ -4262,7 +4270,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             
                 DBISetVersion( pinst, wszDbFullName, ifmp, pfmtversDesired->dbv, pdbfilehdr.get(), fDbNeedsUpdate, fFalse );
             }
-            
+
+            Assert( pfmp->EfvHighestSupported() == 0 ); // shouldn't cache efv during this version update
             } // .dtor releases header lock
 
             Assert( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), pfmtversDesired->dbv ) >= 0 );
@@ -6517,6 +6526,24 @@ ERR ErrDBCloseAllDBs( PIB *ppib )
     return JET_errSuccess;
 }
 
+ERR ErrDBFormatFeatureEnabled_( const FormatVersions* pfmtversFormatFeature, const DbVersion& dbvCurrentFromFile )
+{
+    if ( CmpDbVer( dbvCurrentFromFile, pfmtversFormatFeature->dbv ) >= 0 )
+    {
+        OSTrace( JET_tracetagVersionAndStagingChecks, OSFormat( "DB format feature EFV %d check success (slow path).\n", pfmtversFormatFeature->efv ) );
+        return JET_errSuccess;
+    }
+    else
+    {
+        OSTrace(
+            JET_tracetagVersionAndStagingChecks,
+            OSFormat( "DB format feature EFV %d check failed JET_errEngineFormatVersionParamTooLowForRequestedFeature (%d).\n",
+                pfmtversFormatFeature->efv,
+                JET_errEngineFormatVersionParamTooLowForRequestedFeature ) );
+        return ErrERRCheck( JET_errEngineFormatVersionParamTooLowForRequestedFeature );
+    }
+}
+
 ERR ErrDBFormatFeatureEnabled_( const JET_ENGINEFORMATVERSION efvFormatFeature, const DbVersion& dbvCurrentFromFile )
 {
     //  Fast path - check assuming all persisted versions are current!
@@ -6542,16 +6569,7 @@ ERR ErrDBFormatFeatureEnabled_( const JET_ENGINEFORMATVERSION efvFormatFeature, 
     CallS( ErrGetDesiredVersion( NULL /* must be NULL to bypass staging */, efvFormatFeature, &pfmtversFormatFeature ) );
     if ( pfmtversFormatFeature )
     {
-        if ( CmpDbVer( dbvCurrentFromFile, pfmtversFormatFeature->dbv ) >= 0 )
-        {
-            OSTrace( JET_tracetagVersionAndStagingChecks, OSFormat( "DB format feature EFV %d check success (slow path).\n", efvFormatFeature ) );
-            return JET_errSuccess;
-        }
-        else
-        {
-            OSTrace( JET_tracetagVersionAndStagingChecks, OSFormat( "DB format feature EFV %d check failed JET_errEngineFormatVersionParamTooLowForRequestedFeature (%d).\n", efvFormatFeature, JET_errEngineFormatVersionParamTooLowForRequestedFeature ) );
-            return ErrERRCheck( JET_errEngineFormatVersionParamTooLowForRequestedFeature );
-        }
+        return ErrDBFormatFeatureEnabled_( pfmtversFormatFeature, dbvCurrentFromFile );
     }
 
     AssertTrack( fFalse, "UnknownDbFormatFeatureDisabled" );

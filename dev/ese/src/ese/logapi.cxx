@@ -3294,7 +3294,7 @@ JETUNITTESTDB( PreImageCompression, Dehydration, dwOpenDatabase )
     dataRec.SetCb( sizeof(rgbData) );
     cpage.Insert( 0, &dataRec, 1, 0 );
 
-    data.SetPv( cpage.PvBuffer() );
+    data.SetPv( const_cast<VOID*>( cpage.PvBuffer() ) );
     data.SetCb( cbPage );
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
@@ -3358,7 +3358,7 @@ JETUNITTESTDB( PreImageCompression, DehydrationAndXpress, dwOpenDatabase )
         cpage.Insert( iline, &dataRec, 1, 0 );
     }
 
-    data.SetPv( cpage.PvBuffer() );
+    data.SetPv( const_cast<VOID*>( cpage.PvBuffer() ) );
     data.SetCb( cbPage );
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
@@ -3419,7 +3419,7 @@ JETUNITTESTDB( PreImageCompression, Xpress, dwOpenDatabase )
         cpage.Insert( i, &dataRec, 1, 0 );
     }
 
-    data.SetPv( cpage.PvBuffer() );
+    data.SetPv( const_cast<VOID*>( cpage.PvBuffer() ) );
     data.SetCb( cbPage );
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
@@ -3636,7 +3636,7 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
             if( FBTISplitPageBeforeImageRequired( psplit ) )
             {
                 DATA dataToSet;
-                dataToSet.SetPv( psplitPath->csr.Cpage().PvBuffer() );
+                dataToSet.SetPv( const_cast<VOID*>( psplitPath->csr.Cpage().PvBuffer() ) );
                 dataToSet.SetCb( g_cbPage );
                 if ( ( pbDataCompressed != NULL ||
                        ( pbDataCompressed = PbPKAllocCompressionBuffer() ) != NULL ) &&
@@ -3918,7 +3918,7 @@ ERR ErrLGMerge( const FUCB *pfucb, MERGEPATH *pmergePathLeaf, LGPOS *plgpos )
             if( FBTIMergePageBeforeImageRequired( pmerge ) )
             {
                 DATA dataToSet;
-                dataToSet.SetPv( pmergePath->csr.Cpage().PvBuffer() );
+                dataToSet.SetPv( const_cast<VOID*>( pmergePath->csr.Cpage().PvBuffer() ) );
                 dataToSet.SetCb( g_cbPage );
                 if ( ( pbDataCompressed != NULL ||
                        ( pbDataCompressed = PbPKAllocCompressionBuffer() ) != NULL ) &&

@@ -1418,7 +1418,7 @@ INLINE VOID CPAGE::GetPtr_( INT itag, LINE * pline, _Out_opt_ ERR * perrNoEnforc
 //-
 {
     Assert( itag >= 0 );
-    Assert( itag < ((PGHDR *)m_bfl.pv)->itagMicFree || FNegTest( fCorruptingPageLogically ) );
+    Assert( itag < ITagMicFree_() || FNegTest( fCorruptingPageLogically ) );
     Assert( pline );
     Expected( ( pgnbc == pgnbcChecked ) == ( perrNoEnforce != NULL ) );
     Assert( ( pgnbc == pgnbcChecked ) || ( perrNoEnforce == NULL ) ); // this wouldn't make sense.
@@ -1494,13 +1494,15 @@ INLINE VOID CPAGE::GetPtr_( INT itag, LINE * pline, _Out_opt_ ERR * perrNoEnforc
 
     if ( pline->cb == 0 )
     {
+        Assert( itag < CTagReserved_() || FNegTest( fCorruptingPageLogically ) );
+
         // the ib for zero-length tag zero can be bad; it has never been validated
         // that it is even on the page; even then there are cases where it points
         // past the end of the dehydrated buffer.
 
         if constexpr( pgnbc == pgnbcChecked )
         {
-            if ( itag != 0 )
+            if ( itag >= CTagReserved_() )
             {
                 if ( perrNoEnforce != NULL )
                 {
@@ -1788,7 +1790,7 @@ INLINE CPAGE::TAG * CPAGE::PtagFromItag_( INT itag ) const
 //-
 {
     Assert( itag >= 0 );
-    Assert( itag <= ((PGHDR*)m_bfl.pv)->itagMicFree ); // The <= is for Insert_() and Delete_() which are expanding/shrinking array.
+    Assert( itag <= ITagMicFree_() || FNegTest( fCorruptingPageLogically ) ); // The <= is for Insert_() and Delete_() which are expanding/shrinking array.
 
     TAG * ptag = (TAG *)( (BYTE*)m_bfl.pv + m_platchManager->CbBuffer( m_bfl ) );
     ptag -= itag + 1;
@@ -1800,11 +1802,12 @@ INLINE CPAGE::TAG * CPAGE::PtagFromItag_( INT itag ) const
     Assert( (BYTE*)ptag > ((BYTE*)m_bfl.pv + CbPageHeader()) || FNegTest( fCorruptingPageLogically ) );
     //  We chose >= and +1 because sometimes the itagMicFree is updated after computing a PtagFromItag( itag )
     //  for a newly inserted node / see Insert_().  It would be stricter if we did not add 1 here.
-    Assert( (BYTE*)ptag >= ( ((BYTE*)m_bfl.pv + m_platchManager->CbBuffer( m_bfl )) - ((((PGHDR*)m_bfl.pv)->itagMicFree + 1)  * sizeof(TAG)) ) );
+    Assert( (BYTE*) ptag >= ( ( (BYTE*) m_bfl.pv + m_platchManager->CbBuffer( m_bfl ) ) - ( ( ITagMicFree_() + 1 ) * sizeof( TAG ) ) ) ||
+            FNegTest( fCorruptingPageLogically ) );
 #ifdef DEBUG
     //  If however the ptag matches 1 past the end of the itag array (i.e. insert, THEN we know we must have
-    //  at least 2 bytes free with which to insert a tag.
-    if( (BYTE*)ptag == ( ((BYTE*)m_bfl.pv + m_platchManager->CbBuffer( m_bfl )) - ((((PGHDR*)m_bfl.pv)->itagMicFree + 1)  * sizeof(TAG)) ) )
+    //  at least 4 bytes free with which to insert a tag.
+    if ( (BYTE*) ptag == ( ( (BYTE*) m_bfl.pv + m_platchManager->CbBuffer( m_bfl ) ) - ( ( ITagMicFree_() + 1 ) * sizeof( TAG ) ) ) )
     {
         Assert( ((PGHDR*)m_bfl.pv)->cbFree > sizeof(TAG) );
     }
@@ -1826,7 +1829,7 @@ INLINE CPAGE::TAG * CPAGE::PtagFromRgbCbItag_( BYTE *rgbPage, INT cbPage, INT it
 //-
 {
     Assert( itag >= 0 );
-    Assert( itag <= ((PGHDR*)rgbPage)->itagMicFree );
+    Assert( itag <= ITagMicFree_() || FNegTest( fCorruptingPageLogically ) );
 
     TAG * ptag = (TAG *)( (BYTE*)rgbPage + cbPage );
     ptag -= itag + 1;
@@ -1834,13 +1837,17 @@ INLINE CPAGE::TAG * CPAGE::PtagFromRgbCbItag_( BYTE *rgbPage, INT cbPage, INT it
     Assert( NULL != ptag );
     //  We chose >= and +1 because sometimes the itagMicFree is updated after computing a PtagFromItag( itag )
     //  for a newly inserted node / see Insert_().  It would be stricter if we did not add 1 here.
-    Assert( (BYTE*)ptag >= ( ((BYTE*)rgbPage + cbPage) - ((((PGHDR*)rgbPage)->itagMicFree+1)  * sizeof(TAG)) ) );
+    Assert( (BYTE*) ptag >= ( ( (BYTE*) rgbPage + cbPage ) - ( ITagMicFree_() * sizeof( TAG ) ) ) ||
+            FNegTest( fCorruptingPageLogically ) );
 #ifdef DEBUG
     //  If however the ptag matches 1 past the end of the itag array (i.e. insert, THEN we know we must have
-    //  at least 2 bytes free with which to insert a tag.
-    if( (BYTE*)ptag == ( ((BYTE*)rgbPage + cbPage) - ((((PGHDR*)rgbPage)->itagMicFree+1)  * sizeof(TAG)) ) )
+    //  at least 4 bytes free with which to insert a tag.
+    if ( (BYTE*) ptag == ( ( (BYTE*) rgbPage + cbPage ) - ( ITagMicFree_() * sizeof( TAG ) ) ) )
     {
-        Assert( ((PGHDR*)rgbPage)->cbFree > sizeof(TAG) );
+        // We can't assert the following condition as this code is called on codepaths other than insert.
+        // For example, CPAGE::OverwriteUnusedSpace()
+        // Disabling assert.
+        //Assert( ((PGHDR*)rgbPage)->cbFree >= sizeof(TAG) );
     }
 #endif
 
@@ -1869,6 +1876,7 @@ INLINE CPAGE::TAG * CPAGE::PtagFromRgbCbItag_( BYTE *rgbPage, INT cbPage, INT it
         cpageSnapOriginal.m_fSmallFormat = m_fSmallFormat;                              \
         cpageSnapOriginal.m_dbtimePreInit = m_dbtimePreInit;                            \
         cpageSnapOriginal.m_objidPreInit = m_objidPreInit;                              \
+        cpageSnapOriginal.InitItagState( (PGHDR*)m_bfl.pv );                            \
     }                                                                                   \
     Assert( (BOOL)FIsSmallPage( m_platchManager->CbPage( m_bfl ) ) == m_fSmallFormat );
 
@@ -1877,8 +1885,9 @@ INLINE CPAGE::TAG * CPAGE::PtagFromRgbCbItag_( BYTE *rgbPage, INT cbPage, INT it
 #define DEBUG_SNAP_COMPARE()    \
     if ( cpageSnapOriginal.m_bfl.pv )                                                   \
     {                                                                                   \
-        Assert( ((PGHDR*)cpageSnapOriginal.m_bfl.pv)->itagMicFree == ((PGHDR*)m_bfl.pv)->itagMicFree );     \
-        for ( INT itagT = 0; itagT < ((PGHDR*)m_bfl.pv)->itagMicFree; ++itagT )         \
+        Assert( cpageSnapOriginal.ITagMicFree_() == ITagMicFree_() );                   \
+        Assert( cpageSnapOriginal.CTagReserved_() == CTagReserved_() );                 \
+        for ( INT itagT = 0; itagT < ITagMicFree_(); ++itagT )                          \
         {                                                                               \
             const TAG * const ptagOld = cpageSnapOriginal.PtagFromRgbCbItag_( ((BYTE*)cpageSnapOriginal.m_bfl.pv), cbSnapPage, itagT );     \
             const TAG * const ptagNew = PtagFromItag_( itagT );                         \
@@ -1892,6 +1901,8 @@ INLINE CPAGE::TAG * CPAGE::PtagFromRgbCbItag_( BYTE *rgbPage, INT cbPage, INT it
         cpageSnapOriginal.m_pgno    = pgnoNull;                                         \
         cpageSnapOriginal.m_dbtimePreInit = dbtimeNil;                                  \
         cpageSnapOriginal.m_objidPreInit = objidNil;                                    \
+        cpageSnapOriginal.m_itagMicFree = 0;                                            \
+        cpageSnapOriginal.m_ctagReserved = 0;                                           \
         BFFree( cpageSnapOriginal.m_bfl.pv );                                           \
         cpageSnapOriginal.m_bfl.pv  = NULL;                                             \
     }
@@ -1906,7 +1917,7 @@ INLINE CPAGE::TAG * CPAGE::PtagFromRgbCbItag_( BYTE *rgbPage, INT cbPage, INT it
 INLINE ULONG CPAGE::CbTagArray_() const
 //  ================================================================
 {
-    return ((PGHDR *)m_bfl.pv)->itagMicFree * sizeof(TAG);
+    return ITagMicFree_() * sizeof( TAG );
 }
 
 
@@ -1943,12 +1954,14 @@ CPAGE::CPAGE( ) :
         m_dbtimePreInit( dbtimeNil ),
         m_pgno( pgnoNull ),
         m_objidPreInit( objidNil ),
+        m_itagMicFree( 0 ),
+        m_ctagReserved( 0 ),
         m_platchManager( &g_nullPageLatchManager ),
         m_fSmallFormat( fFormatInvalid ),
-        m_iRuntimeScrubbingEnabled( -1 )
+        m_fRuntimeFlags( 0 )
 {
     C_ASSERT( sizeof( CPAGE::TAG ) == 4 );
-    C_ASSERT( ctagReserved > 0 );
+    C_ASSERT( ctagReservedLegacy > 0 );
     m_bfl.pv        = NULL;
     m_bfl.dwContext = NULL;
 }
@@ -1986,6 +1999,8 @@ VOID CPAGE::PreInitializeNewPage_(  PIB * const ppib,
     m_ppib = ppib;
     m_ifmp = ifmp;
     m_pgno = pgno;
+    m_itagMicFree = 0;
+    m_ctagReserved = 0;
 
 #ifndef ENABLE_JET_UNIT_TEST
     Assert( ( ifmpNil != ifmp ) || FNegTest( fInvalidUsage ) || dbtime == dbtimeRevert );
@@ -2005,7 +2020,7 @@ VOID CPAGE::PreInitializeNewPage_(  PIB * const ppib,
     ppghdr->cbFree              = (USHORT)CbPageData();
     ppghdr->cbUncommittedFree   = 0;
     ppghdr->ibMicFree           = 0;
-    ppghdr->itagMicFree         = 0;
+    ppghdr->itagState           = 0;
     ppghdr->pgnoNext            = pgnoNull;
     ppghdr->pgnoPrev            = pgnoNull;
     ppghdr->dbtimeDirtied       = dbtime;
@@ -2162,14 +2177,16 @@ HandleError:
 VOID CPAGE::ConsumePreInitPage( const ULONG fPageFlags )
 //  ================================================================
 {
+    PGHDR* const ppghdr = (PGHDR*)m_bfl.pv;
+
     // Check consistency of current state and new flags.
     Assert( FFlags() == ( CPAGE::fPageNewRecordFormat | CPAGE::fPagePreInit ) );
     Assert( ( fPageFlags & CPAGE::fPagePreInit ) == 0 );
-    Assert( ((PGHDR*)m_bfl.pv)->itagMicFree == 0 );
 
     // Insert the line for the external header.
-    PGHDR* const ppghdr = (PGHDR*)m_bfl.pv;
-    ppghdr->itagMicFree = ctagReserved;
+    Assert( ITagMicFree_() == 0);
+    Assert( CTagReserved_() == 0);
+    SetITagState_( 1, 1 );
 
     USHORT cbFree = ppghdr->cbFree;     // endian conversion
     cbFree -= (USHORT)sizeof( CPAGE::TAG );
@@ -2194,7 +2211,7 @@ VOID CPAGE::FinalizePreInitPage( OnDebug( const BOOL fCheckPreInitPage ) )
     Expected( ( m_dbtimePreInit != dbtimeNil ) && ( m_objidPreInit != objidNil ) );
     Assert( FFlags() != 0 );
     Assert( !!fCheckPreInitPage == !!FPreInitPage() );
-    Assert( !fCheckPreInitPage == ((PGHDR*)m_bfl.pv)->itagMicFree >= ctagReserved );
+    Assert( ITagMicFree_() >= CTagReserved_() );
     m_dbtimePreInit = dbtimeNil;
     m_objidPreInit = objidNil;
 
@@ -2222,7 +2239,7 @@ VOID CPAGE::FinalizePreInitPage( OnDebug( const BOOL fCheckPreInitPage ) )
         tc.iorReason.Iorf(),
         tc.nParentObjectClass,
         ppghdr->dbtimeDirtied,
-        ppghdr->itagMicFree, // kind of pointless for this trace, but shares template with read page.
+        ppghdr->itagState, // kind of pointless for this trace, but shares template with read page.
         ppghdr->cbFree  );
 }
 
@@ -2293,6 +2310,7 @@ LatchPage:
     m_ppib          = ppib;
     m_ifmp          = ifmp;
     m_pgno          = pgno;
+    InitItagState( (PGHDR*) m_bfl.pv );
 
 #ifdef MINIMAL_FUNCTIONALITY
     Enforce( FNewRecordFormat() );
@@ -2444,6 +2462,7 @@ ERR CPAGE::ErrGetRDWPage(   PIB * ppib,
     m_ppib          = ppib;
     m_ifmp          = ifmp;
     m_pgno          = pgno;
+    InitItagState( (PGHDR*) m_bfl.pv );
 
 #ifdef MINIMAL_FUNCTIONALITY
     Enforce( FNewRecordFormat() );
@@ -2526,6 +2545,7 @@ ERR CPAGE::ErrLoadPage(
     m_ifmp          = ifmp;
     m_pgno          = pgno;
     m_fSmallFormat  = FIsSmallPage( g_rgfmp[ifmp].CbPage() );
+    InitItagState( (PGHDR*) pv );
 
     Assert( (ULONG)g_rgfmp[ifmp].CbPage() == cb );
 
@@ -2561,6 +2581,10 @@ VOID CPAGE::LoadNewPage(
 
     PreInitializeNewPage_( ppibNil, ifmp, pgno, objidFDP, 0 );
     ConsumePreInitPage( fFlags );
+
+    // The page is loaded with reserved tag format disabled.
+    // Then it is enabled here if the efv check succeeds.
+    InitItagState( (PGHDR*) pv );
 }
 
 #ifdef ENABLE_JET_UNIT_TEST
@@ -2596,7 +2620,7 @@ VOID CPAGE::LoadNewTestPage( _In_ const ULONG cb, _In_ const IFMP ifmp )
 
     PGHDR * ppghdr = (PGHDR*)PvBuffer();
     ppghdr->checksum = 0xf7e97daa;
-
+    m_fResvTagFormatEnabled = fTrue;
 }
 #endif // ENABLE_JET_UNIT_TEST
 
@@ -2613,6 +2637,7 @@ VOID CPAGE::LoadPage( const IFMP ifmp, const PGNO pgno, VOID * const pv, const U
     m_ppib          = ppibNil;
     m_ifmp          = ifmp;
     m_pgno          = pgno;
+    InitItagState( (PGHDR*) pv );
 
     Assert( cb != 0 );
 
@@ -2729,6 +2754,26 @@ VOID CPAGE::ReBufferPage( _In_ const BFLatch& bfl, const IFMP ifmp, const PGNO p
 }
 
 //  ================================================================
+VOID CPAGE::CopyPage( _In_ const VOID* pv, const ULONG cb )
+//  ================================================================
+//
+//  Copies a page image into the current CPAGE from an arbitrary chunk of memory.
+//  Initializes itag state in CPAGE appropriately based on src pv.
+//  If the pgno of the CPAGE is different than the page image being copied from,
+//  it will be updated for the pgno the CPAGE thinks it is.
+//-
+{
+    Assert( cb == CbPage() );
+    Assert( CbPage() == CbBuffer() );   // page must be dehydrated
+    Assert( FAssertWriteLatch() );
+
+    PGHDR* ppghdr = (PGHDR*) m_bfl.pv;
+    UtilMemCpy( ppghdr, pv, cb );
+    InitItagState( ppghdr );
+    SetPgno( m_pgno );  // modify pgno in the page header to keep the current CPAGE's pgno
+}
+
+//  ================================================================
 VOID CPAGE::UnloadPage()
 //  ================================================================
 //
@@ -2742,6 +2787,8 @@ VOID CPAGE::UnloadPage()
     m_dbtimePreInit     = dbtimeNil;
     m_pgno              = pgnoNull;
     m_objidPreInit      = objidNil;
+    m_itagMicFree       = 0;
+    m_ctagReserved      = 0;
     m_platchManager     = &g_nullPageLatchManager;
     m_fSmallFormat      = fFormatInvalid;
 }
@@ -2770,6 +2817,8 @@ CPAGE& CPAGE::operator=( CPAGE& rhs )
     m_pgno          = rhs.m_pgno;
     m_dbtimePreInit = rhs.m_dbtimePreInit;
     m_objidPreInit  = rhs.m_objidPreInit;
+    m_itagMicFree   = rhs.m_itagMicFree;
+    m_ctagReserved  = rhs.m_ctagReserved;
     m_bfl.pv        = rhs.m_bfl.pv;
     m_bfl.dwContext = rhs.m_bfl.dwContext;
     m_platchManager = rhs.m_platchManager;
@@ -3167,7 +3216,7 @@ VOID CPAGE::Replace( INT iline, const DATA * rgdata, INT cdata, INT fFlags )
     ASSERT_VALID( this );
 #endif  //  DEBUG_PAGE
 
-    Replace_( iline + ctagReserved, rgdata, cdata, fFlags );
+    Replace_( iline + CTagReserved_(), rgdata, cdata, fFlags );
 }
 
 
@@ -3184,7 +3233,7 @@ VOID CPAGE::ReplaceFlags( INT iline, INT fFlags )
     ASSERT_VALID( this );
 #endif  //  DEBUG_PAGE
 
-    ReplaceFlags_( iline + ctagReserved, fFlags );
+    ReplaceFlags_( iline + CTagReserved_(), fFlags );
 }
 
 
@@ -3212,7 +3261,7 @@ VOID CPAGE::Insert( INT iline, const DATA * rgdata, INT cdata, INT fFlags )
     }
 #endif
 
-    Insert_( iline + ctagReserved, rgdata, cdata, fFlags );
+    Insert_( iline + CTagReserved_(), rgdata, cdata, fFlags );
 }
 
 
@@ -3229,7 +3278,7 @@ VOID CPAGE::Delete( INT iline )
     ASSERT_VALID( this );
 #endif  //  DEBUG_PAGE
 
-    Delete_( iline + ctagReserved );
+    Delete_( iline + CTagReserved_() );
 }
 
 
@@ -3252,6 +3301,81 @@ VOID CPAGE::SetExternalHeader( const DATA * rgdata, INT cdata, INT fFlags )
 
 
 //  ================================================================
+INT CPAGE::IAddReservedTag( INT cb, BYTE fill )
+//  ================================================================
+//
+//  Appends a reserved tag. Reserved tags reside before ilines in the tag array.
+//  Sets size and pattern-fills tag's data.
+//
+//-
+{
+    const BOOL  fSmallFormat = FSmallPageFormat();
+    PGHDR*      ppghdr = (PGHDR*) m_bfl.pv;
+    INT         itag = CTagReserved_();
+
+    if ( FResvTagFormatEnabled() && itag < PGHDR::CTAG_RESERVED_MAX )
+    {
+        FreeSpace_( cb );
+        ExpandTagArray_( itag );         // will increment itagMicFree
+        SetCTagReserved_( itag + 1 );   // increment ctagReserved
+
+        TAG* ptag = PtagFromItag_( itag );
+        ptag->SetCb( this, 0 );
+        ptag->SetIb( this, 0 );
+        ptag->SetFlags( this, 0 );
+
+        ptag->SetIb( this, ppghdr->ibMicFree );
+        ppghdr->ibMicFree = USHORT( ppghdr->ibMicFree + cb );
+        ptag->SetCb( this, (USHORT) cb );
+        const USHORT cbFree = (USHORT) ( ppghdr->cbFree - cb - sizeof( CPAGE::TAG ) );
+        ppghdr->cbFree = cbFree;
+
+        BYTE* pb = PbFromIb_( ptag->Ib( fSmallFormat ) );
+        memset( pb, fill, ptag->Cb( fSmallFormat ) );
+        return itag;
+    }
+    else
+    {
+        Assert( FNegTest( fInvalidAPIUsage ) );
+        return -1;
+    }
+}
+
+//  ================================================================
+VOID CPAGE::ReplaceReservedTag( INT itag, const DATA* rgdata, INT cdata )
+//  ================================================================
+//
+//  Replaces a reserved tag with the given data. May reorganize the page.
+//
+//-
+{
+    Assert( FResvTagFormatEnabled() );
+    Assert( itag < CTagReserved_() );
+    Assert( rgdata );
+    Assert( cdata > 0 );
+#ifdef DEBUG_PAGE
+    ASSERT_VALID( this );
+#endif  //  DEBUG_PAGE
+
+    Replace_( itag, rgdata, cdata, 0 );
+}
+
+
+//  ================================================================
+bool CPAGE::FResvTagFormatEnabled()
+//  ================================================================
+{
+#if !defined( ENABLE_JET_UNIT_TEST )
+    // Check if the new cpage format that allows multiple reserved tags is enabled.
+    return ( m_ifmp != ifmpNil &&
+             JET_errSuccess == g_rgfmp[ m_ifmp ].ErrDBFormatFeatureEnabled( JET_efvReservedTags ) );
+#else
+    return m_fResvTagFormatEnabled;
+#endif
+}
+
+
+//  ================================================================
 VOID CPAGE::ReleaseWriteLatch( BOOL fTossImmediate )
 //  ================================================================
 //
@@ -3259,8 +3383,7 @@ VOID CPAGE::ReleaseWriteLatch( BOOL fTossImmediate )
 //  page.
 //
 //-
-{
-    ASSERT_VALID( this );
+{    ASSERT_VALID( this );
     DebugCheckAll();
     Assert( ( m_dbtimePreInit == dbtimeNil ) == ( m_objidPreInit == objidNil ) );
 
@@ -3511,15 +3634,14 @@ VOID CPAGE::ResetFScrubbed_( )
 BOOL CPAGE::FLastNodeHasNullKey() const
 //  ================================================================
 {
-    const PGHDR * const ppghdr  = (PGHDR*)m_bfl.pv;
-    LINE                line;
+    LINE line;
 
     //  should only be called for internal pages
     Assert( FInvisibleSons() );
 
     //  must be at least one node on the page
-    Assert( ppghdr->itagMicFree > ctagReserved );
-    GetPtr( ppghdr->itagMicFree - ctagReserved - 1, &line );
+    Assert( ITagMicFree_() > CTagReserved_() );
+    GetPtr( ITagMicFree_() - CTagReserved_() - 1, &line );
 
     //  internal nodes can't be marked versioned or deleted
     Assert( !( line.fFlags & (fNDVersion|fNDDeleted) ) );
@@ -3599,7 +3721,7 @@ VOID CPAGE::ResetAllFlags( INT fFlags )
 
     const BOOL fSmallFormat = FSmallPageFormat();
 
-    for ( INT itag = ((PGHDR*)m_bfl.pv)->itagMicFree - 1; itag >= ctagReserved; itag-- )
+    for ( INT itag = ITagMicFree_() - 1; itag >= CTagReserved_(); itag-- )
     {
         TAG * const ptag = PtagFromItag_( itag );
         ptag->SetFlags( this, USHORT( ptag->FFlags( this, fSmallFormat ) & ~fFlags ) );
@@ -3619,7 +3741,7 @@ bool CPAGE::FAnyLineHasFlagSet( INT fFlags ) const
 
     const BOOL fSmallFormat = FSmallPageFormat();
 
-    for ( INT itag = ( ( PGHDR* )m_bfl.pv )->itagMicFree - 1; itag >= ctagReserved; itag-- )
+    for ( INT itag = ITagMicFree_() - 1; itag >= CTagReserved_(); itag-- )
     {
         const TAG* const ptag = PtagFromItag_( itag );
 
@@ -3739,7 +3861,7 @@ VOID CPAGE::ReorganizePage(
     Assert( pcbTrailer );
     Assert( pvHeader != pvTrailer );
     Assert( pcbHeader != pcbTrailer );
-    Assert( ctagReserved > 0 );
+    Assert( CTagReserved_() > 0);
     Assert( !FPreInitPage() );
 
     *pvHeader = NULL;
@@ -3760,7 +3882,7 @@ VOID CPAGE::ReorganizePage(
     //
     const BYTE * const pbMin    = (BYTE *)m_bfl.pv;
     const BYTE * const pbFree   = PbFromIb_( ppghdr->ibMicFree );
-    const BYTE * const pbTags   = (BYTE *)PtagFromItag_( ppghdr->itagMicFree-1 );
+    const BYTE * const pbTags   = (BYTE*) PtagFromItag_( ITagMicFree_() - 1 );
     const BYTE * const pbMax    = pbMin + m_platchManager->CbBuffer( m_bfl );
 
     Assert( FOnPage( pbFree, 0 ) );
@@ -3860,6 +3982,9 @@ PAGECHECKSUM CPAGE::LoggedDataChecksum() const
 //  currently this isn't strictly necessary but may be desirable in the future
 //  (i.e. we don't want this blowing up down the road)
 //
+//  Reserved tag Format Upgrade: Based on enabled EFV, we may decide to upgrade the PGHDR to support reserved tags.
+//  This operation isn't logged but only happens on a page modification (implicitly logged)
+//
 //  To do this we will checksum the header, excluding cbUncomittedFree and
 //  ibMicFree, then cycle through the nodes on the page and checksum them.
 //
@@ -3891,7 +4016,7 @@ PAGECHECKSUM CPAGE::LoggedDataChecksum() const
 
     BOOL fCaughtTagNotOnPage = fFalse;
     //  loop through the nodes on the page. checksum the data and then mix in the flags
-    for ( INT itagT = 0; itagT < ppghdr2->pghdr.itagMicFree; ++itagT )
+    for ( INT itagT = 0; itagT < ITagMicFree_(); ++itagT )
     {
         const TAG * const   ptag    = PtagFromItag_( itagT );
 
@@ -4419,22 +4544,22 @@ ERR CPAGE::ErrCheckPage(
         Error( ErrCaptureCorruptedPageInfo( mode, L"ibMicFreeTooLarge" ) );
     }
 
-    if ( ppghdr->itagMicFree >= ( CbBufferData() / sizeof( TAG ) ) )
+    if ( ITagMicFree_() >= ( CbBufferData() / sizeof( TAG ) ) )
     {
-        (*pcprintf)( "page corruption (%d): itagMicFree too large (%d bytes)\r\n",
-                        m_pgno, (USHORT)ppghdr->itagMicFree );
+        (*pcprintf)( "page corruption (%d): itagMicFree too large (%d)\r\n",
+                        m_pgno, ITagMicFree_() );
         Error( ErrCaptureCorruptedPageInfo( mode, L"itagMicFreeTooLarge" ) );
     }
 
     //  make sure number of lines / itagMicFree variable is consistent
 
-    if ( ( ppghdr->itagMicFree == 0 ) && !FEmptyPage() && !FPreInitPage() )
+    if ( ( ITagMicFree_() == 0 ) && !FEmptyPage() && !FPreInitPage() )
     {
         (*pcprintf)( "page corruption (%d): Empty page without fPageEmpty or fPagePreInit flags set\r\n", m_pgno );
         Error( ErrCaptureCorruptedPageInfo( mode, L"EmptyAndPreInitFlagsNotSet" ) );
     }
 
-    const __int64 ctags = (__int64)((PGHDR *)m_bfl.pv)->itagMicFree;
+    const __int64 ctags = ITagMicFree_();
     const ULONG_PTR pbPageDataStart = PbDataStart_();  // m_bfl.pv + header size
     const ULONG_PTR pbPageDataEnd = PbDataEnd_();      // m_bfl.pv + CbBuffer() - tag array size (off itagMicFree)
     if ( pbPageDataEnd <= ( pbPageDataStart + 1 /* generous 1 byte in data section, tighter check next */ ) )
@@ -4471,7 +4596,7 @@ ERR CPAGE::ErrCheckPage(
 
     if ( FPreInitPage() )
     {
-        if ( ( ppghdr->itagMicFree != 0 ) ||
+        if ( ( ITagMicFree_() != 0 ) ||
             !FNewRecordFormat() ||
              ( ( FFlags() & ~fPagePreInit & ~fPageNewRecordFormat & ~fPageNewChecksumFormat & ~maskFlushType ) != 0 ) ||
              ( PgnoPrev() != pgnoNull ) ||
@@ -4522,7 +4647,7 @@ ERR CPAGE::ErrCheckPage(
 
     const INT cbPrefixMax = ( FSpaceTree() || ppghdr->objidFDP == 0 /* zero'd page */ ) ? 0 : PtagFromItag_( 0 )->Cb( fSmallFormat );
 
-    for ( INT itag  = 0; itag < ppghdr->itagMicFree; ++itag )
+    for ( INT itag = 0; itag < ITagMicFree_(); ++itag )
     {
         TAG * const ptag = PtagFromItag_( itag );
 
@@ -4531,12 +4656,10 @@ ERR CPAGE::ErrCheckPage(
 
         cbTotal += cb;
 
-        //  only tag-zero is allowed to be zero-length. however, the IB portion of
-        //  tag-zero is unfortunately allowed to be invalid i.e. greater than ibMicFree.
-
+        //  Reserved tags are allowed to be zero-length.
         if ( cb == 0 )
         {
-            if ( itag == 0 )
+            if ( itag < CTagReserved_() )
             {
                 continue;
             }
@@ -4571,10 +4694,10 @@ ERR CPAGE::ErrCheckPage(
                 Error( ErrCaptureCorruptedPageInfo( mode, L"TagBeyondEndOfPage" ) );
             }
 
-            const INT iline = itag - ctagReserved;
+            const INT iline = itag - CTagReserved_();
             LINE line;
-            const ERR errGetLine = itag < ctagReserved ?
-                                       ErrGetPtrExternalHeader( &line ) :
+            const ERR errGetLine = itag < CTagReserved_() ?
+                                       ErrGetPtrReservedTag( itag, &line ) :
                                        ErrGetPtr( iline, &line );
 
             // Note: ErrNDIGetkeydataflags() down lower also does a ErrGetPtr(), but we do it separately, so we can know
@@ -4660,7 +4783,7 @@ ERR CPAGE::ErrCheckPage(
 
             //  do some simple KEYDATAFLAGS checks
 
-            if ( ( grbitExtensiveCheck & CheckLineBoundedByTag ) && !FSpaceTree() && itag >= ctagReserved  )
+            if ( ( grbitExtensiveCheck & CheckLineBoundedByTag ) && !FSpaceTree() && itag >= CTagReserved_() )
             {
                 KEYDATAFLAGS kdf;
                 kdf.Nullify();
@@ -4700,7 +4823,7 @@ ERR CPAGE::ErrCheckPage(
                 }
 
                 if ( kdf.key.prefix.Cb() == 0 && kdf.key.suffix.Cb() == 0 &&
-                     ( FLeafPage() || itag < ppghdr->itagMicFree - 1 ) && // last key in non-leaf pages is empty
+                     ( FLeafPage() || itag < ITagMicFree( ppghdr ) - 1 ) && // last key in non-leaf pages is empty
                      !g_fRepair )
                 {
                     (*pcprintf)( "page corruption (%d): TAG %d both prefix/suffix are zero length\r\n",
@@ -4766,8 +4889,8 @@ ERR CPAGE::ErrCheckPage(
 
                 if ( grbitExtensiveCheck & CheckLinesInOrder )
                 {
-                    if ( itag > ctagReserved &&
-                         ( FLeafPage() || itag < ppghdr->itagMicFree - 1 ) && // last key in non-leaf pages is empty
+                    if ( itag > CTagReserved_() &&
+                         ( FLeafPage() || itag < ITagMicFree_() - 1 ) && // last key in non-leaf pages is empty
                          CmpKey( kdf.key, keyLast ) < 0 )
                     {
                         (*pcprintf)( "page corruption (%d): TAG %d out of order on the page compared to the previous tag\r\n", m_pgno, itag );
@@ -4933,7 +5056,7 @@ VOID CPAGE::Replace_( INT itag, const DATA * rgdata, INT cdata, INT fFlags )
 {
     PGHDR *ppghdr = (PGHDR*)m_bfl.pv;
 
-    Assert( itag >= 0 && itag < ppghdr->itagMicFree );
+    Assert( itag >= 0 && itag < ITagMicFree_() );
     Assert( rgdata );
     Assert( cdata > 0 );
     Assert( FAssertWriteLatch( ) );
@@ -5032,7 +5155,7 @@ VOID CPAGE::Replace_( INT itag, const DATA * rgdata, INT cdata, INT fFlags )
 VOID CPAGE::ReplaceFlags_( INT itag, INT fFlags )
 //  ================================================================
 {
-    Assert( itag >= 0 && itag < ((PGHDR*)m_bfl.pv)->itagMicFree );
+    Assert( itag >= 0 && itag < ITagMicFree_() );
     Assert( FAssertWriteLatch() || FAssertWARLatch() );
 
     TAG * const ptag = PtagFromItag_( itag );
@@ -5055,20 +5178,19 @@ VOID CPAGE::Insert_( INT itag, const DATA * rgdata, INT cdata, INT fFlags )
 {
     PGHDR *ppghdr = (PGHDR*)m_bfl.pv;
 
-    Assert( itag >= 0 && itag <= ppghdr->itagMicFree );
+    Assert( itag >= 0 && itag <= ITagMicFree_() );
     Assert( rgdata );
     Assert( cdata > 0 );
     Assert( FAssertWriteLatch( ) );
     Assert( FIsNormalSized() );
 
-    const BOOL fSmallFormat = FSmallPageFormat();
-
 #ifdef DEBUG
-    if ( ppghdr->itagMicFree > 1 )
+    const BOOL fSmallFormat = FSmallPageFormat();
+    if ( ITagMicFree_() > 1 )
     {
         //  check the last itag (often the last record) is consistent with ibMicFree
 
-        TAG * const ptagLast = PtagFromItag_( ppghdr->itagMicFree - 1);
+        TAG* const ptagLast = PtagFromItag_( ITagMicFree_() - 1 );
         USHORT ibAfterLastTag = ptagLast->Ib( fSmallFormat ) + ptagLast->Cb( fSmallFormat );
         Assert( ibAfterLastTag <= ppghdr->ibMicFree );
     }
@@ -5087,14 +5209,40 @@ VOID CPAGE::Insert_( INT itag, const DATA * rgdata, INT cdata, INT fFlags )
 #endif  //  DEBUG
 
     FreeSpace_( cbTotal + sizeof( CPAGE::TAG ) );
+    ExpandTagArray_( itag );
 
-    if( itag != ppghdr->itagMicFree )
+    TAG * const ptag = PtagFromItag_( itag );
+    ptag->SetCb( this, 0 );
+    ptag->SetIb( this, 0 );
+    ptag->SetFlags( this, 0 );
+
+    ptag->SetIb( this, ppghdr->ibMicFree );
+    ppghdr->ibMicFree = USHORT( ppghdr->ibMicFree + cbTotal );
+    ptag->SetCb( this, cbTotal );
+    const USHORT cbFree =   (USHORT)(ppghdr->cbFree - ( cbTotal + sizeof( CPAGE::TAG ) ) );
+    ppghdr->cbFree = cbFree;
+    ptag->SetFlags( this, (USHORT)fFlags );
+
+    CopyData_ ( ptag, rgdata, cdata );
+
+#ifdef DEBUG_PAGE
+    DebugCheckAll();
+#endif
+}
+
+
+//  ================================================================
+VOID CPAGE::ExpandTagArray_( INT itag )
+//  ================================================================
+//
+//  Expands the tag array to make room for a new entry at itag.
+//
+{
+    if ( itag != ITagMicFree_() )
     {
-        //  expand the tag array and make room
-
-        VOID * const pvTagSrc   = PtagFromItag_( ppghdr->itagMicFree-1 );
-        VOID * const pvTagDest  = PtagFromItag_( ppghdr->itagMicFree );
-        const LONG  cTagsToMove = ppghdr->itagMicFree - itag;
+        VOID*  const pvTagSrc   = PtagFromItag_( ITagMicFree_() - 1 );
+        VOID*  const pvTagDest  = PtagFromItag_( ITagMicFree_() );
+        const LONG  cTagsToMove = ITagMicFree_() - itag;
 
         //  tags grow from the end of the page (i.e. from high memory to low) so the destination
         //  will be less than the source
@@ -5102,8 +5250,6 @@ VOID CPAGE::Insert_( INT itag, const DATA * rgdata, INT cdata, INT fFlags )
         Assert( pvTagDest < pvTagSrc );
         Assert( sizeof( CPAGE::TAG ) == ( (LONG_PTR)pvTagSrc - (LONG_PTR)pvTagDest ) );
         Assert( cTagsToMove > 0 );
-
-        //
 
         C_ASSERT( sizeof( CPAGE::TAG ) == sizeof( DWORD ) );
 
@@ -5145,28 +5291,11 @@ VOID CPAGE::Insert_( INT itag, const DATA * rgdata, INT cdata, INT fFlags )
         //  if the move was done correctly the contents of the tag at itag should
         //  have been moved to itag+1, leaving a (temporarily) duplicate tag
 
+        const BOOL fSmallFormat = FSmallPageFormat();
         Assert( PtagFromItag_( itag )->Ib( fSmallFormat ) == PtagFromItag_( itag + 1 )->Ib( fSmallFormat ) );
     }
 
-    ppghdr->itagMicFree = USHORT( ppghdr->itagMicFree + 1 );
-
-    TAG * const ptag = PtagFromItag_( itag );
-    ptag->SetCb( this, 0 );
-    ptag->SetIb( this, 0 );
-    ptag->SetFlags( this, 0 );
-
-    ptag->SetIb( this, ppghdr->ibMicFree );
-    ppghdr->ibMicFree = USHORT( ppghdr->ibMicFree + cbTotal );
-    ptag->SetCb( this, cbTotal );
-    const USHORT cbFree =   (USHORT)(ppghdr->cbFree - ( cbTotal + sizeof( CPAGE::TAG ) ) );
-    ppghdr->cbFree = cbFree;
-    ptag->SetFlags( this, (USHORT)fFlags );
-
-    CopyData_ ( ptag, rgdata, cdata );
-
-#ifdef DEBUG_PAGE
-    DebugCheckAll();
-#endif
+    SetITagMicFree_( ITagMicFree_() + 1 );
 }
 
 
@@ -5180,7 +5309,7 @@ VOID CPAGE::Delete_( INT itag )
 {
     PGHDR *ppghdr = (PGHDR*)m_bfl.pv;
 
-    Assert( itag >= ctagReserved && itag < ppghdr->itagMicFree );   // never delete the external header
+    Assert( itag >= CTagReserved_() && itag < ITagMicFree_());   // never delete the external header
     Assert( FAssertWriteLatch( ) );
     Assert( FIsNormalSized() );
 
@@ -5205,9 +5334,9 @@ VOID CPAGE::Delete_( INT itag )
     const USHORT cbFree =   (USHORT)( ppghdr->cbFree + ptag->Cb( fSmallFormat ) + sizeof( CPAGE::TAG ) );
     ppghdr->cbFree = cbFree;
 
-    ppghdr->itagMicFree = USHORT( ppghdr->itagMicFree - 1 );
+    SetITagMicFree_( ITagMicFree_() - 1 );
     copy_backward(
-        PtagFromItag_( ppghdr->itagMicFree ),
+        PtagFromItag_( ITagMicFree_() ),
         PtagFromItag_( itag ),
         PtagFromItag_( itag-1 ) );
 
@@ -5215,7 +5344,7 @@ VOID CPAGE::Delete_( INT itag )
     if ( ppghdr->cbFree + sizeof( CPAGE::TAG ) + CbPageHeader() == m_platchManager->CbBuffer( m_bfl ) )
     {
         AssertRTL( PtagFromItag_( 0 )->Cb( fSmallFormat ) == 0 );
-        AssertRTL( ppghdr->itagMicFree == 1 );
+        AssertRTL( ITagMicFree_() == 1 );
         ppghdr->ibMicFree = 0;
     }
 
@@ -5243,7 +5372,7 @@ INLINE VOID CPAGE::ReorganizeData_( __in_range( reorgOther, reorgMax - 1 ) const
     DEBUG_SNAP_PAGE();
 
     Assert( !FPreInitPage() );
-    Assert( ppghdr->itagMicFree > 0 );
+    Assert( ITagMicFree_() > 0 );
     Assert( 0 != ppghdr->cbFree );  // we should have space if we are to reorganize
 
     const BOOL fSmallFormat = FSmallPageFormat();
@@ -5263,14 +5392,14 @@ INLINE VOID CPAGE::ReorganizeData_( __in_range( reorgOther, reorgMax - 1 ) const
     //  case separately (for speed)
     INT iptag   = 0;
     INT itag    = 0;
-    for ( ; itag < ppghdr->itagMicFree; ++itag )
+    for ( ; itag < ITagMicFree_(); ++itag )
     {
         TAG * const ptag = PtagFromItag_( itag );
         rgptag[iptag++] = ptag;
     }
 
     const INT cptag = iptag;
-    Assert( iptag <= ppghdr->itagMicFree );
+    Assert( iptag <= ITagMicFree_() );
 
     //  sort the array
     sort( rgptag, rgptag + cptag, PfnCmpPtagIb() );
@@ -5741,7 +5870,7 @@ INLINE VOID CPAGE::ZeroOutGaps_( const CHAR chZero )
     PGHDR * const ppghdr = (PGHDR*)m_bfl.pv;
 
     Assert( !FPreInitPage() );
-    Assert( ppghdr->itagMicFree > 0 );
+    Assert( ITagMicFree_() > 0 );
     Assert( 0 != ppghdr->cbFree );  // we should have space if we are to reorganize
 
     const BOOL fSmallFormat = FSmallPageFormat();
@@ -5760,7 +5889,7 @@ INLINE VOID CPAGE::ZeroOutGaps_( const CHAR chZero )
     //  note: only the external header can be zero-length
     INT iptag   = 0;
     INT itag    = 0;
-    for ( ; itag < ppghdr->itagMicFree; ++itag )
+    for ( ; itag < ITagMicFree_(); ++itag )
     {
         TAG * const ptag = PtagFromItag_( itag );
 
@@ -5776,7 +5905,7 @@ INLINE VOID CPAGE::ZeroOutGaps_( const CHAR chZero )
     }
 
     const INT cptag = iptag;
-    Assert( iptag <= ppghdr->itagMicFree );
+    Assert( iptag <= ITagMicFree_() );
 
     //  sort the array
     sort( rgptag, rgptag + cptag, PfnCmpPtagIb() );
@@ -5831,9 +5960,9 @@ INLINE BOOL CPAGE::FRuntimeScrubbingEnabled_ ( ) const
 //  ================================================================
 {
 #ifdef ENABLE_JET_UNIT_TEST
-    if ( m_iRuntimeScrubbingEnabled != -1 )
+    if ( m_fRuntimeScrubbingEnabledSet )
     {
-        return (BOOL)m_iRuntimeScrubbingEnabled;
+        return (BOOL) m_fRuntimeScrubbingEnabled;
     }
 #endif // ENABLE_JET_UNIT_TEST
 
@@ -5845,7 +5974,8 @@ INLINE BOOL CPAGE::FRuntimeScrubbingEnabled_ ( ) const
 VOID CPAGE::SetRuntimeScrubbingEnabled_( const BOOL fEnabled )
 //  ================================================================
 {
-    m_iRuntimeScrubbingEnabled = fEnabled ? 1 : 0;
+    m_fRuntimeScrubbingEnabledSet = fTrue;
+    m_fRuntimeScrubbingEnabled = !!fEnabled;
 }
 #endif // ENABLE_JET_UNIT_TEST
 
@@ -5866,7 +5996,7 @@ VOID CPAGE::TAG::ErrTest( _In_ VOID * const pvBuffer, ULONG cbPageSize )
     PGHDR* ppgHdr = ( PGHDR* )pvBuffer;
     memset( ppgHdr, 0, sizeof( *ppgHdr ) );
 
-    ppgHdr->itagMicFree = 2;
+    ppgHdr->itagState = 2;
     ppgHdr->fFlags = 0;
 
     CPAGE cpage;
@@ -6095,20 +6225,30 @@ ERR CPAGE::ErrEnumTags( CPAGE::PFNVISITNODE pfnEval, void * pvCtx ) const
     ERR err = JET_errSuccess;
     const PGHDR * const ppghdr      = (PGHDR*)m_bfl.pv;
 
-    Assert( Clines()+1 == ppghdr->itagMicFree );
+    Assert( Clines() + CTagReserved_() == ITagMicFree_() );
 
-    for ( INT itag = 0; itag < ppghdr->itagMicFree; ++itag )
+    // Call once to accumulate page-wide stats.
+    CallR( pfnEval( ppghdr, 0, 0, NULL, pvCtx ) );
+
+    // Now accumulate per-tag stats (excluding external header).
+    for ( INT itag = 1; itag < ITagMicFree_(); ++itag )
     {
         const TAG * const ptag = PtagFromItag_( itag );
-        if ( itag < ctagReserved )
+        if ( itag < CTagReserved_() )
         {
-            CallR( pfnEval( ppghdr, itag, ptag->FFlags( this, FSmallPageFormat() ), NULL, pvCtx ) );
+            LINE line;
+            KEYDATAFLAGS kdf;
+            kdf.Nullify();
+            GetPtrReservedTag( itag, &line );
+            kdf.data.SetPv( line.pv );
+            kdf.data.SetCb( line.cb );
+            CallR( pfnEval( ppghdr, itag, 0, &kdf, pvCtx ) );
         }
         else
         {
             KEYDATAFLAGS kdf;
             kdf.Nullify();
-            NDIGetKeydataflags( *this, itag - ctagReserved, &kdf );
+            NDIGetKeydataflags( *this, itag - CTagReserved_(), &kdf );
             CallR( pfnEval( ppghdr, itag, ptag->FFlags( this, FSmallPageFormat() ), &kdf, pvCtx ) );
         }
     }
@@ -6136,32 +6276,44 @@ ERR ErrAccumulatePageStats(
         Assert( itag == 0 );
         //  Certain stats we only rack up once per page.
         Call( ErrFromCStatsErr( CStatsFromPv(pbtsPageSpace->phistoFreeBytes)->ErrAddSample( ppghdr->cbFree ) ) );
-        Call( ErrFromCStatsErr( CStatsFromPv(pbtsPageSpace->phistoNodeCounts)->ErrAddSample( max( ppghdr->itagMicFree, 1 ) - 1 ) ) );
+
+        // max of 1 to account for legacy behavior of itagMicFree.
+        Call( ErrFromCStatsErr( CStatsFromPv( pbtsPageSpace->phistoNodeCounts )->ErrAddSample( max( 1, CPAGE::ITagMicFree( ppghdr ) ) - max( 1, CPAGE::CTagReserved( ppghdr ) ) ) ) );
         err = JET_errSuccess;
         goto HandleError;
     }
 
     Assert( pkdf->fFlags == fNodeFlags );
 
-    //
-    //  regular nodes
-    //
-    Call( ErrFromCStatsErr( CStatsFromPv(pbtsPageSpace->phistoKeySizes)->ErrAddSample( pkdf->key.Cb() ) ) );
-    Call( ErrFromCStatsErr( CStatsFromPv(pbtsPageSpace->phistoDataSizes)->ErrAddSample( pkdf->data.Cb() ) ) );
-
-    if ( fNodeFlags & fNDCompressed )
+    if ( itag >= CPAGE::CTagReserved( ppghdr ) )
     {
-        Call( ErrFromCStatsErr( CStatsFromPv(pbtsPageSpace->phistoKeyCompression)->ErrAddSample( pkdf->key.prefix.Cb() ) ) );
+        //
+        //  regular nodes
+        //
+        Call( ErrFromCStatsErr( CStatsFromPv( pbtsPageSpace->phistoKeySizes )->ErrAddSample( pkdf->key.Cb() ) ) );
+        Call( ErrFromCStatsErr( CStatsFromPv( pbtsPageSpace->phistoDataSizes )->ErrAddSample( pkdf->data.Cb() ) ) );
+
+        if ( fNodeFlags & fNDCompressed )
+        {
+            Call( ErrFromCStatsErr( CStatsFromPv( pbtsPageSpace->phistoKeyCompression )->ErrAddSample( pkdf->key.prefix.Cb() ) ) );
+        }
+
+        if ( fNodeFlags & fNDDeleted )
+        {
+            Call( ErrFromCStatsErr( CStatsFromPv( pbtsPageSpace->phistoUnreclaimedBytes )->ErrAddSample( CPAGE::cbInsertionOverhead + pkdf->key.Cb() + pkdf->data.Cb() ) ) );
+        }
+
+        if ( fNodeFlags & fNDVersion )
+        {
+            pbtsPageSpace->cVersionedNodes++;
+        }
     }
-
-    if ( fNodeFlags & fNDDeleted )
+    else
     {
-        Call( ErrFromCStatsErr( CStatsFromPv(pbtsPageSpace->phistoUnreclaimedBytes)->ErrAddSample( CPAGE::cbInsertionOverhead + pkdf->key.Cb() + pkdf->data.Cb() ) ) );
-    }
-
-    if ( fNodeFlags & fNDVersion )
-    {
-        pbtsPageSpace->cVersionedNodes++;
+        //
+        //  Reserved tags (caller excludes external header)
+        //
+        Call( ErrFromCStatsErr( CStatsFromPv( pbtsPageSpace->phistoResvTagSizes )->ErrAddSample( pkdf->data.Cb() ) ) );
     }
 
 HandleError:
@@ -6189,7 +6341,6 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
     INT     ichBase     = 0;
     INT     itag;
     INT     iptag       = 0;
-    PGHDR * ppghdr      = (PGHDR*)m_bfl.pv;
 
     TAG * rgptagBuf[g_cbPageMax/sizeof(TAG)];
     TAG ** rgptag = rgptagBuf;
@@ -6203,7 +6354,7 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
 
     //  no need to process the TAG array if the page has 0 TAG.
     //
-    if ( ppghdr->itagMicFree > 0 )
+    if ( ITagMicFree_() > 0 )
     {
         const TAG * const ptag = PtagFromItag_( 0 );
         Assert( ptag->Cb( FSmallPageFormat() ) < min( CbPage(), m_platchManager->CbBuffer( m_bfl ) ) );
@@ -6213,7 +6364,7 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
             rgchBuf[ich+ichBase] = _T( 'E' );
         }
 
-        for ( itag = 1; itag < ppghdr->itagMicFree; ++itag )
+        for ( itag = 1; itag < ITagMicFree_(); ++itag )
         {
             TAG * const ptagT = PtagFromItag_( itag );
             if ( itag >= (sizeof(rgptagBuf)/sizeof(rgptagBuf[0])) )
@@ -6226,13 +6377,13 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
     }
 
     const INT cptag = iptag;
-    Assert( iptag <= ppghdr->itagMicFree );
+    Assert( iptag <= ITagMicFree_() );
 
     //  sort the array
     sort( rgptag, rgptag + cptag, PfnCmpPtagIb() );
 
     //  nodes
-    for ( iptag = 0; iptag < (INT)ppghdr->itagMicFree - 1; ++iptag )
+    for ( iptag = 0; iptag < ITagMicFree_() - 1; ++iptag )
     {
         const TAG * const ptagT = rgptag[iptag];
         Assert( ptagT->Cb( FSmallPageFormat() ) < min( CbPage(), m_platchManager->CbBuffer( m_bfl ) ) );
@@ -6246,9 +6397,9 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
 
     //  tags
     ichBase = m_platchManager->CbBuffer( m_bfl );
-    ichBase -= sizeof( CPAGE::TAG ) * ppghdr->itagMicFree;
+    ichBase -= sizeof( CPAGE::TAG ) * ITagMicFree_();
 
-    for ( ich = 0; ich < (INT)(sizeof( CPAGE::TAG ) * ppghdr->itagMicFree); ++ich )
+    for ( ich = 0; ich < (INT) ( sizeof( CPAGE::TAG ) * ITagMicFree_() ); ++ich )
     {
         rgchBuf[ich+ichBase] = _T( 'T' );
     }
@@ -6291,11 +6442,9 @@ ERR CPAGE::DumpAllocMap( CPRINTF * pcprintf ) const
 ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 //  ================================================================
 {
-    const PGHDR * const ppghdr      = (PGHDR*)m_bfl.pv;
+    Assert( Clines() + CTagReserved_() == ITagMicFree_() );
 
-    Assert( Clines()+1 == ppghdr->itagMicFree );
-
-    CMinMaxTotStats rgStats[6];
+    CMinMaxTotStats rgStats[7];
     BTREE_STATS_PAGE_SPACE btsPageSpace = {
             sizeof(BTREE_STATS_PAGE_SPACE),
             (JET_HISTO*)&rgStats[0],    //  phistoFreeBytes
@@ -6303,7 +6452,8 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
             (JET_HISTO*)&rgStats[2],    //  phistoKeySizes
             (JET_HISTO*)&rgStats[3],    //  phistoDataSizes
             (JET_HISTO*)&rgStats[4],    //  phistoKeyCompression
-            (JET_HISTO*)&rgStats[5]     //  phistoUnreclaimedBytes
+            (JET_HISTO*)&rgStats[5],    //  phistoResvTagSizes
+            (JET_HISTO*)&rgStats[6]     //  phistoUnreclaimedBytes
         };
 
     if ( ErrEnumTags( ErrAccumulatePageStats, (void*)&btsPageSpace ) < JET_errSuccess )
@@ -6311,13 +6461,13 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
         (*pcprintf)( _T( "Failed to accumulate page stats!\n" ) );
     }
 
-    for ( INT itag = 0; itag < ppghdr->itagMicFree; ++itag )
+    for ( INT itag = 0; itag < ITagMicFree_(); ++itag )
     {
         const TAG * const ptag = PtagFromItag_( itag );
         KEYDATAFLAGS    kdf;
-        if ( itag >= ctagReserved )
+        if ( itag >= CTagReserved_() )
         {
-            NDIGetKeydataflags( *this, itag - ctagReserved, &kdf );
+            NDIGetKeydataflags( *this, itag - CTagReserved_(), &kdf );
         }
 
         CHAR szTagFlags[7] = "";
@@ -6329,7 +6479,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
         if( 0 == dwOffset )
         {
-            if ( itag < ctagReserved )
+            if ( itag < CTagReserved_() )
             {
                 (*pcprintf)( _T( "TAG %3d: cb:0x%04x,ib:0x%04x                                                  offset:0x%04x-0x%04x flags:0x%04x %s" ),
                      itag,
@@ -6386,7 +6536,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
         {
             const DWORD_PTR     dwAddress   = reinterpret_cast<DWORD_PTR>( PbFromIb_( 0 ) ) +  ptag->Ib( FSmallPageFormat() ) + dwOffset;
 
-            if ( itag < ctagReserved )
+            if ( itag < CTagReserved_() )
             {
                 (*pcprintf)(
                         _T( "TAG %3d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x  flags=0x%04x %s" ),
@@ -6445,21 +6595,21 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
         }
 
-        if ( itag >= ctagReserved )
+        if ( itag >= CTagReserved_() )
         {
             kdf;
-            NDIGetKeydataflags( *this, itag - ctagReserved, &kdf );
+            NDIGetKeydataflags( *this, itag - CTagReserved_(), &kdf );
             if ( FInvisibleSons() )
             {
                 (*pcprintf)( "    pgno: %d (0x%x)",
-                    (ULONG)*((LittleEndian<ULONG>*)kdf.data.Pv()), (ULONG)*((LittleEndian<ULONG>*)kdf.data.Pv()) );
+                    (PGNO) *( ( UnalignedLittleEndian<PGNO>* )kdf.data.Pv() ), ( PGNO )* ( ( UnalignedLittleEndian<PGNO>* )kdf.data.Pv() ) );
             }
         }
 
         (*pcprintf)( "\n" );
     }
 
-    if ( 0 == ppghdr->itagMicFree )
+    if ( 0 == ITagMicFree_() )
     {
         (*pcprintf)( _T( "[No tags found]\n" ) );
     }
@@ -6469,7 +6619,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
         if ( CStatsFromPv(btsPageSpace.phistoNodeCounts)->C() )
         {
-            Assert( CStatsFromPv(btsPageSpace.phistoNodeCounts)->C() == 1 );
+            Assert( CStatsFromPv( btsPageSpace.phistoNodeCounts )->C() == CTagReserved_() );
             Assert( CStatsFromPv(btsPageSpace.phistoNodeCounts)->Min() == CStatsFromPv(btsPageSpace.phistoNodeCounts)->Ave() );
             Assert( CStatsFromPv(btsPageSpace.phistoNodeCounts)->Max() == CStatsFromPv(btsPageSpace.phistoNodeCounts)->Ave() );
             (*pcprintf)( _T( "Nodes: %I64d\n" ),
@@ -6523,7 +6673,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 VOID CPAGE::DumpTag( CPRINTF * pcprintf, const INT iline, const DWORD_PTR dwOffset ) const
 //  =====================================================================================
 {
-    const INT           itag            = iline + ctagReserved;
+    const INT           itag            = iline + CTagReserved_();
     const TAG * const   ptag            = PtagFromItag_( itag );
     CHAR                szTagFlags[7]   = "";
     KEYDATAFLAGS        kdf;
@@ -6582,7 +6732,9 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_UINT( CPAGE::PGHDR, (PGHDR*)m_bfl.pv, cbFree, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( CPAGE::PGHDR, (PGHDR*)m_bfl.pv, cbUncommittedFree, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( CPAGE::PGHDR, (PGHDR*)m_bfl.pv, ibMicFree, dwOffset ) );
-    (*pcprintf)( FORMAT_UINT( CPAGE::PGHDR, (PGHDR*)m_bfl.pv, itagMicFree, dwOffset ) );
+    (*pcprintf)( FORMAT_UINT( CPAGE::PGHDR, (PGHDR*)m_bfl.pv, itagState, dwOffset ) );
+        (*pcprintf)( "\t%*s:  %d\n", SYMBOL_LEN_MAX + 2 * sizeof (INT_PTR) + 9, "ctagReserved", CTagReserved_() );
+        (*pcprintf)( "\t%*s:  %d\n", SYMBOL_LEN_MAX + 2 * sizeof (INT_PTR) + 9, "itagMicFree", ITagMicFree_() );
     (*pcprintf)( FORMAT_UINT( CPAGE::PGHDR, (PGHDR*)m_bfl.pv, fFlags, dwOffset ) );
 
     if ( !FSmallPageFormat() )
@@ -6888,7 +7040,7 @@ ERR CPAGE::ErrDumpToIrsRaw( _In_ PCWSTR wszReason, _In_ PCWSTR wszDetails ) cons
         CHAR szBuf[1024];
         for ( ULONG i=0; i < cbBuffer/256; i++ )
         {
-            DBUTLSprintHex( szBuf, sizeof(szBuf), reinterpret_cast<BYTE *>( PvBuffer() ) + 256*i, 256, 32, 4, 8, 256*i );
+            DBUTLSprintHex( szBuf, sizeof(szBuf), reinterpret_cast<const BYTE *>( PvBuffer() ) + 256*i, 256, 32, 4, 8, 256*i );
             (*pcprintfPageTrace)( "%s", szBuf );
         }
         (*pcprintfPageTrace)( "\n" );
@@ -6937,21 +7089,21 @@ VOID CPAGE::CorruptHdr( _In_ const ULONG ipgfld, const QWORD qwToAdd )
     {
     case ipgfldCorruptItagMicFree:
         Assert( qwToAdd <= 0xFFFF ); // no point otherwise
-        ppghdr->itagMicFree = ppghdr->itagMicFree + (USHORT)qwToAdd;
+        ppghdr->itagState = ppghdr->itagState + (USHORT) qwToAdd;
         break;
     default:
         AssertSz( fFalse, "NYI" );
     }
 }
 //  ================================================================
-VOID CPAGE::CorruptTag( _In_ const ULONG itag, _In_ BOOL fCorruptCb /* vs. tag's Ib */, _In_ const USHORT usToAdd )
+VOID CPAGE::CorruptTag( _In_ const INT itag, _In_ BOOL fCorruptCb /* vs. tag's Ib */, _In_ const USHORT usToAdd )
 //  ================================================================
 //
 //  Corrupts the properly constructed tag's .ib or .cb data by adding the value specified.
 //
 //-
 {
-    Assert( itag < ((PGHDR*)m_bfl.pv)->itagMicFree );
+    Assert( itag < ITagMicFree_() );
 
     TAG * const ptag = PtagFromItag_( itag );
     if ( !fCorruptCb )
@@ -6989,13 +7141,13 @@ VOID CPAGE::AssertValid() const
         Assert( ppghdr->cbFree <= CbPageData() );
         Assert( ppghdr->cbUncommittedFree <= CbPageFree() );
         Assert( ppghdr->ibMicFree <= CbPageData() );
-        Assert( FPreInitPage() || ( (USHORT) ppghdr->itagMicFree >= ctagReserved ) );
+        Assert( FPreInitPage() || ITagMicFree_() >= CTagReserved_() );
         //  we must use a static_cast to do the unsigned/signed conversion
-        Assert( (USHORT) ppghdr->itagMicFree <= ( CbPageData() - (USHORT) ppghdr->cbFree ) / static_cast<INT>( sizeof( CPAGE::TAG ) ) ); // external header tag
+        Assert( ITagMicFree_() <= ( CbPageData() - (USHORT) ppghdr->cbFree ) / static_cast<INT>( sizeof( CPAGE::TAG ) ) ); // external header tag
         Assert( CbContiguousFree_() <= CbPageFree() );
         Assert( CbContiguousBufferFree_() <= ppghdr->cbFree );
         Assert( CbContiguousFree_() >= 0 );
-        Assert( FPreInitPage() || ( static_cast<VOID *>( PbFromIb_( ppghdr->ibMicFree ) ) <= static_cast<VOID *>( PtagFromItag_( ppghdr->itagMicFree - 1 ) ) ) );
+        Assert( FPreInitPage() || ( static_cast<VOID*>( PbFromIb_( ppghdr->ibMicFree ) ) <= static_cast<VOID*>( PtagFromItag_( ITagMicFree_() - 1 ) ) ) );
     }
 }
 
@@ -7060,7 +7212,7 @@ VOID CPAGE::DebugCheckAll_( ) const
 #endif
 
     const BOOL fSmallFormat = FSmallPageFormat();
-    for ( INT itag = 0; itag < ppghdr->itagMicFree; ++itag )
+    for ( INT itag = 0; itag < ITagMicFree_(); ++itag )
     {
         const TAG * const ptag = PtagFromItag_( itag );
         Assert( ptag );
@@ -7078,7 +7230,7 @@ VOID CPAGE::DebugCheckAll_( ) const
         //  determine if we can do a overlap check for just this single line
         //
 
-        BOOL fSingleOverlapWalk = ( ( rand() % ( 1 + ppghdr->itagMicFree ) ) == 0 );
+        BOOL fSingleOverlapWalk = ( ( rand() % ( 1 + ITagMicFree_() ) ) == 0 );
 #ifdef DEBUG_PAGE
         if ( !fSingleOverlapWalk )
         {
@@ -7097,7 +7249,7 @@ VOID CPAGE::DebugCheckAll_( ) const
         //  check to see that we do not overlap with other tags
 
         INT itagOther = 0;
-        for ( itagOther = 0; itagOther < ppghdr->itagMicFree; ++itagOther )
+        for ( itagOther = 0; itagOther < ITagMicFree_(); ++itagOther )
         {
             if ( cbTag == 0 )
             {
@@ -7151,7 +7303,7 @@ VOID CPAGE::DebugMoveMemory_( )
 
     //  there may not be enough tags to reorganize
     //  we need one to delete and one to move
-    if ( ppghdr->itagMicFree < ctagReserved + 2 )
+    if ( ITagMicFree_() < ctagReservedLegacy + 2 )
     {
         return;
     }
@@ -7167,8 +7319,8 @@ VOID CPAGE::DebugMoveMemory_( )
     //  save the smallest tag with a non-zero size
     //  we only loop to itagMicFree-1 as deleting the last tag is useless
     TAG * ptag  = NULL;
-    INT itag    = ctagReserved;
-    for ( ; itag < ppghdr->itagMicFree - 1; ++itag )
+    INT itag    = ctagReservedLegacy;
+    for ( ; itag < ITagMicFree_() - 1; ++itag )
     {
         ptag    = PtagFromItag_( itag );
         cbTag   = ptag->Cb( fSmallFormat );
@@ -7184,7 +7336,7 @@ VOID CPAGE::DebugMoveMemory_( )
         //  nothing to reorganize
         return;
     }
-    Assert( itag >= ctagReserved && itag < (ppghdr->itagMicFree - 1) );
+    Assert( itag >= ctagReservedLegacy && itag < ( ITagMicFree_() - 1 ) );
     Assert( cbTag > 0 );
 
     fFlagsTag = ptag->FFlags( this, fSmallFormat );

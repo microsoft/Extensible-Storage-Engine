@@ -117,6 +117,9 @@ class CSR
                 const VOID          * const pvPage,
                 const ULONG         cbPage,
                 LATCH               latch );
+        VOID    CopyPage(
+                const VOID*         pv,
+                const ULONG         cb );
 
         // Pre-initialization functions:
         //
@@ -231,7 +234,7 @@ class CSR
 
         //  for crash-dump gathering of referenced pages
         //
-        VOID *  PvBufferForCrashDump()      { return m_cpage.PvBuffer(); }
+        const VOID *  PvBufferForCrashDump()    { return m_cpage.PvBuffer(); }
 
 #ifdef DEBUGGER_EXTENSION
         VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
@@ -805,6 +808,21 @@ INLINE ERR CSR::ErrLoadPage(
     Assert( m_dbtimeSeen == m_cpage.Dbtime() );
 
     return err;
+}
+
+
+INLINE VOID CSR::CopyPage( const VOID* pvPage, const ULONG cbPage )
+{
+    ASSERT_VALID( this );
+    Assert( m_latch == latchWrite );
+    Assert( m_cpage.FAssertDirty() );
+
+    m_cpage.CopyPage( pvPage, cbPage );
+
+    //  set members
+    Assert( m_pgno = m_cpage.PgnoThis() );  // pgno can't change
+    m_dbtimeSeen = m_cpage.Dbtime();
+    m_pagetrimState = pagetrimNormal;
 }
 
 

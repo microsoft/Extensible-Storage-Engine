@@ -1265,7 +1265,7 @@ public:
         AddField( CPAGE::PGHDR, cbFree );
         AddField( CPAGE::PGHDR, cbUncommittedFree );
         AddField( CPAGE::PGHDR, ibMicFree );
-        AddField( CPAGE::PGHDR, itagMicFree );
+        AddField( CPAGE::PGHDR, itagState );
         AddField( CPAGE::PGHDR, fFlags );
 
 
@@ -1424,4 +1424,78 @@ JETUNITTEST ( Node, TestCorruptRandishFuzzingStress )
                    );
         }
     }
+}
+
+INT INDIAddReservedTag( _In_ CPAGE& cpage, _In_ NodeResvTagId resvTagId, _In_ int cb, _In_ BYTE fill );
+VOID NDIReplaceReservedTag( _In_ CPAGE& cpage, _In_ NodeResvTagId resvTagId, const DATA& data );
+
+JETUNITTEST( Node, TestAddDuplicateReservedTag )
+{
+    CreateSmallLargePage;
+
+    INT itag = INDIAddReservedTag( cpageSmall, (NodeResvTagId) 1, 100, 0 );
+    CHECK( itag > 0 );
+
+    // Should enforce
+    bool fEnforce = false;
+    __try
+    {
+        itag = INDIAddReservedTag( cpageSmall, (NodeResvTagId) 1, 101, 1 );
+    }
+    __except ( JetTestEnforceSEHException::Filter( GetExceptionInformation() ) )
+    {
+        fEnforce = true;
+        JetTestEnforceSEHException::Cleanup();
+    }
+
+    CHECK( fEnforce );
+}
+
+JETUNITTEST( Node, TestAddReservedTagOverflow )
+{
+    CreateSmallLargePage;
+
+    for ( int i = 1; i < CPAGE::PGHDR::CTAG_RESERVED_MAX; i++ )
+    {
+        INT itag = INDIAddReservedTag( cpageSmall, (NodeResvTagId) i, 100, 0 );
+        CHECK( itag > 0 );
+    }
+
+    // Should enforce
+    bool fEnforce = false;
+    FNegTestSet( fInvalidAPIUsage );
+
+    __try
+    {
+        INDIAddReservedTag( cpageSmall, (NodeResvTagId) 30, 100, 0 );
+    }
+    __except ( JetTestEnforceSEHException::Filter( GetExceptionInformation() ) )
+    {
+        fEnforce = true;
+        JetTestEnforceSEHException::Cleanup();
+    }
+
+    FNegTestUnset( fInvalidAPIUsage );
+    CHECK( fEnforce );
+}
+
+JETUNITTEST( Node, TestReplaceMissingReservedTag )
+{
+    CreateSmallLargePage;
+
+    // Should enforce
+    bool fEnforce = false;
+    __try
+    {
+        DATA data;
+        data.Nullify();
+        NDIReplaceReservedTag( cpageSmall, (NodeResvTagId) 1, data );
+    }
+    __except ( JetTestEnforceSEHException::Filter( GetExceptionInformation() ) )
+    {
+        fEnforce = true;
+        JetTestEnforceSEHException::Cleanup();
+    }
+
+    CHECK( fEnforce );
 }

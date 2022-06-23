@@ -193,22 +193,27 @@ class CFlushMap;
 class CPAGE
 //  ================================================================
 //
-//  A page is the basic physical storage unit of the B-tree
-//  A page stores data blobs and flags associated with
-//  each data blob. A special data blob, the external header
-//  is provided. Internally the external header is treated
-//  the same as the other blobs.
+//  A page is the basic physical storage unit of the B-tree.
+//  A page stores B-tree nodes as data blobs and flags associated with
+//  each data blob.
 //
 //  Each page holds flags associated with the page, the objid
 //  of the FDP for the table the page is in, the pgno's of
 //  the page's two neighbors, a checksum and the time of
 //  last modification.
 //
-//  Externally the blobs are represented at LINE's
+//  Special data blobs called the reserved tags are provided.
+//  They are used to store information separately from B-tree nodes.
+//  Legacy format dictates that the first reserved tag is interpreted
+//  as the external header. Internally the reserved tags are
+//  treated the same as the other data blobs.
+//
+//  Externally the blobs are represented as LINEs, and indexed by iline.
+//  Reserved tags are indexed by itags. They are separate number spaces.
+//  Internally, reserved tags lie before ilines.
 //
 //  CPAGE interacts with the buffer manager to obtain and latch
-//  pages, to upgrade the latches and to eventually release the
-//  page
+//  pages, to upgrade the latches and to eventually release the page.
 //
 //  It is possible to assign one CPAGE to another, but only if
 //  the destination CPAGE has released its underlying page. This
@@ -287,7 +292,7 @@ class CPAGE
         VOID LoadDehydratedPage( const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb, const ULONG cbPage );
         VOID LoadPage( VOID * const pv, const ULONG cb );
         VOID ReBufferPage( _In_ const BFLatch& bfl, const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb );
-        
+        VOID CopyPage( _In_ const VOID* pvPage, const ULONG cbPage );
         VOID UnloadPage( );
         VOID MarkAsSuperCold( );
 
@@ -328,12 +333,19 @@ class CPAGE
         VOID GetPtrExternalHeader   ( LINE * pline, _Out_opt_ ERR * perrNoEnforce = NULL ) const;
         VOID SetExternalHeader( const DATA * rgdata, INT cdata, INT fFlags );
 
+        // CPAGE supports upto 7 reserved fixed sized tags that can be stored on the page in addition to data lines.
+        INT  IAddReservedTag( INT cb, BYTE fill );
+        template< PageNodeBoundsChecking pgnbc = pgnbcNoChecks >
+        VOID GetPtrReservedTag  ( INT itag, LINE* pline, _Out_opt_ ERR* perrNoEnforce = NULL ) const;
+        VOID ReplaceReservedTag ( INT itag, const DATA* rgdata, INT cdata );
+
         template< PageNodeBoundsChecking pgnbc = pgnbcNoChecks >
         VOID GetPtr             ( INT iline, LINE * pline, _Out_opt_ ERR * perrNoEnforce = NULL ) const;
 
         //  Note: Err enabled versions of these APIs assume you handle the error, even if LINE is filled out.
         ERR  ErrGetPtr               ( INT iline, LINE * pline ) const;
         ERR  ErrGetPtrExternalHeader ( LINE * pline ) const;
+        ERR  ErrGetPtrReservedTag    ( INT itag, LINE* pline ) const;
 
         VOID GetLatchHint       ( INT iline, BFLatch** ppbfl ) const;
 
@@ -347,6 +359,7 @@ class CPAGE
         USHORT  CbPageFree      ( ) const;  // see notes on CbFree_ below
         USHORT  CbUncommittedFree   ( ) const;
 
+        INT     CTagReserved    ( ) const;
         INT     Clines          ( ) const;
         ULONG   FFlags          ( ) const;
 
@@ -390,7 +403,7 @@ class CPAGE
         DBTIME  Dbtime          ( ) const;
 
         BOOL    FLoadedPage     ( ) const;
-        VOID *  PvBuffer        ( ) const;
+        const VOID * PvBuffer   ( ) const;
         BFLatch* PBFLatch       ( );
         BOOL    FIsNormalSized  ( ) const;
 
@@ -530,7 +543,7 @@ class CPAGE
         // Picked 9, b/c it's the 9th field.
         #define ipgfldCorruptItagMicFree   (9)
         VOID    CorruptHdr          ( _In_ const ULONG ipgfld, const QWORD qwToAdd );
-        VOID    CorruptTag          ( _In_ const ULONG itag, BOOL fCorruptCb /* vs. tag's Ib */, const USHORT usToAdd );
+        VOID    CorruptTag          ( _In_ const INT itag, BOOL fCorruptCb /* vs. tag's Ib */, const USHORT usToAdd );
 #endif // DEBUG || ENABLE_JET_UNIT_TEST
 
 #ifdef DEBUG
@@ -577,7 +590,7 @@ class CPAGE
             const BF * const    pbf,
             const CPAGE * const pcpage );
 
-        friend ERR ErrBFPageElemFromStruct( size_t eBFMember, size_t cbUnused, BYTE* pvDebuggee, BYTE* pv, ULONGLONG * pullValue );
+        friend ERR ErrBFPageElemFromStruct( size_t eBFMember, size_t cbUnused, QWORD pvDebuggee, const void* pv, ULONGLONG* pullValue );
 
 #endif  //  DEBUGGER_EXTENSION
 
@@ -697,10 +710,26 @@ class CPAGE
         class TAG;
 
     private:
-        //  friend classes for testing
+        //  friend classes/funcs
+        friend ERR ErrAccumulatePageStats(
+                    const CPAGE::PGHDR* const   ppghdr,
+                    INT                         itag,
+                    DWORD                       fNodeFlags,
+                    const KEYDATAFLAGS* const   pkdf,
+                    void* pvCtx );
+
         friend class CPageTestFixture;
         
     private:
+        // itagState handlers
+        void InitItagState( const PGHDR* ppghdr );
+        INT ITagMicFree_() const;
+        INT CTagReserved_() const;
+        void SetITagMicFree_( INT itagMicFree );
+        void SetCTagReserved_( INT ctagReserved );
+        void SetITagState_( INT itagMicFree, INT ctagReserved );
+        bool FResvTagFormatEnabled();
+
         //  get/insert/replace implementations
         template< PageNodeBoundsChecking pgnbc >
         VOID GetPtr_            ( INT itag, LINE * pline, _Out_opt_ ERR * perrNoEnforce = NULL ) const;
@@ -708,6 +737,7 @@ class CPAGE
         VOID Delete_            ( INT itag );
         VOID Replace_           ( INT itag, const DATA * rgdata, INT cdata, INT fFlags );
         VOID Insert_            ( INT itag, const DATA * rgdata, INT cdata, INT fFlags );
+        VOID ExpandTagArray_    ( INT itag );
 
     private:
         //  auxiliary methods
@@ -916,9 +946,13 @@ class CPAGE
             LittleEndian<USHORT>        cbFree;             //  count of free bytes
             LittleEndian<volatile USHORT>       cbUncommittedFree;  //  free but may be reclaimed by rollback. should always be <= cbFree
             LittleEndian<USHORT>        ibMicFree;          //  index of minimum free byte
-            LittleEndian<USHORT>        itagMicFree;        //  index of maximum itag
-
+            LittleEndian<USHORT>        itagState;          //  stores index of maximum itag, and count of reserved tags
             LittleEndian<ULONG>         fFlags;
+
+            static const USHORT         ITAG_MIC_FREE_MASK = 0x0fff;   // 12-bits (for itagMicFree)
+            static const USHORT         CTAG_RESERVED_MASK = 0x7000;   // 3-bits (ctagReserved), high bit reserved for future use
+            static const USHORT         SHF_CTAG_RESERVED  = 12;
+            static const USHORT         CTAG_RESERVED_MAX  = CTAG_RESERVED_MASK >> SHF_CTAG_RESERVED;   // = 7
         };
 
         //  ================================================================
@@ -938,7 +972,7 @@ class CPAGE
     private:
         //  private constants
         enum    { cchDumpAllocRow       = 64                        };
-        enum    { ctagReserved          = 1                         };
+        enum    { ctagReservedLegacy    = 1                         };
 
 
     //  ****************************************************************
@@ -960,11 +994,30 @@ class CPAGE
         //  40 / 48 bytes
         const ILatchManager *   m_platchManager;
         //  44 / 56 bytes
-        INT                     m_iRuntimeScrubbingEnabled; //  Technically, only needed when ENABLE_JET_UNIT_TEST is defined, but
-                                                            //  we run into stack corruption problems when running unit tests because
-                                                            //  they link against libs with mismatching versions of CPAGE (i.e., built
-                                                            //  with or without ENABLE_JET_UNIT_TEST).
-        //  48 / 64 bytes
+        USHORT                  m_itagMicFree;
+        USHORT                  m_ctagReserved;
+        //  48 / 60 bytes
+        union
+        {
+            struct
+            {
+#ifdef ENABLE_JET_UNIT_TEST
+                FLAG32          m_fRuntimeScrubbingEnabled      : 1; //  Technically, only needed when ENABLE_JET_UNIT_TEST is defined, but
+                FLAG32          m_fRuntimeScrubbingEnabledSet   : 1; //  we run into stack corruption problems when running unit tests because
+                                                                     //  they link against libs with mismatching versions of CPAGE (i.e., built
+                                                                     //  with or without ENABLE_JET_UNIT_TEST).
+                FLAG32          m_reserved1                     : 2;
+                FLAG32          m_fResvTagFormatEnabled         : 1; //  Whether reserved tag format feature is enabled
+                FLAG32          m_reserved2                     : 3;
+#else
+                FLAG32          m_reservedTestFlags             : 8; //  Bits reserved for test
+#endif
+                // Add non-test flags here.
+            };
+            FLAG32              m_fRuntimeFlags;
+        };
+
+        //  52 / 64 bytes
 
     //  ****************************************************************
     //  Global Hint Cache
@@ -990,22 +1043,33 @@ class CPAGE
 
         enum { cbInsertionOverhead = sizeof( CPAGE::TAG ) };
                                         // 4
-        INLINE static ULONG CbPageDataMax( const ULONG cbPageSize ) { return (ULONG)(
-                    CbPageData( cbPageSize )
-                    - ( (ULONG)sizeof( TAG ) * ctagReserved )
-                    - cbInsertionOverhead ); };
-        INLINE ULONG CbPageDataMax() const { return (ULONG)(
-                    CbPageData()
-                    - ( (ULONG)sizeof( TAG ) * ctagReserved )
-                    - cbInsertionOverhead ); };
-                                        // 4056 - ( 4 * 1 ) - 4 = 4048
-        INLINE static ULONG CbPageDataMaxNoInsert( const ULONG cbPageSize ) { return ( CbPageData( cbPageSize ) - ( sizeof( TAG ) * ctagReserved ) ); };
-                                        // 4056 - ( 4 * 1 ) = 4052
-        INLINE ULONG CbPageDataMaxNoInsert() const { return ( CbPageData() - ( sizeof( TAG ) * ctagReserved ) ); };
-                                        // 4056 - ( 4 * 1 ) = 4052
+        INLINE static ULONG CbPageDataMax( const ULONG cbPageSize ) {
+            return (ULONG) (
+                CbPageData( cbPageSize )
+                - ( (ULONG) sizeof( TAG ) * ctagReservedLegacy )
+                - cbInsertionOverhead );
+        };
+        INLINE ULONG CbPageDataMax() const {
+            return (ULONG) (
+                CbPageData()
+                - ( (ULONG) sizeof( TAG ) * CTagReserved_() )
+                - cbInsertionOverhead );
+        };
+        // 4056 - ( 4 * 1 ) - 4 = 4048
+        INLINE static ULONG CbPageDataMaxNoInsert( const ULONG cbPageSize ) { return ( CbPageData( cbPageSize ) - ( sizeof( TAG ) * ctagReservedLegacy ) ); };
+        // 4056 - ( 4 * 1 ) = 4052
+        INLINE ULONG CbPageDataMaxNoInsert() const { return ( CbPageData() - ( sizeof( TAG ) * CTagReserved_() ) ); };
+        // 4056 - ( 4 * 1 ) = 4052
 
-        INLINE static USHORT CbPageHeader( const ULONG cbPageSize ) { return FIsSmallPage( cbPageSize ) ? sizeof ( PGHDR ) : sizeof( PGHDR2 ); }
-        INLINE USHORT CbPageHeader() const { return FSmallPageFormat() ? sizeof ( PGHDR ) : sizeof( PGHDR2 ); }
+        INLINE static USHORT CbPageHeader( const ULONG cbPageSize ) { return FIsSmallPage( cbPageSize ) ? sizeof( PGHDR ) : sizeof( PGHDR2 ); }
+        INLINE USHORT CbPageHeader() const { return FSmallPageFormat() ? sizeof( PGHDR ) : sizeof( PGHDR2 ); }
+
+        INLINE static USHORT CbTagReservedLegacy() { return sizeof( TAG ) * ctagReservedLegacy; }
+
+    private:
+        INLINE static USHORT ITagMicFree( const PGHDR* ppghdr )         { return ( ppghdr->itagState & PGHDR::ITAG_MIC_FREE_MASK ); }
+    public:
+        INLINE static USHORT CTagReserved( const PGHDR* ppghdr )        { return ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ); }
 
 };  //  class CPAGE
 
@@ -1038,10 +1102,18 @@ INLINE BOOL CPAGE::FAssertUnused_( ) const
 
 
 //  ================================================================
+INLINE INT CPAGE::CTagReserved( ) const
+//  ================================================================
+{
+    return CTagReserved_();
+}
+
+
+//  ================================================================
 INLINE INT CPAGE::Clines ( ) const
 //  ================================================================
 {
-    return ((PGHDR*)m_bfl.pv)->itagMicFree - ctagReserved;
+    return ITagMicFree_() - CTagReserved_();
 }
 
 
@@ -1309,7 +1381,7 @@ INLINE USHORT CPAGE::CbUncommittedFree ( ) const
 
 
 //  ================================================================
-INLINE VOID * CPAGE::PvBuffer ( ) const
+INLINE const VOID * CPAGE::PvBuffer ( ) const
 //  ================================================================
 {
     return m_bfl.pv;
@@ -1329,7 +1401,7 @@ INLINE VOID CPAGE::GetPtr( INT iline, LINE * pline, _Out_opt_ ERR * perrNoEnforc
 {
     Assert( iline >= 0 );
     Assert( pline );
-    GetPtr_< pgnbc >( iline + ctagReserved, pline, perrNoEnforce );
+    GetPtr_< pgnbc >( iline + CTagReserved_(), pline, perrNoEnforce );
 }
 
 //  ================================================================
@@ -1375,6 +1447,122 @@ INLINE ERR CPAGE::ErrGetPtrExternalHeader( LINE * pline ) const
     GetPtrExternalHeader< pgnbcChecked >( pline, &err );
     return err;
 }
+
+
+//  ================================================================
+template< PageNodeBoundsChecking pgnbc >
+INLINE VOID CPAGE::GetPtrReservedTag( INT itag, LINE* pline, _Out_opt_ ERR* perrNoEnforce ) const
+//  ================================================================
+//
+//  Gets a pointer to a reserved tag.
+//
+//-
+{
+    Assert( itag < CTagReserved_() );
+    Assert( pline );
+    GetPtr_< pgnbc >( itag, pline, perrNoEnforce );
+}
+
+//  ================================================================
+INLINE ERR CPAGE::ErrGetPtrReservedTag( INT itag, LINE* pline ) const
+//  ================================================================
+//
+//  Gets a pointer to the external header.
+//
+//-
+{
+    ERR err = JET_errSuccess;
+    Assert( pline );
+    GetPtrReservedTag< pgnbcChecked >( itag, pline, &err );
+    return err;
+}
+
+
+//  ================================================================
+INLINE VOID CPAGE::InitItagState( const PGHDR* ppghdr )
+//  ================================================================
+{
+    // Legacy behavior: itagState stored itagMicFree, and 1 reserved tag was assumed.
+    // New behavior: Top 3-bits of itagState stores ctagReserved, lower 13-bits store itagMicFree.
+    // So we force m_ctagReserved to be atleast 1, to honor the legacy behavior.
+    // When someone modifies itagState (adds/removes an itag) on a leagcy page,
+    // it will push the correct ctagReserved value to the page and upgrade to new behavior.
+    m_itagMicFree = ppghdr->itagState & PGHDR::ITAG_MIC_FREE_MASK;
+    USHORT  ctagReserved = ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED;
+    m_ctagReserved = max( 1, ctagReserved );
+}
+
+//  ================================================================
+INLINE INT CPAGE::ITagMicFree_() const
+//  ================================================================
+{
+    Assert( ( ( (PGHDR*) m_bfl.pv )->itagState & PGHDR::ITAG_MIC_FREE_MASK ) == m_itagMicFree || FNegTest( fCorruptingPageLogically ) );
+    return m_itagMicFree;
+}
+
+//  ================================================================
+INLINE INT CPAGE::CTagReserved_() const
+//  ================================================================
+{
+    // ctagReserved on pghdr can be 0 on pages written before variable reserved tags were introduced.
+    // For those pages, a cpage used to have one fixed reserved tag backing the external header.
+
+    PGHDR* ppghdr = (PGHDR*) m_bfl.pv;
+    Assert( ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ) == m_ctagReserved ||
+            ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ) == 0 ||
+            FNegTest( fCorruptingPageLogically ) );
+
+    Assert( m_ctagReserved >= 1 || FPreInitPage() );
+    return m_ctagReserved;
+}
+
+//  ================================================================
+INLINE void CPAGE::SetITagMicFree_( INT itagMicFree )
+//  ================================================================
+{
+    PGHDR* ppghdr = (PGHDR*) m_bfl.pv;
+    Assert( ( ppghdr->itagState & PGHDR::ITAG_MIC_FREE_MASK ) == m_itagMicFree );
+    Assert( ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ) == m_ctagReserved || ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ) == 0 );
+
+    SetITagState_( itagMicFree, m_ctagReserved );
+}
+
+//  ================================================================
+INLINE void CPAGE::SetCTagReserved_( INT ctagReserved )
+//  ================================================================
+{
+    PGHDR* ppghdr = (PGHDR*) m_bfl.pv;
+    Assert( ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ) == m_ctagReserved || ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ) == 0 );
+    Assert( ( ppghdr->itagState & PGHDR::ITAG_MIC_FREE_MASK ) == m_itagMicFree );
+
+    SetITagState_( m_itagMicFree, ctagReserved );
+}
+
+//  ================================================================
+INLINE void CPAGE::SetITagState_( INT itagMicFree, INT ctagReserved )
+//  ================================================================
+{
+    PGHDR* ppghdr = (PGHDR*) m_bfl.pv;
+    Assert( itagMicFree <= PGHDR::ITAG_MIC_FREE_MASK );
+    Assert( ctagReserved <= PGHDR::CTAG_RESERVED_MAX );
+
+    m_itagMicFree = (USHORT) itagMicFree;
+    m_ctagReserved = (USHORT) ctagReserved;
+
+    bool fResvTagFormatEnabled = FResvTagFormatEnabled();
+    if ( fResvTagFormatEnabled || ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ) > 0 )
+    {
+        Assert( m_ifmp == ifmpNil || fResvTagFormatEnabled );   // UA_TODO: can this trigger if a build is rolled back?
+        ppghdr->itagState = USHORT( ( ctagReserved << PGHDR::SHF_CTAG_RESERVED ) | itagMicFree );
+    }
+    else
+    {
+        // Store in legacy format.
+        Assert( m_ctagReserved == 1 );  // only 1 reserved tag supported in legacy format
+        ppghdr->itagState = USHORT( itagMicFree );
+    }
+}
+
 
 //  ================================================================
 INLINE ULONG_PTR CPAGE::PbDataStart_( _In_ const BOOL fSmallPageCached ) const

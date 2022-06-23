@@ -2451,8 +2451,6 @@ inline INT CmpDbVer( const DbVersion& ver1, const DbVersion& ver2 )
 //     you update the ManagedEsent layer.
 //   - And finally add an entry to end of g_rgfmtversEngine[] table.
 
-extern const FormatVersions     g_rgfmtversEngine[];
-
 const FormatVersions * PfmtversEngineMin();
 const FormatVersions * PfmtversEngineMax();
 const FormatVersions * PfmtversEngineDefault();

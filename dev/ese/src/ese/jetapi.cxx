@@ -19837,6 +19837,7 @@ LOCAL JET_ERR JetDBUtilitiesEx( JET_DBUTIL_W *pdbutilW )
         case opDBUTILDumpLogfileTrackNode:
         case opDBUTILDumpPage:
         case opDBUTILDumpNode:
+        case opDBUTILDumpTag:
         case opDBUTILDumpData:
         case opDBUTILDumpSpace:
         case opDBUTILDumpSpaceCategory:

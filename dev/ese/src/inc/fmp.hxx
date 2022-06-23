@@ -535,6 +535,8 @@ class FMP
 
         BOOL                m_fSelfAllocSpBufReservationEnabled;
 
+        volatile JET_ENGINEFORMATVERSION m_efvHighestSupported;
+
         CIoStats *          m_rgpiostats[iotypeMax];
 
         CSXWLatch           m_sxwlRedoMaps;
@@ -657,11 +659,13 @@ class FMP
         ULONG_PTR UlDiskId() const;
         BOOL FSeekPenalty() const;
         ERR ErrDBFormatFeatureEnabled( const DBFILEHDR* const pdbfilehdr, const JET_ENGINEFORMATVERSION efvFormatFeature );
-        ERR ErrDBFormatFeatureEnabled( const JET_ENGINEFORMATVERSION efvFormatFeature );
         BOOL FScheduledPeriodicTrim() const;
         BOOL FTrimSupported() const;
-        BOOL FEfvSupported( const JET_ENGINEFORMATVERSION efvFormatFeature );
         CIoStats * Piostats( const IOTYPE iotype ) const;
+
+        // Feature checks using cached efv value
+        ERR ErrDBFormatFeatureEnabled( const JET_ENGINEFORMATVERSION efvFormatFeature );
+        BOOL FEfvSupported( const JET_ENGINEFORMATVERSION efvFormatFeature );
 
         BOOL FContainsDataFromFutureLogs() const;
         VOID SetContainsDataFromFutureLogs();
@@ -774,6 +778,9 @@ public:
         // Self-alloc split-buffer reservation.
         VOID SetSelfAllocSpBufReservationEnabled( const BOOL fSelfAllocSpBufReservationEnabled );
         BOOL FSelfAllocSpBufReservationEnabled() const;
+        VOID SetEfvHighestSupported( JET_ENGINEFORMATVERSION efv );
+        VOID ResetEfvHighestSupported();
+        JET_ENGINEFORMATVERSION EfvHighestSupported() const;
 
         // Redo maps.
         //
@@ -1702,6 +1709,25 @@ INLINE VOID FMP::SetSelfAllocSpBufReservationEnabled( const BOOL fSelfAllocSpBuf
 INLINE BOOL FMP::FSelfAllocSpBufReservationEnabled() const
 {
     return m_fSelfAllocSpBufReservationEnabled;
+}
+
+INLINE VOID FMP::SetEfvHighestSupported( JET_ENGINEFORMATVERSION efv )
+{
+    m_efvHighestSupported = efv;
+}
+
+INLINE VOID FMP::ResetEfvHighestSupported()
+{
+    // Must reset under db header write lock. We reset the cached value in case the efv is being upgraded.
+    // A competing thread may perform an efv check, and may end up caching a stale efv before the db header is upgraded.
+    // The db header lock protects ErrDBFormatFeatureEnabled() from reading stale values from the db header.
+    Assert( m_dbfilehdrLock.m_rwl.FWriter() || m_critLatch.FOwner() );
+    m_efvHighestSupported = 0;
+}
+
+INLINE JET_ENGINEFORMATVERSION FMP::EfvHighestSupported() const
+{
+    return m_efvHighestSupported;
 }
 
 // =====================================================================

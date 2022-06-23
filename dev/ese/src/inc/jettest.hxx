@@ -249,6 +249,38 @@ class JetTestFixture
         JetUnitTestResult * m_presult;
 };
 
+const DWORD JETTEST_EXCEP_ENFORCE = 0xE0E5E001;    // E0 = custom exception, E5E = ESE, XXX = error code
+
+//  ================================================================
+class JetTestEnforceSEHException
+//  ================================================================
+//
+//  Jet unit tests throw an SEH exception with the following
+//  information to react to code enforces.
+//-
+{
+    static const int cchMax = 128;
+    static thread_local JetTestEnforceSEHException* s_pThreadExcep;  // currently thrown exception on the current thread
+
+public:
+    WCHAR   wszContext[ cchMax ];
+    CHAR    szMessage[ cchMax ];
+    WCHAR   wszIssueSource[ cchMax ];
+
+    // Filter function to catch JetTestEnforceSEHException.
+    static DWORD Filter( _EXCEPTION_POINTERS* lpExcepPtrs );
+
+    // Call from within an __except handler to cleanup memory allocated for the exception object.
+    static void Cleanup();
+
+    static JetTestEnforceSEHException* GetException()
+    {
+        Assert( s_pThreadExcep != NULL );
+        return s_pThreadExcep;
+    }
+};
+
+
 //** JETUNITTEST *****************************************************
 
 #define JETUNITTEST(component,test) \

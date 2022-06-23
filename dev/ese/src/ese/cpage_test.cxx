@@ -2141,6 +2141,7 @@ class CPageTestFixture : public JetTestFixture
 
     private:
         void InsertOneLine_( const ULONG cb );
+        void InsertOneReservedTag_( const ULONG cb, const BYTE pattern );
 
         void InsertString_( INT iline, const char * const sz );
         void ReplaceString_( INT iline, const char * const sz );
@@ -2195,6 +2196,9 @@ class CPageTestFixture : public JetTestFixture
         void TestReplaceScrubsFirstGap();
         void TestReorganizePageScrubsData();
         void TestInsertLines();
+        void TestInsertReservedTags();
+        void TestReplaceReservedTag();
+        void TestResvTagFormatDisabled();
         void TestReorganizePage();
         void TestOverwriteUnusedSpace();
         void TestOverwriteUnusedSpaceFixesContiguousSpaceForNonZeroRecords();
@@ -2257,6 +2261,9 @@ CPAGE_TEST(ReplaceScrubsGapData);
 CPAGE_TEST(ReplaceScrubsFirstGap);
 CPAGE_TEST(ReorganizePageScrubsData);
 CPAGE_TEST(InsertLines);
+CPAGE_TEST(InsertReservedTags);
+CPAGE_TEST(ReplaceReservedTag);
+CPAGE_TEST(ResvTagFormatDisabled);
 CPAGE_TEST(ReorganizePage);
 CPAGE_TEST(OverwriteUnusedSpace);
 CPAGE_TEST(OverwriteUnusedSpaceFixesContiguousSpaceForNonZeroRecords);
@@ -2506,7 +2513,30 @@ void CPageTestFixture::TestInsert()
     CHECK( line.cb == cbTotal );
     CHECK( FAreLinesEqual( line.pv, m_pvBuffer, cbTotal ) );
     CHECK( ( fNDVersion | fNDCompressed ) == line.fFlags );
-    
+
+    // Now insert a reserved tag
+    const int cbResvTag = 32;
+    INT itag = m_cpage.IAddReservedTag( cbResvTag, 0xaf );
+
+    // Check both nodes and reserved tag
+    m_cpage.GetPtr( 0, &line );
+    CHECK( line.cb == (ULONG) data.Cb() );
+    CHECK( FAreLinesEqual( line.pv, data.Pv(), data.Cb() ) );
+    CHECK( 0 == line.fFlags );
+
+    m_cpage.GetPtr( 1, &line );
+    CHECK( line.cb == cbTotal );
+    CHECK( FAreLinesEqual( line.pv, m_pvBuffer, cbTotal ) );
+    CHECK( ( fNDVersion | fNDCompressed ) == line.fFlags );
+
+    m_cpage.GetPtrReservedTag( itag, &line );
+    CHECK( line.cb == cbResvTag );
+
+    BYTE* pbTag = (BYTE*) line.pv;
+    for ( int i = 0; i < cbResvTag; i++ )
+    {
+        CHECK( pbTag[ i ] == 0xaf );
+    }
 }
 
 //  ================================================================
@@ -2706,6 +2736,88 @@ void CPageTestFixture::TestInsertLines()
     {
         InsertOneLine_( cb );
     }
+}
+
+//  ================================================================
+void CPageTestFixture::TestInsertReservedTags()
+//  ================================================================
+//
+//  Inserts the maximum supported number of reserved tags into the page + 1 more.
+//
+//-
+{
+    int cb = 32;
+    BYTE pattern = 0x11;
+
+    for ( BYTE i = 0; i < CPAGE::PGHDR::CTAG_RESERVED_MAX - 1; i++ )
+    {
+        InsertOneReservedTag_( cb, pattern * ( i + 1 ) );
+    }
+
+    FNegTestSet( fInvalidAPIUsage );
+    INT itag = m_cpage.IAddReservedTag( cb, pattern );
+    CHECK( m_cpage.CTagReserved() == CPAGE::PGHDR::CTAG_RESERVED_MAX );
+    CHECK( itag == -1 );
+    FNegTestUnset( fInvalidAPIUsage );
+}
+
+//  ================================================================
+void CPageTestFixture::TestReplaceReservedTag()
+//  ================================================================
+//
+//  Replaces a reserved tag.
+//
+//-
+{
+    int cb = 32;
+    BYTE pattern = 0x11;
+
+    INT itag = m_cpage.IAddReservedTag( cb, pattern );
+    CHECK( itag != -1 );
+
+    DATA data;
+    data.SetPv( m_pvBuffer );
+    data.SetCb( cb * 2 );
+
+    m_cpage.ReplaceReservedTag( itag, &data, 1 );
+
+    LINE line;
+    m_cpage.GetPtrReservedTag( itag, &line );
+    CHECK( line.cb == ULONG( cb * 2 ) );
+    CHECK( FAreLinesEqual( line.pv, m_pvBuffer, line.cb ) );
+}
+
+//  ================================================================
+void CPageTestFixture::TestResvTagFormatDisabled()
+//  ================================================================
+//
+//  Inserts tags (regular and reserved) into the page with Reserved Tag format disabled.
+//
+//-
+{
+    int cb = 32;
+    BYTE pattern = 0xaf;
+    CPAGE::PGHDR* ppghdr = (CPAGE::PGHDR*) m_cpage.PvBuffer();
+
+    CHECK( ppghdr->itagState == 1 );
+    // Disable reserved tag format
+    m_cpage.m_fResvTagFormatEnabled = fFalse;
+
+    // Insert a regular line
+    DATA data;
+    data.SetPv( m_pvBuffer );
+    data.SetCb( cb );
+    m_cpage.Insert( 0, &data, 1, 0 );
+
+    // Check that itagState isn't stored in new format
+    CHECK( ppghdr->itagState == 2 );
+
+    // Check that adding reserved tag fails.
+    FNegTestSet( fInvalidAPIUsage );
+    INT itag = m_cpage.IAddReservedTag( cb, pattern );
+    CHECK( itag == -1 );
+    CHECK( ppghdr->itagState == 2 );
+    FNegTestUnset( fInvalidAPIUsage );
 }
 
 //  ================================================================
@@ -2952,6 +3064,32 @@ void CPageTestFixture::InsertOneLine_( const ULONG cb )
 }
 
 //  ================================================================
+void CPageTestFixture::InsertOneReservedTag_( const ULONG cb, const BYTE pattern )
+//  ================================================================
+{
+    PAGECHECKSUM    checksumLoggedData1 = 0;
+    PAGECHECKSUM    checksumLoggedData2 = 0;
+    INT             ctagInitial         = m_cpage.CTagReserved();
+
+    DATA data;
+    LINE line;
+
+    data.SetPv( m_pvBuffer );
+    data.SetCb( cb );
+    memset( data.Pv(), pattern, data.Cb() );
+
+    checksumLoggedData1 = m_cpage.LoggedDataChecksum();
+    INT itag = m_cpage.IAddReservedTag( cb, pattern );
+    checksumLoggedData2 = m_cpage.LoggedDataChecksum();
+    CHECK( checksumLoggedData1 != checksumLoggedData2 );
+    CHECK( ctagInitial + 1 == m_cpage.CTagReserved() );
+
+    m_cpage.GetPtrReservedTag( itag, &line );
+    CHECK( line.cb == (ULONG) cb );
+    CHECK( FAreLinesEqual( line.pv, m_pvBuffer, cb ) );
+}
+
+//  ================================================================
 CPageTestFixture::CPageTestFixture()
 //  ================================================================
 {
@@ -3001,6 +3139,7 @@ bool CPageTestFixture::SetUp_()
             m_pvPage,
             CbPage_() );
     
+    m_cpage.m_fResvTagFormatEnabled = fTrue;
     return true;
 }
 

@@ -7,6 +7,12 @@
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+#include <errhandlingapi.h>
+
+extern VOID( *g_pfnReportEnforceFailure )( const WCHAR* wszContext, const CHAR* szMessage, const WCHAR* wszIssueSource );
+void __stdcall JetTestReportEnforceFail( const WCHAR* wszContext, const CHAR* szMessage, const WCHAR* wszIssueSource );
+thread_local JetTestEnforceSEHException* JetTestEnforceSEHException::s_pThreadExcep = NULL;
+
 //  ****************************************************************
 //  JetUnitTestFailure
 //  ****************************************************************
@@ -150,6 +156,9 @@ INT JetUnitTest::RunTests( const char * const szTest, const IFMP ifmpTest )
         JetUnitTest::PrintTests();
         return 1;
     }
+
+    // Activate custom enforce failure reporting for testing code enforces.
+    g_pfnReportEnforceFailure = &JetTestReportEnforceFail;
 
     bool fDefaultRun = true;
     const char szWildCard[] = { JetUnitTest::chWildCard, '\0' };
@@ -480,6 +489,52 @@ void JetTestFixture::Fail_( const char * const szFile, const INT line, const cha
 {
     JetUnitTestFailure failure( szFile, line, szCondition );
     m_presult->AddFailure( failure );
+}
+
+void __stdcall JetTestReportEnforceFail( const WCHAR* wszContext, const CHAR* szMessage, const WCHAR* wszIssueSource )
+{
+    JetTestEnforceSEHException* pExcep = new JetTestEnforceSEHException();
+
+    wszContext != NULL ? wcscpy_s( pExcep->wszContext, wszContext ) : pExcep->wszContext[ 0 ] = '\0';
+    szMessage != NULL ? strcpy_s( pExcep->szMessage, szMessage ) : pExcep->szMessage[ 0 ] = '\0';
+    wszIssueSource != NULL ? wcscpy_s( pExcep->wszIssueSource, wszIssueSource ) : pExcep->wszIssueSource[ 0 ] = '\0';
+
+    // Raise a continuable exception.
+    // Caller must destroy the heap-allocated exception object.
+    RaiseException( JETTEST_EXCEP_ENFORCE, 0, 1, (ULONG_PTR*) &pExcep );
+}
+
+
+//  ================================================================
+DWORD JetTestEnforceSEHException::Filter( _EXCEPTION_POINTERS* lpExcepPtrs )
+//  ================================================================
+{
+    Assert( lpExcepPtrs != NULL );
+    Assert( lpExcepPtrs->ExceptionRecord != NULL );
+
+    _EXCEPTION_RECORD* pExcepRecord = lpExcepPtrs->ExceptionRecord;
+    if ( pExcepRecord->ExceptionCode == JETTEST_EXCEP_ENFORCE )
+    {
+        Assert( pExcepRecord->NumberParameters == 1 );
+
+        JetTestEnforceSEHException* pExcep = (JetTestEnforceSEHException*) pExcepRecord->ExceptionInformation[ 0 ];
+        Assert( pExcep != NULL );
+        s_pThreadExcep = pExcep;
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+    else
+    {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+}
+
+//  ================================================================
+void JetTestEnforceSEHException::Cleanup()
+//  ================================================================
+{
+    Assert( s_pThreadExcep != NULL );
+    delete s_pThreadExcep;
+    s_pThreadExcep = NULL;
 }
 
 #endif // ENABLE_JET_UNIT_TEST
