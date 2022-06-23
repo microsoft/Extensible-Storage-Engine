@@ -1686,7 +1686,7 @@ JETUNITTESTDB( RBSPreImageCompression, Dehydration, dwOpenDatabase )
     dataRec.SetCb( sizeof(rgbData) );
     cpage.Insert( 0, &dataRec, 1, 0 );
 
-    data.SetPv( cpage.PvBuffer() );
+    data.SetPv( const_cast<VOID*>( cpage.PvBuffer() ) );
     data.SetCb( cbPage );
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
@@ -1750,7 +1750,7 @@ JETUNITTESTDB( RBSPreImageCompression, DehydrationAndXpress, dwOpenDatabase )
         cpage.Insert( iline, &dataRec, 1, 0 );
     }
 
-    data.SetPv( cpage.PvBuffer() );
+    data.SetPv( const_cast<VOID*>( cpage.PvBuffer() ) );
     data.SetCb( cbPage );
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
@@ -1811,7 +1811,7 @@ JETUNITTESTDB( RBSPreImageCompression, Xpress, dwOpenDatabase )
         cpage.Insert( i, &dataRec, 1, 0 );
     }
 
-    data.SetPv( cpage.PvBuffer() );
+    data.SetPv( const_cast<VOID*>( cpage.PvBuffer() ) );
     data.SetCb( cbPage );
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];

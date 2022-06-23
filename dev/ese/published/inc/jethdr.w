@@ -269,6 +269,7 @@ typedef enum
     opDBUTILDumpMetaData,
     opDBUTILDumpPage,
     opDBUTILDumpNode,
+    opDBUTILDumpTag,
     opDBUTILDumpSpace,
     opDBUTILSetHeaderState,
     opDBUTILDumpHeader,
@@ -675,6 +676,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvExtentFreed2                                 9500    //  Adds support for ExtentFreed2 LR which adds dbtime of the database to the existing ExtentFreed LR.
 #define JET_efvKVPStoreV2                                   9520    //  Allows upgrade of KVP stores to version 1.0.2
 #define JET_efvIndexDeferredPopulate                        9540    //  Adds support for deferred population of indices.
+#define JET_efvReservedTags                                 9560    //  Allows adding additional reserved tags to cpage.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -3266,6 +3268,7 @@ typedef struct
     JET_HISTO *                     phistoKeySizes;             // per node
     JET_HISTO *                     phistoDataSizes;            // per node
     JET_HISTO *                     phistoKeyCompression;       // per compressed node
+    JET_HISTO *                     phistoResvTagSizes;         // per reserved tag
     JET_HISTO *                     phistoUnreclaimedBytes;     // per deleted node
 #if ( JET_VERSION >= 0x0602 )
     __int64                         cVersionedNodes;            // node accumulation

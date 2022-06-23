@@ -7299,10 +7299,9 @@ ERR ErrAccumulateLvNodeData(
     Assert( pbtsLvCtx->fStarted );
     Assert( pbtsLvCtx->pgnoCurrent );
 
-    if ( NULL == pkdf )
+    if ( NULL == pkdf || itag < CPAGE::CTagReserved( ppghdr) )
     {
-        // we don't care about the external header ...
-        Assert( itag == 0 );
+        // we don't care about the reserved tags...
         err = JET_errSuccess;
         goto HandleError;
     }

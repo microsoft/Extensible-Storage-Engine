@@ -245,6 +245,7 @@ typedef enum
     eSPFieldKeySizesMAM,
     eSPFieldDataSizesMAM,
     eSPFieldKeyCompMAM,
+    eSPFieldResvTagsMAM,
     eSPFieldUnreclaimedMAM,
     eSPFieldVersionedNodes,
     eSPFieldLVRefs,
@@ -500,6 +501,7 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
     { eSPFieldKeySizesMAM,              cchMAMH,    L"Data:KeySizes",           szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
     { eSPFieldDataSizesMAM,             cchMAMH,    L"Data:DataSizes",          szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
     { eSPFieldKeyCompMAM,               cchMAMH,    L"Data:KeyComp",            szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
+    { eSPFieldResvTagsMAM,              cchMAMH,    L"Data:ReservedTags",       szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
     { eSPFieldUnreclaimedMAM,           cchMAMH,    L"Data:Unreclaim",          szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
     { eSPFieldVersionedNodes,           10,         L"VersndNode",              NULL,   JET_bitDBUtilSpaceInfoFullWalk      },
 
@@ -1201,6 +1203,9 @@ JET_ERR ErrPrintField(
             break;
         case eSPFieldKeyCompMAM:
             PrintMAM( pBTStats->pFullWalk->phistoKeyCompression );
+            break;
+        case eSPFieldResvTagsMAM:
+            PrintMAM( pBTStats->pFullWalk->phistoResvTagSizes );
             break;
         case eSPFieldUnreclaimedMAM:
             PrintMAM( pBTStats->pFullWalk->phistoUnreclaimedBytes );

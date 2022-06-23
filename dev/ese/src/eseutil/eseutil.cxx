@@ -506,6 +506,7 @@ LOCAL VOID EDBUTLHelpDump( _In_ PCWSTR wszAppName )
     wprintf( L"                               where a pgnoLast of 'max' indicates the last page%c", wchNewLine );
     wprintf( L"                               of the database.%c", wchNewLine );
     wprintf( L"                  /n<node>   - dump the specified node from the database%c", wchNewLine );
+    wprintf( L"                  /i<itag>   - dump the specified itag from the database%c", wchNewLine );
     wprintf( L"                  /t<table>  - perform dump for specified table only%c", wchNewLine );
     wprintf( L"                  /a         - dump all nodes including deleted ones%c", wchNewLine );
     wprintf( L"                               (dump-nodes mode only)%c", wchNewLine );
@@ -2398,6 +2399,8 @@ LOCAL BOOL FEDBUTLParseDump( _In_ PCWSTR arg, UTILOPTS *popts )
 
         case L'n':
         case L'N':
+        case L'i':
+        case L'I':
         {
             const size_t cchSzNode = 256;
             WCHAR   wszNode[cchSzNode];
@@ -2419,10 +2422,10 @@ LOCAL BOOL FEDBUTLParseDump( _In_ PCWSTR arg, UTILOPTS *popts )
                 break;
             }
 
-            pdbutil->op     = opDBUTILDumpNode;
+            pdbutil->op     = ( arg[1] == L'n' || arg[1] == L'N' ) ? opDBUTILDumpNode : opDBUTILDumpTag;
             pdbutil->dbid   = dbid;
             pdbutil->pgno   = pgno;
-            pdbutil->iline  = iline;
+            pdbutil->iline  = iline;    // iline will be interpreted as itag if op is opDBUTILDumpTag
 
             fResult         = fTrue;
         }
@@ -6640,6 +6643,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                         break;
 
                     case opDBUTILDumpNode:
+                    case opDBUTILDumpTag:
                         Call( ErrEDBUTLCheckDBName( &opts, wszDefaultTempDB, NULL ) );
                         wprintf( L"      Database: %s%c", opts.wszSourceDB, wchNewLine );
                         break;

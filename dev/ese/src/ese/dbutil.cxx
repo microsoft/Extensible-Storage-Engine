@@ -1368,7 +1368,7 @@ LOCAL ERR ErrDBUTLDumpPage( PIB * ppib, IFMP ifmp, PGNO pgno, PFNPAGE pfnpage, V
     pagedef.pgnoNext    = csr.Cpage().PgnoNext();
     pagedef.pgnoPrev    = csr.Cpage().PgnoPrev();
     
-    pagedef.pbRawPage   = reinterpret_cast<BYTE *>( csr.Cpage().PvBuffer() );
+    pagedef.pbRawPage   = reinterpret_cast<const BYTE *>( csr.Cpage().PvBuffer() );
 
     pagedef.cbFree      = csr.Cpage().CbPageFree();
     pagedef.cbUncommittedFree   = csr.Cpage().CbUncommittedFree();
@@ -2062,6 +2062,43 @@ void DBUTLCloseIfmpFucb( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_ IFMP 
 }
 
 //  ================================================================
+LOCAL VOID DBUTLDumpNode_( const KEYDATAFLAGS& kdf, CHAR* szBuf, const INT cbBuf, const INT cbWidth )
+//  ================================================================
+{
+    printf( "     Flags:  0x%4.4x\n", kdf.fFlags );
+    printf( "===========\n" );
+    if ( FNDVersion( kdf ) )
+    {
+        printf( "            Versioned\n" );
+    }
+    if ( FNDDeleted( kdf ) )
+    {
+        printf( "            Deleted\n" );
+    }
+    if ( FNDCompressed( kdf ) )
+    {
+        printf( "            Compressed\n" );
+    }
+    printf( "\n" );
+
+    printf( "Key Prefix:  %4d bytes\n", kdf.key.prefix.Cb() );
+    printf( "===========\n" );
+    szBuf[ 0 ] = 0;
+    DBUTLSprintHex( szBuf, cbBuf, reinterpret_cast<BYTE*>( kdf.key.prefix.Pv() ), kdf.key.prefix.Cb(), cbWidth );
+    printf( "%s\n", szBuf );
+    printf( "Key Suffix:  %4d bytes\n", kdf.key.suffix.Cb() );
+    printf( "===========\n" );
+    szBuf[ 0 ] = 0;
+    DBUTLSprintHex( szBuf, cbBuf, reinterpret_cast<BYTE*>( kdf.key.suffix.Pv() ), kdf.key.suffix.Cb(), cbWidth );
+    printf( "%s\n", szBuf );
+    printf( "      Data:  %4d bytes\n", kdf.data.Cb() );
+    printf( "===========\n" );
+    szBuf[ 0 ] = 0;
+    DBUTLSprintHex( szBuf, cbBuf, reinterpret_cast<BYTE*>( kdf.data.Pv() ), kdf.data.Cb(), cbWidth );
+    printf( "%s\n", szBuf );
+}
+
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpNode( JET_SESID sesid, IFileSystemAPI *const pfsapi, const WCHAR * const wszFile, const PGNO pgno, const INT iline, const  JET_GRBIT grbit )
 //  ================================================================
 {
@@ -2098,7 +2135,7 @@ LOCAL ERR ErrDBUTLDumpNode( JET_SESID sesid, IFileSystemAPI *const pfsapi, const
     }
     Call( pfapi->ErrIORead( *tcUtil, ibOffset, g_cbPage, (BYTE* const)pvPage, qosIONormal ) );
 
-    cpage.LoadPage( 1, pgno, pvPage, g_cbPage );
+    cpage.LoadPage( ifmpNil, pgno, pvPage, g_cbPage);
 
     if ( iline < -1 || iline >= cpage.Clines() )
     {
@@ -2153,38 +2190,7 @@ LOCAL ERR ErrDBUTLDumpNode( JET_SESID sesid, IFileSystemAPI *const pfsapi, const
         NDIGetKeydataflags( cpage, ilineCurrent, &kdf );
 
         printf( "          Node: %d:%d\n\n", pgno, ilineCurrent );
-        printf( "     Flags:  0x%4.4x\n", kdf.fFlags );
-        printf( "===========\n" );
-        if( FNDVersion( kdf ) )
-        {
-            printf( "            Versioned\n" );
-        }
-        if( FNDDeleted( kdf ) )
-        {
-            printf( "            Deleted\n" );
-        }
-        if( FNDCompressed( kdf ) )
-        {
-            printf( "            Compressed\n" );
-        }
-        printf( "\n" );
-
-        printf( "Key Prefix:  %4d bytes\n", kdf.key.prefix.Cb() );
-        printf( "===========\n" );
-        szBuf[0] = 0;
-        DBUTLSprintHex( szBuf, g_cbPage * 8, reinterpret_cast<BYTE *>( kdf.key.prefix.Pv() ), kdf.key.prefix.Cb(), cbWidth );
-        printf( "%s\n", szBuf );
-        printf( "Key Suffix:  %4d bytes\n", kdf.key.suffix.Cb() );
-        printf( "===========\n" );
-        szBuf[0] = 0;
-        DBUTLSprintHex( szBuf, g_cbPage * 8, reinterpret_cast<BYTE *>( kdf.key.suffix.Pv() ), kdf.key.suffix.Cb(), cbWidth );
-        printf( "%s\n", szBuf );
-        printf( "      Data:  %4d bytes\n", kdf.data.Cb() );
-        printf( "===========\n" );
-        szBuf[0] = 0;
-        DBUTLSprintHex( szBuf, g_cbPage * 8, reinterpret_cast<BYTE *>( kdf.data.Pv() ), kdf.data.Cb(), cbWidth );
-        printf( "%s\n", szBuf );
-
+        DBUTLDumpNode_( kdf, szBuf, g_cbPage * 8, cbWidth );
         printf( "\n\n" );
 
         if( !cpage.FLeafPage() )
@@ -2235,6 +2241,137 @@ LOCAL ERR ErrDBUTLDumpNode( JET_SESID sesid, IFileSystemAPI *const pfsapi, const
 HandleError:
     DBUTLCloseIfmpFucb( sesid, wszFile, ifmp, pfucbTable );
 
+    if ( cpage.FLoadedPage() )
+    {
+        cpage.UnloadPage();
+    }
+    OSMemoryPageFree( szBuf );
+    OSMemoryPageFree( pvPage );
+    delete pfapi;
+    return err;
+}
+
+//  ================================================================
+LOCAL ERR ErrDBUTLDumpTag( JET_SESID sesid, IFileSystemAPI* const pfsapi, const WCHAR* const wszFile, const PGNO pgno, const INT itag, const  JET_GRBIT grbit )
+//  ================================================================
+{
+    ERR             err = JET_errSuccess;
+    KEYDATAFLAGS    kdf;
+    CPAGE           cpage;
+    IFileAPI* pfapi = NULL;
+    QWORD           ibOffset = OffsetOfPgno( pgno );
+    VOID* pvPage = NULL;
+    CHAR* szBuf = NULL;
+    const INT       cbWidth = UtilCprintfStdoutWidth() >= 116 ? 32 : 16;
+    INT             itagCurr;
+    TraceContextScope   tcUtil( iorpDirectAccessUtil );
+
+    pvPage = PvOSMemoryPageAlloc( g_cbPage, NULL );
+    if ( NULL == pvPage )
+    {
+        Call( ErrERRCheck( JET_errOutOfMemory ) );
+    }
+
+    err = CIOFilePerf::ErrFileOpen( pfsapi,
+        reinterpret_cast<PIB*>( sesid )->m_pinst,
+        wszFile,
+        IFileAPI::fmfReadOnly,
+        iofileDbAttached,
+        qwDumpingFileID,
+        &pfapi );
+    if ( err < 0 )
+    {
+        wprintf( L"Cannot open file %ws.\n\n", wszFile );
+        Call( err );
+    }
+    Call( pfapi->ErrIORead( *tcUtil, ibOffset, g_cbPage, (BYTE* const) pvPage, qosIONormal ) );
+
+    cpage.LoadPage( ifmpNil, pgno, pvPage, g_cbPage );
+
+    const INT ctags = cpage.Clines() + cpage.CTagReserved();
+    if ( itag < -1 || itag >= ctags )
+    {
+        printf( "Invalid itag: %d\n\n", itag );
+        //  errNDNotFound would be a MUCH better error, but we have a general policy against returning
+        //  internal errors out the JET API.  Perhaps we should relax that for utility \ dumping.
+        Call( ErrERRCheck( cpage.FPageIsInitialized() ? JET_errInvalidParameter : JET_errPageNotInitialized ) );
+    }
+
+    if ( !cpage.FNewRecordFormat()
+        && cpage.FPrimaryPage()
+        && !cpage.FRepairedPage()
+        && cpage.FLeafPage()
+        && !cpage.FSpaceTree()
+        && !cpage.FLongValuePage() )
+    {
+        if ( itag == -1 )
+        {
+            printf( "Cannot dump all tags on old format page\n\n" );
+            Call( ErrERRCheck( JET_errInvalidParameter ) );
+        }
+
+        VOID* pvBuf = PvOSMemoryPageAlloc( g_cbPage, NULL );
+
+        if ( NULL == pvBuf )
+        {
+            Call( ErrERRCheck( JET_errOutOfMemory ) );
+        }
+
+        err = ErrUPGRADEConvertNode( &cpage, itag, pvBuf );
+        OSMemoryPageFree( pvBuf );
+        Call( err );
+    }
+
+    szBuf = (CHAR*) PvOSMemoryPageAlloc( g_cbPage * 8, NULL );
+    if ( NULL == szBuf )
+    {
+        Call( ErrERRCheck( JET_errOutOfMemory ) );
+    }
+
+    itagCurr = ( itag == -1 ) ? 0 : itag;
+
+    do
+    {
+        if ( itagCurr >= ctags )
+        {
+            Assert( itagCurr == 0 );
+            printf( "ERROR:  This page doesn't even have one valid tag.  Q: Blank?  A: %hs\n", cpage.FPageIsInitialized() ? "No" : "Yes" );
+            Call( ErrERRCheck( cpage.FPageIsInitialized() ? JET_errInvalidParameter : JET_errPageNotInitialized ) );
+        }
+
+        printf( "          Tag: %d:%d\n", pgno, itagCurr );
+        printf( "         Type: %s\n\n",
+                    itagCurr == 0 ? "External Header" :
+                    itagCurr < cpage.CTagReserved() ? "Reserved Tag" :
+                    "Node" );
+
+        if ( itagCurr < cpage.CTagReserved() )
+        {
+            LINE line;
+            cpage.GetPtrReservedTag( itagCurr, &line );
+            if ( itagCurr > 0 )
+            {
+                NodeResvTag* pResvTag = (NodeResvTag*) line.pv;
+                printf( " ResvTagId:  %d\n", pResvTag->resvTagId );
+            }
+
+            printf( "      Data:  %4d bytes\n", line.cb );
+            printf( "===========\n" );
+            szBuf[ 0 ] = 0;
+            DBUTLSprintHex( szBuf, g_cbPage * 8, reinterpret_cast<BYTE*>( line.pv ), line.cb, cbWidth );
+            printf( "%s\n", szBuf );
+        }
+        else
+        {
+            NDIGetKeydataflags( cpage, itagCurr - cpage.CTagReserved(), &kdf);
+            DBUTLDumpNode_( kdf, szBuf, g_cbPage * 8, cbWidth );
+        }
+
+        printf( "\n\n" );
+        itagCurr++;
+    } while ( itag == -1 && itagCurr < ctags );
+
+HandleError:
     if ( cpage.FLoadedPage() )
     {
         cpage.UnloadPage();
@@ -2429,7 +2566,7 @@ LOCAL ERR ErrDBUTLSeekToKey_(
             return err;
         }
 
-        cpage.LoadPage( 1, pgnoChild, pvPageBuf, g_cbPage );
+        cpage.LoadPage( ifmpNil, pgnoChild, pvPageBuf, g_cbPage );
 
         pgnoCurr = pgnoChild;
     }
@@ -2487,7 +2624,7 @@ LOCAL ERR ErrDBUTLDumpPage(
     }
     Call( pfapi->ErrIORead( *tcUtil, OffsetOfPgno( pgno ), g_cbPage, (BYTE* const)pvPage, qosIONormal ) );
 
-    cpage.LoadPage( 1, pgno, pvPage, g_cbPage );
+    cpage.LoadPage( ifmpNil, pgno, pvPage, g_cbPage );
 
 
     //  page integrity check.
@@ -2679,7 +2816,7 @@ class CBTreeStatsManager {
         BTREE_STATS_PAGE_SPACE      m_btsInternalPageSpace;
         BTREE_STATS_PAGE_SPACE      m_btsFullWalk;
         BTREE_STATS_LV              m_btsLvData;
-        CPerfectHistogramStats      m_rgHistos[20];
+        CPerfectHistogramStats      m_rgHistos[22];
         BTREE_STATS                 m_bts;
 
     public:
@@ -2708,23 +2845,25 @@ class CBTreeStatsManager {
             m_btsFullWalk.phistoKeySizes        = (JET_HISTO*)&m_rgHistos[3];
             m_btsFullWalk.phistoDataSizes       = (JET_HISTO*)&m_rgHistos[4];
             m_btsFullWalk.phistoKeyCompression  = (JET_HISTO*)&m_rgHistos[5];
-            m_btsFullWalk.phistoUnreclaimedBytes    = (JET_HISTO*)&m_rgHistos[6];
+            m_btsFullWalk.phistoResvTagSizes    = (JET_HISTO*)&m_rgHistos[6];
+            m_btsFullWalk.phistoUnreclaimedBytes    = (JET_HISTO*)&m_rgHistos[7];
             m_btsFullWalk.cVersionedNodes       = 0;
             
-            m_btsInternalPageSpace.phistoFreeBytes      = (JET_HISTO*)&m_rgHistos[7];
-            m_btsInternalPageSpace.phistoNodeCounts     = (JET_HISTO*)&m_rgHistos[8];
-            m_btsInternalPageSpace.phistoKeySizes       = (JET_HISTO*)&m_rgHistos[9];
-            m_btsInternalPageSpace.phistoDataSizes      = (JET_HISTO*)&m_rgHistos[10];
-            m_btsInternalPageSpace.phistoKeyCompression = (JET_HISTO*)&m_rgHistos[11];
-            m_btsInternalPageSpace.phistoUnreclaimedBytes   = (JET_HISTO*)&m_rgHistos[12];
+            m_btsInternalPageSpace.phistoFreeBytes      = (JET_HISTO*)&m_rgHistos[8];
+            m_btsInternalPageSpace.phistoNodeCounts     = (JET_HISTO*)&m_rgHistos[9];
+            m_btsInternalPageSpace.phistoKeySizes       = (JET_HISTO*)&m_rgHistos[10];
+            m_btsInternalPageSpace.phistoDataSizes      = (JET_HISTO*)&m_rgHistos[11];
+            m_btsInternalPageSpace.phistoKeyCompression = (JET_HISTO*)&m_rgHistos[12];
+            m_btsInternalPageSpace.phistoResvTagSizes   = (JET_HISTO*)&m_rgHistos[13];
+            m_btsInternalPageSpace.phistoUnreclaimedBytes   = (JET_HISTO*)&m_rgHistos[14];
 
-            m_btsLvData.phistoLVSize            = (JET_HISTO*)&m_rgHistos[13];
-            m_btsLvData.phistoLVComp            = (JET_HISTO*)&m_rgHistos[14];
-            m_btsLvData.phistoLVRatio           = (JET_HISTO*)&m_rgHistos[15];
-            m_btsLvData.phistoLVSeeks           = (JET_HISTO*)&m_rgHistos[16];
-            m_btsLvData.phistoLVBytes           = (JET_HISTO*)&m_rgHistos[17];
-            m_btsLvData.phistoLVExtraSeeks      = (JET_HISTO*)&m_rgHistos[18];
-            m_btsLvData.phistoLVExtraBytes      = (JET_HISTO*)&m_rgHistos[19];
+            m_btsLvData.phistoLVSize            = (JET_HISTO*)&m_rgHistos[15];
+            m_btsLvData.phistoLVComp            = (JET_HISTO*)&m_rgHistos[16];
+            m_btsLvData.phistoLVRatio           = (JET_HISTO*)&m_rgHistos[17];
+            m_btsLvData.phistoLVSeeks           = (JET_HISTO*)&m_rgHistos[18];
+            m_btsLvData.phistoLVBytes           = (JET_HISTO*)&m_rgHistos[19];
+            m_btsLvData.phistoLVExtraSeeks      = (JET_HISTO*)&m_rgHistos[20];
+            m_btsLvData.phistoLVExtraBytes      = (JET_HISTO*)&m_rgHistos[21];
 
             //  Zero the parent structure of all this.
             memset( &m_bts, 0, sizeof(m_bts) );
@@ -2771,6 +2910,7 @@ class CBTreeStatsManager {
             CStatsFromPv(pPOL->pInternalPageStats->phistoKeySizes)->Zero();
             CStatsFromPv(pPOL->pInternalPageStats->phistoDataSizes)->Zero();
             CStatsFromPv(pPOL->pInternalPageStats->phistoKeyCompression)->Zero();
+            CStatsFromPv(pPOL->pInternalPageStats->phistoResvTagSizes)->Zero();
             CStatsFromPv(pPOL->pInternalPageStats->phistoUnreclaimedBytes)->Zero();
         }
 
@@ -2793,6 +2933,9 @@ class CBTreeStatsManager {
 
             Assert( pFW->phistoKeyCompression );
             CStatsFromPv(pFW->phistoKeyCompression)->Zero();
+
+            Assert( pFW->phistoResvTagSizes );
+            CStatsFromPv(pFW->phistoResvTagSizes)->Zero();
 
             Assert( pFW->phistoUnreclaimedBytes );
             CStatsFromPv(pFW->phistoUnreclaimedBytes)->Zero();
@@ -5426,6 +5569,8 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
             return ErrDBUTLDump( sesid, pdbutil );
         case opDBUTILDumpNode:
             return ErrDBUTLDumpNode( sesid, pinst->m_pfsapi, pdbutil->szDatabase, pdbutil->pgno, pdbutil->iline, pdbutil->grbitOptions );
+        case opDBUTILDumpTag:
+            return ErrDBUTLDumpTag( sesid, pinst->m_pfsapi, pdbutil->szDatabase, pdbutil->pgno, pdbutil->iline, pdbutil->grbitOptions );
 #ifdef DEBUG
         case opDBUTILSetHeaderState:
             return ErrDUMPFixupHeader( pinst, pdbutil->szDatabase, pdbutil->grbitOptions & JET_bitDBUtilOptionDumpVerbose );

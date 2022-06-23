@@ -15981,17 +15981,20 @@ VOID BTPerformPageMove( _In_ MERGEPATH * const pmergePath )
 
     const PGNO pgnoOld = pmergePath->csr.Pgno();
     const PGNO pgnoNew = pmergePath->pmerge->csrNew.Pgno();
+    const DBTIME dbtimeNew = pmergePath->pmerge->csrNew.Dbtime();
 
     // copy the data
     if( FBTIUpdatablePage( pmergePath->pmerge->csrNew ) )
     {
         Assert( pmergePath->csr.Cpage().CbPage() == pmergePath->pmerge->csrNew.Cpage().CbPage() );
-        UtilMemCpy(
-            pmergePath->pmerge->csrNew.Cpage().PvBuffer(),  // destination
+        pmergePath->pmerge->csrNew.Cpage().CopyPage(
             pmergePath->csr.Cpage().PvBuffer(),             // source
             pmergePath->csr.Cpage().CbPage() );             // length
-        pmergePath->pmerge->csrNew.Cpage().SetPgno( pgnoNew );
+
         pmergePath->pmerge->csrNew.FinalizePreInitPage();
+
+        Assert( pmergePath->pmerge->csrNew.Cpage().PgnoThis() == pgnoNew );
+        Assert( pmergePath->pmerge->csrNew.Dbtime() == dbtimeNew );
     }
 
     // set the source page as empty
@@ -17437,24 +17440,27 @@ class CBTAcrossQueue {
             return JET_errSuccess;
         }
 
-        Assert( pkdf->key.Cb() == ( pkdf->key.prefix.Cb() + pkdf->key.suffix.Cb() ) );  // I assumed this...
+        if ( itag >= CPAGE::CTagReserved( ppghdr ) )
+        {
+            Assert( pkdf->key.Cb() == ( pkdf->key.prefix.Cb() + pkdf->key.suffix.Cb() ) );  // I assumed this...
 
-        PGNO pgnoLeaf;
-        Assert( pkdf->data.Cb() == sizeof(PGNO) );
-        pgnoLeaf = *((UnalignedLittleEndian<ULONG>*)pkdf->data.Pv());
-        CStupidQueue::ERR errQueue = pThisCtx->ErrEnqueuePage( pgnoLeaf );
-        if ( errQueue == CStupidQueue::ERR::errSuccess )
-        {
-            err = JET_errSuccess;
-        }
-        else if ( errQueue == CStupidQueue::ERR::errOutOfMemory )
-        {
-            err = ErrERRCheck( JET_errOutOfMemory );
-        }
-        else
-        {
-            AssertSz( fFalse, "Unexpected error out of ErrEnqueuePage()" );
-            err = ErrERRCheck( JET_errInvalidParameter );
+            PGNO pgnoLeaf;
+            Assert( pkdf->data.Cb() == sizeof( PGNO ) );
+            pgnoLeaf = *( ( UnalignedLittleEndian<ULONG>* )pkdf->data.Pv() );
+            CStupidQueue::ERR errQueue = pThisCtx->ErrEnqueuePage( pgnoLeaf );
+            if ( errQueue == CStupidQueue::ERR::errSuccess )
+            {
+                err = JET_errSuccess;
+            }
+            else if ( errQueue == CStupidQueue::ERR::errOutOfMemory )
+            {
+                err = ErrERRCheck( JET_errOutOfMemory );
+            }
+            else
+            {
+                AssertSz( fFalse, "Unexpected error out of ErrEnqueuePage()" );
+                err = ErrERRCheck( JET_errInvalidParameter );
+            }
         }
 
         return err;

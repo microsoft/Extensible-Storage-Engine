@@ -644,6 +644,7 @@ ERR FMP::ErrInitMSysDeferredPopulateKeys( PIB * const ppib, BOOL fAllowCreation 
 }
 
 
+ERR ErrDBFormatFeatureEnabled_( const FormatVersions* pfmtversFormatFeature, const DbVersion& dbvCurrentFromFile );
 ERR ErrDBFormatFeatureEnabled_( const JET_ENGINEFORMATVERSION efvFormatFeature, const DbVersion& dbvCurrentFromFile );
 
 ERR FMP::ErrDBFormatFeatureEnabled( const DBFILEHDR* const pdbfilehdr, const JET_ENGINEFORMATVERSION efvFormatFeature )
@@ -688,7 +689,34 @@ ERR FMP::ErrDBFormatFeatureEnabled( const DBFILEHDR* const pdbfilehdr, const JET
 
 ERR FMP::ErrDBFormatFeatureEnabled( const JET_ENGINEFORMATVERSION efvFormatFeature )
 {
-    return ErrDBFormatFeatureEnabled( Pdbfilehdr().get(), efvFormatFeature );
+    ERR err = JET_errSuccess;
+
+    Assert( efvFormatFeature <= PfmtversEngineMax()->efv );
+
+    JET_ENGINEFORMATVERSION efvHighestSupported = m_efvHighestSupported;
+    if ( efvHighestSupported == 0 )
+    {
+        // If cached efv is not initialized.
+        const FormatVersions* pfmtVerDb;
+        err = ErrDBFindHighestMatchingDbMajors( Pdbfilehdr().get()->Dbv(), &pfmtVerDb );
+        if ( err == JET_errSuccess )
+        {
+            AtomicCompareExchange( (ULONG*) &m_efvHighestSupported, efvHighestSupported, pfmtVerDb->efv );
+            efvHighestSupported = m_efvHighestSupported;
+        }
+    }
+
+    if ( efvHighestSupported >= JET_efvSetDbVersion )
+    {
+        return ( efvFormatFeature <= efvHighestSupported ? JET_errSuccess : ErrERRCheck( JET_errEngineFormatVersionParamTooLowForRequestedFeature ) );
+    }
+    else
+    {
+        // DB's supported efv is lower than SetDbVersion.
+        // Don't use cached checks for this case, fall back to slow path.
+        // This is because some legacy efvs are out of order and just comparing efv value may yield incorrect result.
+        return ErrDBFormatFeatureEnabled( Pdbfilehdr().get(), efvFormatFeature );
+    }
 }
 
 ERR ErrFMFormatFeatureEnabled( const JET_ENGINEFORMATVERSION efvFormatFeature, const GenVersion& fmvCurrentFromFile )
@@ -1633,6 +1661,7 @@ ERR FMP::ErrInitializeOneFmp(
     pfmp->SetLeakReclaimerEnabled( fFalse );
     pfmp->SetLeakReclaimerTimeQuota( -1 );
     pfmp->SetSelfAllocSpBufReservationEnabled( fFalse );
+    pfmp->ResetEfvHighestSupported();
     pfmp->ResetLeakReclaimerIsRunning();
     pfmp->ResetPgnoMaxTracking();
     pfmp->ResetCpgAvail();

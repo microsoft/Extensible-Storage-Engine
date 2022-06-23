@@ -5241,7 +5241,7 @@ void BFIBuildReferencedPageListForCrashDump( CReferencedPages * ptableReferenced
                     
                     for ( FUCB * pfucb = ppib->pfucbOfSession; pfucbNil != pfucb; pfucb = pfucb->pfucbNextOfSession )
                     {
-                        void * const    pvPage  = pfucb->csr.PvBufferForCrashDump();
+                        const void * const    pvPage  = pfucb->csr.PvBufferForCrashDump();
 
                         if ( NULL != pvPage )
                         {
@@ -20801,7 +20801,7 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
                             tcBFLatch->iorReason.Iorf(),
                             tcBFLatch->nParentObjectClass,
                             ppghdr->dbtimeDirtied,
-                            ppghdr->itagMicFree,
+                            ppghdr->itagState,
                             ppghdr->cbFree );
                     }
                 }

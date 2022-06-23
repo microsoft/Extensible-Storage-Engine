@@ -40,6 +40,23 @@ enum NodeRootField {
         noderfMax,               // Not persisted
     };
 
+PERSISTED
+enum NodeResvTagId : BYTE
+{
+    rtidInvalid = 0,
+    rtidMax = 0x1f  // tag Ids are byte values, but we only support a max of 7 reserved tags.
+                    // Reserving 3 high bits to keep it similar to NodeFlags on the first byte of a regular iline.
+                    // This isn't needed because reserved tags don't have node flags.
+                    // Keeping these bits free just in case. They can be reclaimed in the future.
+};
+
+PERSISTED
+struct NodeResvTag
+{
+    NodeResvTagId   resvTagId;
+    BYTE            rgb[ 0 ];
+};
+
 // Currently we have only one byte for the node root field flag.
 // It may also be dangerous to use the highest 3 bits,
 // see comments for enum NodeRootField.
@@ -157,6 +174,10 @@ VOID    NDSetExternalHeader     ( _In_ FUCB* const pfucb, _In_ CSR* const pcsr, 
 VOID    NDSetExternalHeader     ( _In_ const IFMP ifmp, _In_ CSR* const pcsr, _In_range_( 0, noderfMax - 1 ) const NodeRootField noderf, _In_ const DATA * pdata );
 ERR     ErrNDValidateSetExternalHeader( const CPAGE &cpage, _In_ const DATA * pdata );
 
+// Reserved tag support. Caller must handle logging. These APIs don't do it.
+INT  INDAddReservedTag( _In_ FUCB* pfucb, _In_ CSR* pcsr, _In_ NodeResvTagId resvTagId, _In_ int cb, _In_ BYTE fill );
+VOID NDReplaceReservedTag( _In_ FUCB* pfucb, _In_ CSR* pcsr, _In_ NodeResvTagId resvTagId, const DATA& data );
+INT  INDGetReservedTag( _In_ FUCB* pfucb, _In_ CSR* pcsr, _In_ NodeResvTagId resvTagId, _Out_ DATA* pdata );
 
 // page scrubbing
 const SCRUBOPER scrubOperNone               = 0x0;

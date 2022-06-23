@@ -5701,7 +5701,9 @@ enum eBFVirtualMembers
     eBFCPAGEcbFree,
     eBFCPAGEcbUncommittedFree,
     eBFCPAGEibMicFree,
+    eBFCPAGEitagState,
     eBFCPAGEitagMicFree,
+    eBFCPAGEctagReserved,
     eBFCPAGEfFlags,
     //  extended (large) page member accessors
     eBFCPAGEpgno,
@@ -5949,7 +5951,20 @@ ERR ErrBFPageElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDe
         ExtrudeCPAGEElem( cbFree );
         ExtrudeCPAGEElem( cbUncommittedFree );
         ExtrudeCPAGEElem( ibMicFree );
-        ExtrudeCPAGEElem( itagMicFree );
+        ExtrudeCPAGEElem( itagState );
+
+        case eBFCPAGEitagMicFree:
+        {
+            ullValue1 = CPAGE::ITagMicFree( ppghdr );
+        }
+            break;
+
+        case eBFCPAGEctagReserved:
+        {
+            ullValue1 = CPAGE::CTagReserved( ppghdr );
+        }
+            break;
+
         ExtrudeCPAGEElem( fFlags );
 
         //  extended (large) page member accessors
@@ -6351,7 +6366,9 @@ CMemberDescriptor const rgmdBfEntryMembers[] =
     QPG( PAGE, cbFree,              ePerfectHisto,      ShortExprEval, NULL, ShortReadVal, ShortPrintVal )
     QPG( PAGE, cbUncommittedFree,   ePerfectHisto,      ShortExprEval, NULL, ShortReadVal, ShortPrintVal )
     QPG( PAGE, ibMicFree,           ePerfectHisto,      ShortExprEval, NULL, ShortReadVal, ShortPrintVal )
-    QPG( PAGE, itagMicFree,         ePerfectHisto,      ShortExprEval, NULL, ShortReadVal, ShortPrintVal )
+    QPG( PAGE, itagState,           ePerfectHisto,      ShortExprEval, NULL, ShortReadVal, ShortPrintVal )
+         {  "pv->itagMicFree",      ErrBFPageElemFromStruct, eBFCPAGEitagMicFree, 0, ePerfectHisto,    ShortExprEval, NULL, ShortReadVal, ShortPrintVal },
+         {  "pv->ctagReserved",     ErrBFPageElemFromStruct, eBFCPAGEctagReserved, 0, ePerfectHisto,    ShortExprEval, NULL, ShortReadVal, ShortPrintVal },
     QPG( PAGE, fFlags,              ePerfectHisto,      DwordExprEval, NULL, DwordReadVal, DwordPrintVal )
     QPG( PAGE, pgno,                ePartialHisto|1024, UlongExprEval, NULL, UlongReadVal, UlongPrintVal )
     QPG( PAGE, rgChecksum2,         eNoHistoSupport,    QwordExprEval, NULL, QwordReadVal, QwordPrintVal )

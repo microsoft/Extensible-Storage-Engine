@@ -24,7 +24,7 @@
 //  A service pack / QFE version might be able to be inserted, but should not shift any other
 //  values.
 PERSISTED
-const FormatVersions g_rgfmtversEngine[] = {
+constexpr FormatVersions g_rgfmtversEngine[] = {
 
     //  EngineFormatVersion / EFV                       DbVersion       LogVersion  FlushMapVer.
 
@@ -94,10 +94,39 @@ const FormatVersions g_rgfmtversEngine[] = {
     { JET_efvExtentFreed2, /* 9500 */                   { 1568,230,500 }, { 8,120,260 }, { 3,0,0 } }, // [2021/12/21]
     { JET_efvKVPStoreV2, /* 9520 */                     { 1568,250,520 }, { 8,120,260 }, { 3,0,0 } }, // [2022/02/17]
     { JET_efvIndexDeferredPopulate, /* 9540 */          { 1568,260,540 }, { 8,120,260 }, { 3,0,0 } }, // [2022/03/02]  
+    { JET_efvReservedTags, /* 9560 */                   { 1568,270,560 }, { 8,120,260 }, { 3,0,0 } }, // [2022/06/17]
 };
 
-const INT g_cfmtversEngine = _countof( g_rgfmtversEngine );
-const INT g_ifmtversLastFeature = _countof(g_rgfmtversEngine) - 1;
+constexpr INT g_cfmtversEngine = std::size( g_rgfmtversEngine );
+constexpr INT g_ifmtversLastFeature = g_cfmtversEngine - 1;
+
+constexpr int IfmtVersSorted()
+{
+    int i = 0;
+    for ( i; i < g_cfmtversEngine; i++ )
+    {
+        // This efv is when ESE started supporting efvs.
+        // Any efvs before that are made up, and maybe out of order.
+        if ( g_rgfmtversEngine[ i ].efv == JET_efvSetDbVersion )
+        {
+            break;
+        }
+    }
+
+    for ( i; i < g_cfmtversEngine - 1; i++ )
+    {
+        if ( g_rgfmtversEngine[ i ].efv >= g_rgfmtversEngine[ i + 1 ].efv )
+        {
+            {
+                return i;
+            }
+        }
+    }
+
+    return i;
+}
+
+static_assert( IfmtVersSorted() == g_ifmtversLastFeature, "Format versions aren't defined correctly. Please check g_rgfmtversEngine" );
 
 FormatVersions g_fmtversEngineMax = g_rgfmtversEngine[g_ifmtversLastFeature];
 FormatVersions g_fmtversEngineDefault = g_rgfmtversEngine[g_ifmtversLastFeature];
@@ -162,8 +191,7 @@ ERR ErrGetDesiredVersion( _In_ const INST * const pinstStaging, _In_ JET_ENGINEF
         return JET_errSuccess;
     }
 
-    // Probably be more efficient to reverse the order right?  Maybe.
-    for ( ULONG i = 0; i < _countof(g_rgfmtversEngine); ++i )
+    for ( ULONG i = g_ifmtversLastFeature; i >= 0; i-- )
     {
         if ( g_rgfmtversEngine[i].efv == efvDesired )
         {
@@ -209,7 +237,10 @@ ERR ErrDBFindHighestMatchingDbMajors( _In_ const DbVersion& dbvFromFileHeader, _
 
     if ( *ppfmtversMatching == NULL )
     {
-        AssertSz( fDbMayBeTooHigh || FInEseutilPossibleUsageError(), "Asked for %d.%d.%d DB version, we don't have an entry in g_rgfmtversEngine for this!", dbvFromFileHeader.ulDbMajorVersion, dbvFromFileHeader.ulDbUpdateMajor, dbvFromFileHeader.ulDbUpdateMinor );
+        OnDebug( BOOL fDbMayBeTooLow = ( 0 < CmpDbVer( PfmtversEngineMin()->dbv, dbvFromFileHeader ) ) );  // some ancient version encountered that is smaller than the earliest recorded version?
+        AssertSz( fDbMayBeTooLow || fDbMayBeTooHigh || FInEseutilPossibleUsageError(),
+                  "Asked for %d.%d.%d DB version, we don't have an entry in g_rgfmtversEngine for this!",
+                  dbvFromFileHeader.ulDbMajorVersion, dbvFromFileHeader.ulDbUpdateMajor, dbvFromFileHeader.ulDbUpdateMinor );
         return ErrERRCheck( JET_errInvalidDatabaseVersion );
     }
     return JET_errSuccess;

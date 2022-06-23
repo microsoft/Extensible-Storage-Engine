@@ -1829,20 +1829,12 @@ LOCAL VOID SHKIRootMoveCopyToNewPage(
     const BOOL fRecoveryRedo )
 {
     Assert( pcsr->FDirty() );
-    if ( fRecoveryRedo )
-    {
-        pcsr->SetDbtime( dbtimeAfter );
-    }
 
     // Copy image to destination page.
-    UtilMemCpy(
-        pcsr->Cpage().PvBuffer(),
-        dataOld.Pv(),
-        dataOld.Cb() );
+    pcsr->CopyPage( dataOld.Pv(), dataOld.Cb() );
+    pcsr->SetDbtime( dbtimeAfter ); // copying would revert dbtime back to old page image
 
-    // Fix up pgno and dbtime in the destination page.
-    pcsr->Cpage().SetPgno( pgnoNew );
-    pcsr->Cpage().SetDbtime( dbtimeAfter );
+    Assert( pcsr->Cpage().PgnoThis() == pgnoNew );
 }
 
 LOCAL VOID SHKIRootMoveReleaseLatches( ROOTMOVE* const prm )
