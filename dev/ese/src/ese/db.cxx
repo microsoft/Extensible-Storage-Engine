@@ -1200,7 +1200,7 @@ ERR ErrDBUpdateAndFlushVersion(
         DBISetVersion( pinst, wszDbFullName, ifmp, pfmtversDesired->dbv, pdbfilehdr.get(), fDbNeedsUpdate, fCreateDbUpgradeDoNotLog );
     }
 
-    Assert( pfmp->EfvHighestSupported() == 0 ); // shouldn't cache efv during this version update
+    AssertTrack( pfmp->EfvHighestSupported() == 0, "StaleCachedEfv_DBUpdateVersion" );   // shouldn't cache efv during this version update
     } // .dtor release dbfilehdr lock
 
     Assert( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), pfmtversDesired->dbv ) >= 0 );
@@ -1297,7 +1297,7 @@ ERR ErrDBRedoSetDbVersion(
         Enforce( !fRedo );
     }
 
-    Assert( pfmp->EfvHighestSupported() == 0 ); // shouldn't cache efv during this version update
+    AssertTrack( pfmp->EfvHighestSupported() == 0, "StaleCachedEfv_RedoSetDbVersion" ); // shouldn't cache efv during this version update
     } // PdbfilehdrReadWrite
 
     if ( fRedo )
@@ -4271,7 +4271,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
                 DBISetVersion( pinst, wszDbFullName, ifmp, pfmtversDesired->dbv, pdbfilehdr.get(), fDbNeedsUpdate, fFalse );
             }
 
-            Assert( pfmp->EfvHighestSupported() == 0 ); // shouldn't cache efv during this version update
+            AssertTrack( pfmp->EfvHighestSupported() == 0, "StaleCachedEfv_Attach" ); // shouldn't cache efv during this version update
             } // .dtor releases header lock
 
             Assert( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), pfmtversDesired->dbv ) >= 0 );
