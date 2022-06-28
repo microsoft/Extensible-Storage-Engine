@@ -1488,7 +1488,7 @@ class TFileFilter  //  ff
                     if ( pwaiter && pwaiter->FWaiting() )
                     {
                         m_ilWaiting.Remove( pwaiter );
-                        ilToComplete.InsertAsPrevMost( pwaiter );
+                        pwaiter->Complete();
                     }
 
                     while ( m_ilWaiting.PrevMost() && FIncrementMax( m_cIO, m_cIOMax ) )
@@ -1921,10 +1921,8 @@ class TFileFilter  //  ff
 
             //  if we need to wait to get a throttle count then we must issue to avoid deadlocks
 
-            if ( !waiter.FComplete() )
+            if ( fThrottleAcquired && !fCombined && !waiter.FComplete() )
             {
-                Assert( fThrottleAcquired && !fCombined );
-
                 //  issue any IO queued for this thread
 
                 Call( ErrIOIssue() );
@@ -3081,7 +3079,7 @@ ERR TFileFilter<I>::ErrInvalidate( _In_ const COffsets& offsets )
                                     qosIONormal,
                                     cpPinned,
                                     NULL,
-                                    NULL ));
+                                    NULL ) );
         }
 
         //  invalidate the cache for this offset range
