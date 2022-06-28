@@ -4004,6 +4004,15 @@ PAGECHECKSUM CPAGE::LoggedDataChecksum() const
     pghdr2T.pghdr.cbUncommittedFree = 0;
     pghdr2T.pghdr.cbFree            = 0;
     pghdr2T.pghdr.ibMicFree         = 0;
+
+    INT ctagResvLegacy = CTagReserved( &ppghdr2->pghdr );
+    if ( ctagResvLegacy <= 1 )
+    {
+        ctagResvLegacy = 0;
+    }
+
+    pghdr2T.pghdr.itagState         = USHORT( ( ctagResvLegacy << PGHDR::SHF_CTAG_RESERVED ) | ITagMicFree( &ppghdr2->pghdr ) );
+
     //  flush bit can flip-flop regardless of logging / replay
     //  checksum is not summed in, neither needs bit (which changes/upgrades from dehydration)
     //  Page FDP delete might be set only on a copy reverted by RBS.
