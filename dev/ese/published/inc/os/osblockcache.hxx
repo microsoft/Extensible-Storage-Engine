@@ -793,6 +793,11 @@ class CCachedBlock  //  cbl
         {
         }
 
+        CCachedBlock( _In_ const CCachedBlock& other )
+        {
+            memcpy( this, &other, sizeof( *this ) );
+        }
+
         const CCachedBlockId& Cbid() const { return m_cbid; }
         ClusterNumber Clno() const { return m_le_clno; }
         BOOL FValid() const { return m_fValid != 0; }
@@ -843,17 +848,17 @@ class CCachedBlock  //  cbl
 
     private:
 
-        const CCachedBlockId                            m_cbid;                 //  the cached block id
-        const UnalignedLittleEndian<ClusterNumber>      m_le_clno;              //  the cluster number of the caching file holding the cached block
-        const UnalignedLittleEndian<DWORD>              m_le_dwECC;             //  ECC of the block's contents
-        const UnalignedLittleEndian<TouchNumber>        m_le_rgtono[ 2 ];       //  touch numbers for the replacement policy
-        const BYTE                                      m_fValid : 1;           //  indicates that the cached block is valid
-        const BYTE                                      m_fPinned : 1;          //  indicates that the cached block must not be written back
-        const BYTE                                      m_fDirty : 1;           //  indicates that the cached block needs to be written back
-        const BYTE                                      m_fEverDirty : 1;       //  indicates that the cached block has been written since cached
-        const BYTE                                      m_fPurged : 1;          //  indicates that the cached block had a current valid dirty image invalidated
-        const BYTE                                      m_rgbitReserved0 : 3;   //  reserved; always zero
-        const UnalignedLittleEndian<UpdateNumber>       m_le_updno;             //  the update number of the cached block
+        CCachedBlockId                            m_cbid;               //  the cached block id
+        UnalignedLittleEndian<ClusterNumber>      m_le_clno;            //  the cluster number of the caching file holding the cached block
+        UnalignedLittleEndian<DWORD>              m_le_dwECC;           //  ECC of the block's contents
+        UnalignedLittleEndian<TouchNumber>        m_le_rgtono[ 2 ];     //  touch numbers for the replacement policy
+        BYTE                                      m_fValid : 1;         //  indicates that the cached block is valid
+        BYTE                                      m_fPinned : 1;        //  indicates that the cached block must not be written back
+        BYTE                                      m_fDirty : 1;         //  indicates that the cached block needs to be written back
+        BYTE                                      m_fEverDirty : 1;     //  indicates that the cached block has been written since cached
+        BYTE                                      m_fPurged : 1;        //  indicates that the cached block had a current valid dirty image invalidated
+        BYTE                                      m_rgbitReserved0 : 3; //  reserved; always zero
+        UnalignedLittleEndian<UpdateNumber>       m_le_updno;           //  the update number of the cached block
 };
 
 #include <poppack.h>
@@ -1012,13 +1017,16 @@ class CCachedBlockSlotState : public CCachedBlockSlot
         friend class COSBlockCacheFactoryImpl;
         friend const char* OSFormat( _In_ const CCachedBlockSlotState& slotst );
 
-        CCachedBlockSlotState(  _In_ const CCachedBlockSlot&    slot,
-                                _In_ const BOOL                 fSlabUpdated,
-                                _In_ const BOOL                 fChunkUpdated,
-                                _In_ const BOOL                 fSlotUpdated,
-                                _In_ const BOOL                 fClusterUpdated,
-                                _In_ const BOOL                 fSuperceded )
-            :   CCachedBlockSlot( slot ),
+        CCachedBlockSlotState(  _In_ const CCachedBlock& cbl,
+                                _In_ const QWORD        ibSlab,
+                                _In_ const ChunkNumber  chno,
+                                _In_ const SlotNumber   slno,
+                                _In_ const BOOL         fSlabUpdated,
+                                _In_ const BOOL         fChunkUpdated,
+                                _In_ const BOOL         fSlotUpdated,
+                                _In_ const BOOL         fClusterUpdated,
+                                _In_ const BOOL         fSuperceded )
+            :   CCachedBlockSlot( ibSlab, chno, slno, cbl ),
                 m_fSlabUpdated( fSlabUpdated ),
                 m_fChunkUpdated( fChunkUpdated ),
                 m_fSlotUpdated( fSlotUpdated ),
