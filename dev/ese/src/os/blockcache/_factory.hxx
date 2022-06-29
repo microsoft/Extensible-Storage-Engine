@@ -801,7 +801,15 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrCreateCachedBlockSlotState( _In_    cons
                                                                     _In_    const BOOL              fSuperceded,
                                                                     _Out_   CCachedBlockSlotState*  pslotst )
 {
-    new( pslotst ) CCachedBlockSlotState( slot, fSlabUpdated, fChunkUpdated, fSlotUpdated, fClusterUpdated, fSuperceded );
+    new( pslotst ) CCachedBlockSlotState(   slot,
+                                            slot.IbSlab(),
+                                            slot.Chno(),
+                                            slot.Slno(),
+                                            fSlabUpdated, 
+                                            fChunkUpdated, 
+                                            fSlotUpdated,
+                                            fClusterUpdated,
+                                            fSuperceded );
 
     return JET_errSuccess;
 }

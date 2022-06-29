@@ -201,16 +201,16 @@ class TCachedBlockSlab  //  cbs
 
             private:
 
-            static BOOL FClusterUpdateExpected( _In_ const CCachedBlockSlot&    slotBefore,
-                                                _In_ const CCachedBlockSlot&    slotNew )
-            {
-                return !slotBefore.FValid() &&
-                        slotNew.FValid() &&
-                        !(  slotNew.Cbid().Volumeid() == volumeidInvalid &&
-                            slotNew.Cbid().Fileid() == fileidInvalid &&
-                            slotNew.Cbid().Fileserial() == fileserialInvalid &&
-                            slotNew.Cbid().Cbno() == cbnoInvalid );
-            }
+                static BOOL FClusterUpdateExpected( _In_ const CCachedBlockSlot&    slotBefore,
+                                                    _In_ const CCachedBlockSlot&    slotNew )
+                {
+                    return !slotBefore.FValid() &&
+                            slotNew.FValid() &&
+                            !(  slotNew.Cbid().Volumeid() == volumeidInvalid &&
+                                slotNew.Cbid().Fileid() == fileidInvalid &&
+                                slotNew.Cbid().Fileserial() == fileserialInvalid &&
+                                slotNew.Cbid().Cbno() == cbnoInvalid );
+                }
 
             private:
 
@@ -671,34 +671,19 @@ class TCachedBlockSlab  //  cbs
         {
         };
 
-        const ISlot Islot( _In_ const size_t icbc, _In_ const size_t icbl ) const { return (ISlot)( icbc * CCachedBlockChunk::Ccbl() + icbl ); }
-
-        const size_t Icbc( _In_ const ISlot islot ) const { return (size_t)islot / CCachedBlockChunk::Ccbl(); }
-        const size_t Icbl( _In_ const ISlot islot ) const { return (size_t)islot % CCachedBlockChunk::Ccbl(); }
-
-        typedef int( __cdecl* PfnCompare )( _In_ void* pvContext, _In_ const void* pvA, _In_ const void* pvB );
-
-
-        ERR ErrCreateSortedIslotArray(  _In_                                const PfnCompare    pfnCompare,
-                                        _Out_                               size_t* const       pcislot,
-                                        _Outptr_result_buffer_( *pcislot )  ISlot** const       prgislot );
-
-        int CompareSlotsForInit( _In_ const ISlot islotA, _In_ const ISlot islotB );
-        int CompareSlotsForEvict( _In_ const ISlot islotA, _In_ const ISlot islotB );
-
-        static int __cdecl CompareSlotsForInit_( _In_ void* pvContext, _In_ const void* pvA, _In_ const void* pvB )
+        const ISlot Islot( _In_ const size_t icbc, _In_ const size_t icbl ) const
         {
-            TCachedBlockSlab<I>* const pcbs = (TCachedBlockSlab<I>*)pvContext;
-
-            return pcbs->CompareSlotsForInit( *((ISlot*)pvA), *((ISlot*)pvB) );
+            return (ISlot)( icbc * CCachedBlockChunk::Ccbl() + icbl );
         }
 
-        static int __cdecl CompareSlotsForEvict_( _In_ void* pvContext, _In_ const void* pvA, _In_ const void* pvB )
+        void ISlotToIcbcIcbl( _In_ const ISlot islot, _Out_ size_t* const picbc, _Out_ size_t* const picbl )
         {
-            TCachedBlockSlab<I>* const pcbs = (TCachedBlockSlab<I>*)pvContext;
-
-            return pcbs->CompareSlotsForEvict( *((ISlot*)pvA), *((ISlot*)pvB) );
+            *picbc = (size_t)islot / CCachedBlockChunk::Ccbl();
+            *picbl = (size_t)islot - *picbc * CCachedBlockChunk::Ccbl();
         }
+
+        int CompareSlotsForInit( _In_ const ISlot& islotA, _In_ const ISlot& islotB );
+        int CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ const ISlot& islotB );
 
     private:
 
@@ -782,10 +767,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotForRead(  _In_    const CCachedBlockId
 {
     ERR                     err             = JET_errSuccess;
     CCachedBlockSlotState   slotstCurrent;
-    CCachedBlockSlot        slotNew;
     TouchNumber             tonoNew         = tonoInvalid;
-
-    new( pslot ) CCachedBlockSlot();
 
     //  do not allow operation on a corrupt slab
 
@@ -1192,7 +1174,8 @@ template< class I  >
 INLINE ERR TCachedBlockSlab<I>::ErrInvalidateSlots( _In_ const ICachedBlockSlab::PfnConsiderUpdate  pfnConsiderUpdate,
                                                     _In_ const DWORD_PTR                            keyConsiderUpdate )
 {
-    ERR err = JET_errSuccess;
+    ERR                     err             = JET_errSuccess;
+    CCachedBlockSlotState   slotstCurrent;
 
     //  do not allow operation on a corrupt slab
 
@@ -1206,7 +1189,6 @@ INLINE ERR TCachedBlockSlab<I>::ErrInvalidateSlots( _In_ const ICachedBlockSlab:
         {
             //  get the current slot state
 
-            CCachedBlockSlotState slotstCurrent;
             GetSlotState( icbc, icbl, &slotstCurrent );
 
             //  compute the legal state change for this slot
@@ -1249,7 +1231,9 @@ template< class I  >
 INLINE ERR TCachedBlockSlab<I>::ErrCleanSlots(  _In_ const ICachedBlockSlab::PfnConsiderUpdate  pfnConsiderUpdate,
                                                 _In_ const DWORD_PTR                            keyConsiderUpdate )
 {
-    ERR err = JET_errSuccess;
+    ERR                     err             = JET_errSuccess;
+    CCachedBlockSlotState   slotstCurrent;
+    CCachedBlockSlot        slot;
 
     //  do not allow operation on a corrupt slab
 
@@ -1263,7 +1247,6 @@ INLINE ERR TCachedBlockSlab<I>::ErrCleanSlots(  _In_ const ICachedBlockSlab::Pfn
         {
             //  get the current slot state
 
-            CCachedBlockSlotState slotstCurrent;
             GetSlotState( icbc, icbl, &slotstCurrent );
 
             //  determine if this slot may be cleaned
@@ -1275,7 +1258,6 @@ INLINE ERR TCachedBlockSlab<I>::ErrCleanSlots(  _In_ const ICachedBlockSlab::Pfn
 
             //  compute the legal state change for this slot
 
-            CCachedBlockSlot        slot;
             const CCachedBlockSlot& slotNew = fMayClean ? slot : slotstCurrent;
 
             if ( fMayClean )
@@ -1319,9 +1301,13 @@ template< class I  >
 INLINE ERR TCachedBlockSlab<I>::ErrEvictSlots(  _In_ const ICachedBlockSlab::PfnConsiderUpdate  pfnConsiderUpdate,
                                                 _In_ const DWORD_PTR                            keyConsiderUpdate )
 {
-    ERR     err     = JET_errSuccess;
-    size_t  cislot  = 0;
-    ISlot*  rgislot = NULL;
+    ERR                     err             = JET_errSuccess;
+    size_t                  cislot          = 0;
+    ISlot*                  rgislot         = NULL;
+    CCachedBlockSlotState   slotstCurrent;
+    size_t                  icbc            = 0;
+    size_t                  icbl            = 0;
+    CCachedBlockSlot        slot;
 
     //  do not allow operation on a corrupt slab
 
@@ -1329,7 +1315,17 @@ INLINE ERR TCachedBlockSlab<I>::ErrEvictSlots(  _In_ const ICachedBlockSlab::Pfn
 
     //  sort all slots by increasing utility
 
-    Call( ErrCreateSortedIslotArray( &CompareSlotsForEvict_, &cislot, &rgislot ) );
+    cislot = m_ccbc * CCachedBlockChunk::Ccbl();
+
+    Alloc( rgislot = new ISlot[ cislot ] );
+    for ( size_t iislot = 0; iislot < cislot; iislot++ )
+    {
+        rgislot[ iislot ] = (ISlot)iislot;
+    }
+
+    std::sort(  rgislot,
+                rgislot + cislot, 
+                [&]( const ISlot& a, const ISlot& b ) { return CompareSlotsForEvict( a, b ) < 0; } );
 
     //  visit all slots by increasing utility
 
@@ -1339,8 +1335,8 @@ INLINE ERR TCachedBlockSlab<I>::ErrEvictSlots(  _In_ const ICachedBlockSlab::Pfn
 
         //  get the current slot state
 
-        CCachedBlockSlotState slotstCurrent;
-        GetSlotState( Icbc( islot ), Icbl( islot ), &slotstCurrent );
+        ISlotToIcbcIcbl( islot, &icbc, &icbl );
+        GetSlotState( icbc, icbl, &slotstCurrent );
 
         //  determine if this slot may be evicted
 
@@ -1350,7 +1346,6 @@ INLINE ERR TCachedBlockSlab<I>::ErrEvictSlots(  _In_ const ICachedBlockSlab::Pfn
 
         //  compute the legal state change for this slot
 
-        CCachedBlockSlot        slot;
         const CCachedBlockSlot& slotNew = fMayEvict ? slot : slotstCurrent;
 
         if ( fMayEvict )
@@ -1394,7 +1389,10 @@ template< class I  >
 INLINE ERR TCachedBlockSlab<I>::ErrVisitSlots(  _In_ const ICachedBlockSlab::PfnVisitSlot   pfnVisitSlot,
                                                 _In_ const DWORD_PTR                        keyVisitSlot )
 {
-    ERR err = JET_errSuccess;
+    ERR                     err             = JET_errSuccess;
+    CCachedBlockSlotState   slotst;
+    CUpdate*                pupdateFirst    = NULL;
+    CUpdate*                pupdateLast     = NULL;
 
     //  visit all slots
 
@@ -1404,9 +1402,6 @@ INLINE ERR TCachedBlockSlab<I>::ErrVisitSlots(  _In_ const ICachedBlockSlab::Pfn
         {
             //  get the current slot state
 
-            CCachedBlockSlotState slotst;
-            CUpdate* pupdateFirst;
-            CUpdate* pupdateLast;
             GetSlotState( icbc, icbl, &slotst, &pupdateFirst, &pupdateLast );
 
             //  visit the slot
@@ -1414,6 +1409,9 @@ INLINE ERR TCachedBlockSlab<I>::ErrVisitSlots(  _In_ const ICachedBlockSlab::Pfn
             if ( !pfnVisitSlot( m_rgerrChunk[ icbc ],
                                 pupdateFirst ?
                                     CCachedBlockSlotState(  pupdateFirst->SlotBefore(),
+                                                            pupdateFirst->SlotBefore().IbSlab(),
+                                                            pupdateFirst->SlotBefore().Chno(),
+                                                            pupdateFirst->SlotBefore().Slno(),
                                                             fFalse,
                                                             fFalse,
                                                             fFalse,
@@ -1768,17 +1766,35 @@ ERR TCachedBlockSlab<I>::ErrComputeSupercededState()
 
     //  sort all slots by validity and then by cached block id and then by update number
 
-    Call( ErrCreateSortedIslotArray( &CompareSlotsForInit_, &cislot, &rgislot ) );
+    cislot = m_ccbc * CCachedBlockChunk::Ccbl();
+
+    Alloc( rgislot = new ISlot[ cislot ] );
+    for ( size_t iislot = 0; iislot < cislot; iislot++ )
+    {
+        rgislot[ iislot ] = (ISlot)iislot;
+    }
+
+    std::sort(  rgislot,
+                rgislot + cislot,
+                [&]( const ISlot& a, const ISlot& b ) { return CompareSlotsForInit( a, b ) < 0; } );
 
     //  use the array to discover all the cached blocks with older versions in the cache
 
     for ( size_t iislot = 0; iislot < cislot - 1; iislot++ )
     {
         const ISlot                 islotThis   = rgislot[ iislot ];
-        const CCachedBlock* const   pcblThis    = Pcbc( Icbc( islotThis ) )->Pcbl( Icbl( islotThis ) );
+        size_t                      icbcThis;
+        size_t                      icblThis;
+
+        ISlotToIcbcIcbl( islotThis, &icbcThis, &icblThis );
+        const CCachedBlock* const   pcblThis    = Pcbc( icbcThis )->Pcbl( icblThis );
 
         const ISlot                 islotNext   = rgislot[ iislot + 1 ];
-        const CCachedBlock* const   pcblNext    = Pcbc( Icbc( islotNext ) )->Pcbl( Icbl( islotNext ) );
+        size_t                      icbcNext;
+        size_t                      icblNext;
+
+        ISlotToIcbcIcbl( islotNext, &icbcNext, &icblNext );
+        const CCachedBlock* const   pcblNext    = Pcbc( icbcNext )->Pcbl( icblNext );
 
         m_rgfSlotSuperceded[ (size_t)islotThis ] = fFalse;
 
@@ -1822,10 +1838,6 @@ INLINE void TCachedBlockSlab<I>::GetSlotState(  _In_    const size_t            
                                                 _Out_   CUpdate** const                 ppupdateFirst,
                                                 _Out_   CUpdate** const                 ppupdateLast )
 {
-    new( pslotst ) CCachedBlockSlotState();
-    *ppupdateFirst = NULL;
-    *ppupdateLast = NULL;
-
     //  compute the absolute address of this slot
 
     const ChunkNumber           chno                = Chno( icbc );
@@ -1867,7 +1879,10 @@ INLINE void TCachedBlockSlab<I>::GetSlotState(  _In_    const size_t            
 
     //  generate the slot state
 
-    new( pslotst ) CCachedBlockSlotState(   CCachedBlockSlot( m_ibSlab, chno, slno, *pcbl ),
+    new( pslotst ) CCachedBlockSlotState(   *pcbl,
+                                            m_ibSlab,
+                                            chno,
+                                            slno,
                                             fSlabUpdated,
                                             fChunkUpdated,
                                             fSlotUpdated,
@@ -1898,10 +1913,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotForNewImage(  _In_                    
     size_t                  icblEmpty       = CCachedBlockChunk::Ccbl();
     CCachedBlockSlotState   slotstCurrent;
     DWORD                   dwECC           = 0;
-    CCachedBlockSlot        slotNew;
     TouchNumber             tonoNew         = tonoInvalid;
-
-    new( pslot ) CCachedBlockSlot();
 
     //  do not allow operation on a corrupt slab
 
@@ -1997,39 +2009,35 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotForNewImage(  _In_                    
     //  generate an image of the slot holding the new image of this cached block
 
     tonoNew = TonoGetNextTouch();
-    new( &slotNew ) CCachedBlockSlot(   m_ibSlab,
-                                        Chno( icbcEmpty ),
-                                        Slno( icblEmpty ),
-                                        CCachedBlock(   cbid,
-                                                        Pcbc( icbcEmpty )->Pcbl( icblEmpty )->Clno(),
-                                                        dwECC,
-                                                        tonoNew,
-                                                        slotstCurrent.Tono0() == tonoInvalid ?
-                                                            tonoNew :
-                                                            slotstCurrent.Tono0(),
-                                                        fTrue,
-                                                        slotstCurrent.FPinned(),
-                                                        fWrite,
-                                                        fWrite || slotstCurrent.FEverDirty(),
-                                                        fFalse,
-                                                        slotstCurrent.Updno() + ( fWrite ? 1 : 0 ) ) );
+    new( pslot ) CCachedBlockSlot(  m_ibSlab,
+                                    Chno( icbcEmpty ),
+                                    Slno( icblEmpty ),
+                                    CCachedBlock(   cbid,
+                                                    Pcbc( icbcEmpty )->Pcbl( icblEmpty )->Clno(),
+                                                    dwECC,
+                                                    tonoNew,
+                                                    slotstCurrent.Tono0() == tonoInvalid ?
+                                                        tonoNew :
+                                                        slotstCurrent.Tono0(),
+                                                    fTrue,
+                                                    slotstCurrent.FPinned(),
+                                                    fWrite,
+                                                    fWrite || slotstCurrent.FEverDirty(),
+                                                    fFalse,
+                                                    slotstCurrent.Updno() + ( fWrite ? 1 : 0 ) ) );
 
     //  if we are replacing a different slot then fetch its before image
 
-    if ( slotstCurrent.Chno() != slotNew.Chno() || slotstCurrent.Slno() != slotNew.Slno() )
+    if ( slotstCurrent.Chno() != pslot->Chno() || slotstCurrent.Slno() != pslot->Slno() )
     {
-        GetSlotState( Icbc( slotNew.Chno() ), Icbl( slotNew.Slno() ), &slotstCurrent );
+        GetSlotState( Icbc( pslot->Chno() ), Icbl( pslot->Slno() ), &slotstCurrent );
     }
 
     //  verify that this change is allowed
 
-    err = ErrVerifySlotUpdate( slotstCurrent, slotNew );
+    err = ErrVerifySlotUpdate( slotstCurrent, *pslot );
     CallS( err );
     Call( err );
-
-    //  return the slot we found
-
-    UtilMemCpy( pslot, &slotNew, sizeof( *pslot ) );
 
 HandleError:
     if ( err < JET_errSuccess )
@@ -2045,8 +2053,6 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotState(    _In_    const CCachedBlockId
 {
     ERR                     err             = JET_errSuccess;
     CCachedBlockSlotState   slotstCurrent;
-
-    new( pslotst ) CCachedBlockSlotState();
 
     //  if the request is for an invalid cached block id then don't return a slot
 
@@ -2800,64 +2806,35 @@ HandleError:
     return err;
 }
 
-template<class I>
-INLINE ERR TCachedBlockSlab<I>::ErrCreateSortedIslotArray(  _In_                                const PfnCompare    pfnCompare,
-                                                            _Out_                               size_t* const       pcislot,
-                                                            _Outptr_result_buffer_( *pcislot )  ISlot** const       prgislot )
-{
-    ERR             err     = JET_errSuccess;
-    const size_t    cislot  = m_ccbc * CCachedBlockChunk::Ccbl();
-    ISlot*          rgislot = NULL;
-
-    *pcislot = 0;
-    *prgislot = NULL;
-
-    //  sort all slots by the given criteria
-
-    Alloc( rgislot = new ISlot[ cislot ] );
-    for ( size_t iislot = 0; iislot < cislot; iislot++ )
-    {
-        rgislot[ iislot ] = (ISlot)iislot;
-    }
-
-    qsort_s( rgislot, cislot, sizeof( rgislot[ 0 ] ), pfnCompare, this );
-
-    //  return the array
-
-    *prgislot = rgislot;
-    rgislot = NULL;
-    *pcislot = cislot;
-
-HandleError:
-    delete[] rgislot;
-    if ( err < JET_errSuccess )
-    {
-        delete[] *prgislot;
-        *prgislot = NULL;
-        *pcislot = 0;
-    }
-    return err;
-}
-
 template< class I  >
-int TCachedBlockSlab<I>::CompareSlotsForInit( _In_ const ISlot islotA, _In_ const ISlot islotB )
+int TCachedBlockSlab<I>::CompareSlotsForInit( _In_ const ISlot& islotA, _In_ const ISlot& islotB )
 {
     //  recover pointers to the cached blocks for each slot
 
-    const CCachedBlock* const   pcblA   = Pcbc( Icbc( islotA ) )->Pcbl( Icbl( islotA ) );
-    const CCachedBlock* const   pcblB   = Pcbc( Icbc( islotB ) )->Pcbl( Icbl( islotB ) );
+    size_t                      icbcA;
+    size_t                      icblA;
+    ISlotToIcbcIcbl( islotA, &icbcA, &icblA );
+    const CCachedBlock* const   pcblA   = Pcbc( icbcA )->Pcbl( icblA );
+
+    size_t                      icbcB;
+    size_t                      icblB;
+    ISlotToIcbcIcbl( islotB, &icbcB, &icblB );
+    const CCachedBlock* const   pcblB   = Pcbc( icbcB )->Pcbl( icblB );
 
     //  compare the slots by their validity and then identity and then update number
 
-    if ( !pcblA->FValid() && pcblB->FValid() )
+    const BOOL                  fValidA = pcblA->FValid();
+    const BOOL                  fValidB = pcblB->FValid();
+
+    if ( !fValidA & fValidB )
     {
         return -1;
     }
-    if ( pcblA->FValid() && !pcblB->FValid() )
+    if ( fValidA & !fValidB )
     {
         return 1;
     }
-    if ( !pcblA->FValid() && !pcblB->FValid() )
+    if ( !fValidA & !fValidB )
     {
         if ( islotA < islotB )
         {
@@ -2923,30 +2900,37 @@ int TCachedBlockSlab<I>::CompareSlotsForInit( _In_ const ISlot islotA, _In_ cons
 }
 
 template< class I  >
-int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot islotA, _In_ const ISlot islotB )
+int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ const ISlot& islotB )
 {
-    //  retrieve the current state of each slot
+    //  recover pointers to the cached blocks for each slot
 
-    CCachedBlockSlotState slotstA;
-    GetSlotState( Icbc( islotA ), Icbl( islotA ), &slotstA );
+    size_t                      icbcA;
+    size_t                      icblA;
+    ISlotToIcbcIcbl( islotA, &icbcA, &icblA );
+    const CCachedBlock* const   pcblA   = Pcbc( icbcA )->Pcbl( icblA );
 
-    CCachedBlockSlotState slotstB;
-    GetSlotState( Icbc( islotB ), Icbl( islotB ), &slotstB );
+    size_t                      icbcB;
+    size_t                      icblB;
+    ISlotToIcbcIcbl( islotB, &icbcB, &icblB );
+    const CCachedBlock* const   pcblB   = Pcbc( icbcB )->Pcbl( icblB );
 
     //  compare the slots for their relative utility vs our cache replacement policy
     //
     //  The replacement order is:  !FValid, FSuperceded, touched once by touch number ascending, and then touched twice
     //  by previous touch number ascending.
 
-    if ( !slotstA.FValid() && slotstB.FValid() )
+    const BOOL                  fValidA = pcblA->FValid();
+    const BOOL                  fValidB = pcblB->FValid();
+
+    if ( !fValidA & fValidB )
     {
         return -1;
     }
-    if ( slotstA.FValid() && !slotstB.FValid() )
+    if ( fValidA & !fValidB )
     {
         return 1;
     }
-    if ( !slotstA.FValid() && !slotstB.FValid() )
+    if ( !fValidA & !fValidB )
     {
         if ( islotA < islotB )
         {
@@ -2959,15 +2943,18 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot islotA, _In_ con
         return 0;
     }
 
-    if ( slotstA.FSuperceded() && !slotstB.FSuperceded() )
+    const BOOL  fSupercededA    = m_rgfSlotSuperceded[ (size_t)islotA ];
+    const BOOL  fSupercededB    = m_rgfSlotSuperceded[ (size_t)islotB ];
+
+    if ( fSupercededA & !fSupercededB )
     {
         return -1;
     }
-    if ( !slotstA.FSuperceded() && slotstB.FSuperceded() )
+    if ( !fSupercededA & fSupercededB )
     {
         return 1;
     }
-    if ( slotstA.FSuperceded() && slotstB.FSuperceded() )
+    if ( fSupercededA & fSupercededB )
     {
         if ( islotA < islotB )
         {
@@ -2980,20 +2967,25 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot islotA, _In_ con
         return 0;
     }
 
-    if ( slotstA.Tono0() == slotstA.Tono1() && slotstB.Tono0() != slotstB.Tono1() )
+    const TouchNumber   tono0A  = pcblA->Tono0();
+    const TouchNumber   tono1A  = pcblA->Tono1();
+    const TouchNumber   tono0B  = pcblB->Tono0();
+    const TouchNumber   tono1B  = pcblB->Tono1();
+
+    if ( ( tono0A == tono1A ) & ( tono0B != tono1B ) )
     {
         return -1;
     }
-    if ( slotstA.Tono0() != slotstA.Tono1() && slotstB.Tono0() == slotstB.Tono1() )
+    if ( ( tono0A != tono1A ) & ( tono0B == tono1B ) )
     {
         return 1;
     }
 
-    if ( slotstA.Tono1() < slotstB.Tono1() )
+    if ( tono1A < tono1B )
     {
         return -1;
     }
-    if ( slotstA.Tono1() > slotstB.Tono1() )
+    if ( tono1A > tono1B )
     {
         return 1;
     }
