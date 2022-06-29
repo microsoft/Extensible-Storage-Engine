@@ -110,6 +110,7 @@ ERR StatBasicTest::ErrTest()
     Validate( pPHS->C() == 1 );
     Validate( pPHS->Min() == qwSmall );
     Validate( pPHS->Ave() == qwSmall );
+    Validate( pPHS->DblStdDev() == 0.0 );
     Validate( pPHS->Max() == qwSmall );
     Validate( pPHS->Total() == qwSmall );
     pPHS->AssertValid();
@@ -117,6 +118,8 @@ ERR StatBasicTest::ErrTest()
     Validate( pPHS->C() == 2 );
     Validate( pPHS->Min() == qwSmall );
     Validate( pPHS->Ave() == ( ( qwSmall + qwMiddleMinus ) / 2 ) );
+    // Adding the big values caused internal overflow, rendering StdDev incalculable.
+    Validate( isnan( pPHS->DblStdDev() ) );
     Validate2( pPHS->Max() == qwMiddleMinus, pPHS->Max() );
     Validate( pPHS->Total() == ( qwSmall + qwMiddleMinus ) );
     CallTest( pPHS->ErrAddSample( qwMiddlePlus ) );
@@ -124,6 +127,7 @@ ERR StatBasicTest::ErrTest()
     Validate( pPHS->C() == 3 );
     Validate( pPHS->Min() == qwSmall );
     Validate( pPHS->Ave() == ( ( qwSmall + qwMiddleMinus + qwMiddlePlus ) / 3 ) );
+    Validate( isnan(pPHS->DblStdDev()) );
     Validate( pPHS->Max() == qwMiddlePlus );
     Validate( pPHS->Total() == ( qwSmall + qwMiddleMinus + qwMiddlePlus ) );
     CallTest( pPHS->ErrAddSample( qwBig ) );
@@ -139,12 +143,14 @@ ERR StatBasicTest::ErrTest()
     Validate( pPHS->C() == 1 );
     Validate( pPHS->Min() == qwMiddlePlus );
     Validate( pPHS->Ave() == qwMiddlePlus );
+    Validate( isnan(pPHS->DblStdDev()) );
     Validate( pPHS->Max() == qwMiddlePlus );
     Validate( pPHS->Total() == qwMiddlePlus );
     CallTest( pPHS->ErrAddSample( qwMiddleMinus ) );
     Validate( pPHS->C() == 2 );
     Validate( pPHS->Min() == qwMiddleMinus );
     Validate( pPHS->Ave() == ( ( qwMiddlePlus + qwMiddleMinus ) / 2 ) );
+    Validate( isnan(pPHS->DblStdDev()) );
     Validate2( pPHS->Max() == qwMiddlePlus, pPHS->Max() );
     Validate( pPHS->Total() == ( qwMiddlePlus + qwMiddleMinus ) );
     CallTest( pPHS->ErrAddSample( qwBig ) );

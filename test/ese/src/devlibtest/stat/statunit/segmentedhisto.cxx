@@ -177,6 +177,9 @@ ERR SegmentedHistogramTest::ErrTest()
     CallTest( pSHS->ErrAddSample( 0 ) );
     CallTest( pSHS->ErrAddSample( 3 ) );
 
+    // DblStdDev() is not implemented for this class, so returns NotANumber.
+    TestTest( isnan(pSHS->DblStdDev() ) );
+
     TestTest( 40 == pSHS->Mode() );
 
     pSHS = NULL;

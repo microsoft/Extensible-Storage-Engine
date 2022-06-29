@@ -127,6 +127,9 @@ ERR FixedLinearHistogramRoundingAndCappingTest::ErrTest()
         CallTest( sMultiStats.Phisto( ihisto )->ErrAddSample( 51 ) );
         CallTest( sMultiStats.Phisto( ihisto )->ErrAddSample( 59 ) );
         CallTest( sMultiStats.Phisto( ihisto )->ErrAddSample( 60 ) );
+
+        // DblStdDev() is not implemented for this class, so returns NotANumber.
+        TestTest( isnan( sMultiStats.Phisto( ihisto )->DblStdDev() ) );
     }
 
     //  Check the samples are all expected
