@@ -72,6 +72,13 @@ CStats::ERR TestSimplePerfectHistogramBehavior( CStats * const phistoTest )
     CallTest( phistoTest->ErrAddSample( 70 ) );
     CallTest( phistoTest->ErrAddSample( 90 ) );
 
+    // Comparing floating point for equality is a pain.  Check
+    // that we're within .001% of the expected vale.
+    // Precalculated approximate answer, taken from Excel.
+    double dblStdDevExpected = 12.47219129;
+    TestTest( dblStdDevExpected * 1.000001 > phistoTest->DblStdDev() );
+    TestTest( dblStdDevExpected * 0.999999 < phistoTest->DblStdDev() );
+
     //  Do basic sample enumeration.
 
     CallTest( phistoTest->ErrReset() );
@@ -95,6 +102,11 @@ CStats::ERR TestSimplePerfectHistogramBehavior( CStats * const phistoTest )
     CallTest( phistoTest->ErrAddSample( 80 ) );
     CallTest( phistoTest->ErrAddSample( 89 ) );
     CallTest( phistoTest->ErrAddSample( 90 ) );
+
+    // Precalculated approximate answer, taken from Excel.
+    dblStdDevExpected = 12.70224149;
+    TestTest( dblStdDevExpected * 1.000001 > phistoTest->DblStdDev() );
+    TestTest( dblStdDevExpected * 0.999999 < phistoTest->DblStdDev() );
     // Diag / debugging 
     //((CCompoundHistogram*)phistoTest)->Dump();
 

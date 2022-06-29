@@ -241,6 +241,7 @@ typedef enum
     eSPFieldIntKeyCompMAM,
     eSPFieldFreeBytesMAM,
     eSPFieldNodeCountsMAM,
+    eSPFieldNodeCounts,
     eSPFieldNodePctOfTable,
     eSPFieldKeySizesMAM,
     eSPFieldDataSizesMAM,
@@ -382,11 +383,18 @@ typedef struct
 } ESEUTIL_SPACE_FIELDS;
 
 //  The sub-header for fields w/ Min,Ave,Max data (as well as count and total for completeness).
-WCHAR * szMAMH = L"   Count,  Min,  Ave,  Max,       Total";
-#define cchMAMH     39
+WCHAR * szMAMH = L"   Count,  Min,  Ave, StdDev,  Max,       Total";
+#define cchMAMH     48
 
 WCHAR * szCAH = L"   Count,  Ave";
 #define cchCAH      14
+
+WCHAR szNodesH []= L"   1-Node,   2-Nodes,   3-Nodes,   4-Nodes,   8-Nodes,  16-Nodes,  32-Nodes,  64-Nodes,  96-Nodes, 128-Nodes, 256-Nodes, 512-Nodes,1024-Nodes, Over-1024";
+#define cchNodesH 120
+SAMPLE rgNodesHistoDivisions[] =
+{
+    1, 2, 3, 4, 8, 16, 32, 64, 96, 128, 256, 512, 1024, (SAMPLE)-1 /* catch the rest */
+};
 
 WCHAR szRunsH []= L"    1-Page,   2-Pages,   3-Pages,   4-Pages,   8-Pages,  16-Pages,  32-Pages,  64-Pages,  96-Pages, 128-Pages,  Over-128";
 #define cchRunsH 120
@@ -497,6 +505,7 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
 
     { eSPFieldFreeBytesMAM,             cchMAMH,    L"Data:FreeBytes",          szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
     { eSPFieldNodeCountsMAM,            cchMAMH,    L"Data:Nodes",              szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
+    { eSPFieldNodeCounts,               cchNodesH,  L"Data:Nodes(histo)",       szNodesH, JET_bitDBUtilSpaceInfoFullWalk    },
     { eSPFieldNodePctOfTable,           9,          L"Node%Tbl",                NULL,   JET_bitDBUtilSpaceInfoFullWalk      },
     { eSPFieldKeySizesMAM,              cchMAMH,    L"Data:KeySizes",           szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
     { eSPFieldDataSizesMAM,             cchMAMH,    L"Data:DataSizes",          szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
@@ -559,23 +568,24 @@ BOOL FLastField( ULONG eField )
 }
 
     
-//  Print min,ave,max ... as well as count and total for simplicity.
+//  Print min,ave,StdDev,max ... as well as count and total for simplicity.
 void PrintMAM( _In_ const JET_HISTO *   phisto )
 {
     CStats * pStats = CStatsFromPv( phisto );
 
     if ( pStats && pStats->C() )
     {
-        wprintf(L"%8I64u,%5I64u,%5I64u,%5I64u,%12I64u",
+        wprintf(L"%8I64u,%5I64u,%5.0lf,%7.0lf,%5I64u,%12I64u",
                 pStats->C(),
                 pStats->Min(),
-                pStats->Ave(),
+                pStats->DblAve(),
+                pStats->DblStdDev(),
                 pStats->Max(),
                 pStats->Total() );
     }
     else
     {
-        wprintf(L"       0,     ,     ,     ,            ");
+        wprintf(L"       0,     ,     ,       ,     ,            ");
     }
 }
 
@@ -1180,6 +1190,9 @@ JET_ERR ErrPrintField(
             break;
         case eSPFieldNodeCountsMAM:
             PrintMAM( pBTStats->pFullWalk->phistoNodeCounts );
+            break;
+        case eSPFieldNodeCounts:
+            PrintHisto( eField, rgNodesHistoDivisions, _countof( rgNodesHistoDivisions ), pBTStats->pFullWalk->phistoNodeCounts );
             break;
         case eSPFieldNodePctOfTable:
             assert( pBTStats->pFullWalk->phistoNodeCounts );

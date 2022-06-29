@@ -95,6 +95,8 @@ ERR LinearHistogramTest::ErrTest()
     CallTest( pLHS->ErrAddSample( 80 ) );
     CallTest( pLHS->ErrAddSample( 120 ) );
 
+    TestTest( 15.0 == pLHS->DblStdDev() );
+
     //  Test the samples are properly distributed to the proper multiples of 30
 
     CallTest( pLHS->ErrGetSampleHits( 0, &chits ) );

@@ -223,6 +223,7 @@ public:
     virtual SAMPLE Total() const = 0;
     virtual SAMPLE Ave() const = 0;
     virtual double DblAve( void ) const = 0;
+    virtual double DblStdDev() const = 0;
 
 
 };
@@ -243,6 +244,7 @@ protected:
     SAMPLE  qwMin;
     SAMPLE  qwMax;
     SAMPLE  qwTotal;
+    SAMPLE  qwTotalOfSquares;
     CHITS   c;
 
 public:
@@ -265,6 +267,7 @@ public:
             STATAssert( qwMin == 0xFFFFFFFFFFFFFFFF );
             STATAssert( qwMax == 0 );
             STATAssert( qwTotal == 0 );
+            STATAssert( qwTotalOfSquares == 0 );
             //  Can not call these, as they call AssertValid().
             //STATAssert( Ave() == 0 ); // and should not AV
             //STATAssert( DblAve() == 0.0 );    // and should not AV
@@ -281,6 +284,7 @@ public:
         qwMin = 0xFFFFFFFFFFFFFFFF;
         qwMax = 0;
         qwTotal = 0;
+        qwTotalOfSquares = 0;
     }
     CMinMaxTotStats()
     {
@@ -298,6 +302,23 @@ public:
             qwMax = qwSample;
         }
         qwTotal += qwSample;
+
+        // Rather than do 128 bit math, we're just going to max out qwTotalOfSquares and subsequently DblStdDev
+        // if we overflow.  This is primarily because we care about 32 bit platforms and 128 bit math
+        // is worrisome for performance on 32 bit platforms.
+
+        QWORD qwSampleSquared = qwSample * qwSample;
+        if ( ( qwTotalOfSquares != ullMax ) &&                                // We haven't already overflowed.
+             ( ( qwSample == 0 ) || ( qwSample == ( qwSampleSquared / qwSample ) ) ) &&       // The square didn't overflow.
+             ( qwTotalOfSquares <= ( qwTotalOfSquares + qwSampleSquared ) ) ) // The sum didn't overflow.
+        {
+            qwTotalOfSquares += qwSampleSquared;
+        }
+        else
+        {
+            qwTotalOfSquares = ullMax;
+        }
+
         c++;
         AssertValid();
         return ERR::errSuccess;
@@ -321,6 +342,21 @@ public:
         const CHITS cT = c;
         return cT ? ( (double)qwTotal / (double)cT ) : (double)0.0;
     }
+
+    double DblStdDev() const
+    {
+        AssertValid();
+
+        if ( qwTotalOfSquares == ullMax )
+        {
+            // We overflowed while accumulating this.  We don't have a valid answer for
+            // standard deviation.
+            return nan(NULL); // Not A Number, an invalid double.
+        }
+
+        const CHITS cT = c;
+        return cT ? ( sqrt( ((double)qwTotalOfSquares / (double)cT ) - pow( DblAve(),2) ) ) : (double)0.0;
+    };
 
     CStats::ERR ErrReset( const HistogramCurrencyResetFlags hgcrf = hgcrfDefault )
     {
@@ -356,15 +392,21 @@ public:
             qwTotal = qwInitial;
             c = cInitial;
 
-            // Min/Max aren't used, but need to be
-            // initialized to a valid state
+            // Min/Max aren't accurate, but need to be initialized to a valid state.
             qwMin = 0;
             qwMax = qwInitial;
+
+            // TotalOfSquares is not accurate.  We initialize to ullMax, triggering
+            // the overflow path in the base class.
+            qwTotalOfSquares = ullMax; 
             }
         else
             {
             STATAssert( qwInitial == 0 );
+
+            // Min/Max/TotalOfSquares will be accurate.
             }
+
     }
 
     // Not supported
@@ -381,6 +423,38 @@ public:
         (void)AtomicExchangeMax( &qwMax, qwSample );
         (void)AtomicAdd( &qwTotal, qwSample );
         (void)AtomicAdd( (QWORD*)&c, (QWORD)1 );
+
+        // This is the same code as is used in the base class except that for thread safety,
+        // calculations use a temporarily read value of qwTotalOfSquares.  An AtomicCompareExchange
+        // is used to set the desired value back into the member variable, if and only if
+        // the original value is still the current value.
+        QWORD qwSampleSquared = qwSample * qwSample;
+        OSSYNC_FOREVER
+        {
+            const QWORD qwTotalOfSquaresOrig = qwTotalOfSquares;
+
+            QWORD qwTotalOfSquaresTemp = qwTotalOfSquaresOrig;
+            if ( ( qwTotalOfSquaresTemp != ullMax ) &&                                    // We haven't already overflowed.
+                 ( ( qwSample == 0 ) || ( qwSample == ( qwSampleSquared / qwSample ) ) ) &&               // The square didn't overflow.
+                 ( qwTotalOfSquaresTemp <= ( qwTotalOfSquaresTemp + qwSampleSquared ) ) ) // The sum didn't overflow.
+            {
+                qwTotalOfSquaresTemp += qwSampleSquared;
+            }
+            else
+            {
+                qwTotalOfSquaresTemp = ullMax;
+            }
+
+
+            QWORD qwTotalOfSquaresFound = AtomicCompareExchange( &qwTotalOfSquares, qwTotalOfSquaresOrig, qwTotalOfSquaresTemp );
+            if ( qwTotalOfSquaresFound == qwTotalOfSquaresOrig )
+            {
+                // We succeeded in writing our desired value; no one changed anything
+                // while we were calculating.
+                break;
+            }
+        }
+
         return ERR::errSuccess;
     }
 };
@@ -833,6 +907,7 @@ public:
     SAMPLE Ave() const      { AssertValid(); return cmmts.Ave(); }
     SAMPLE Mean() const     { AssertValid(); return Ave(); }    // in case you're a td statiscian
     double DblAve() const   { AssertValid(); return cmmts.DblAve(); }
+    double DblStdDev() const { AssertValid(); return cmmts.DblStdDev(); }
 
 };
 
@@ -949,6 +1024,7 @@ public:
     SAMPLE Ave() const      { AssertValid(); return m_stats.Ave(); }
     SAMPLE Mean() const     { AssertValid(); return Ave(); }    // in case you're a td statiscian
     double DblAve() const   { AssertValid(); return m_stats.DblAve(); }
+    double DblStdDev() const { AssertValid(); return m_stats.DblStdDev(); }
 
 };
 
@@ -1326,8 +1402,11 @@ class CSegmentedHistogram : public CStats {
             const double t = (double)Total();
             return c ? ( t / c ) : 0.0;
         }
-
-
+        double DblStdDev() const
+        {
+            // Not Yet Implemented.  We don't track qwTotalOfSquares during AddSample.
+            return nan(NULL); // Not A Number, an invalid double.
+        }
 };
 
 
@@ -1677,6 +1756,11 @@ public:
     {
         const SAMPLE cHitsTotal = C();
         return C() ? ( (double)Total() / (double)cHitsTotal ) : 0.0;
+    }
+    double DblStdDev() const
+    {
+        // Not Yet Implemented.  We don't track qwTotalOfSquares during AddSample.
+        return nan(NULL); // Not A Number, an invalid double.
     }
 
 private:
@@ -2097,6 +2181,10 @@ class CCompoundHistogram : public CStats {
             const double c = (double)C();
             const double t = (double)Total();
             return c ? ( t / c ) : 0.0;
+        }
+        double DblStdDev() const
+        {
+            return m_mmts.DblStdDev();
         }
 
 }; // CCompoundHistogram
