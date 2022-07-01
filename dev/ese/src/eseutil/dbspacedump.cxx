@@ -237,6 +237,7 @@ typedef enum
     eSPFieldForwardScans,
     eSPFieldIntFreeBytesMAM,
     eSPFieldIntNodeCountsMAM,
+    eSPFieldIntNodeCounts,
     eSPFieldIntKeySizesMAM,
     eSPFieldIntKeyCompMAM,
     eSPFieldFreeBytesMAM,
@@ -390,7 +391,7 @@ WCHAR * szCAH = L"   Count,  Ave";
 #define cchCAH      14
 
 WCHAR szNodesH []= L"   1-Node,   2-Nodes,   3-Nodes,   4-Nodes,   8-Nodes,  16-Nodes,  32-Nodes,  64-Nodes,  96-Nodes, 128-Nodes, 256-Nodes, 512-Nodes,1024-Nodes, Over-1024";
-#define cchNodesH 120
+#define cchNodesH 152
 SAMPLE rgNodesHistoDivisions[] =
 {
     1, 2, 3, 4, 8, 16, 32, 64, 96, 128, 256, 512, 1024, (SAMPLE)-1 /* catch the rest */
@@ -496,6 +497,7 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
 
     { eSPFieldIntFreeBytesMAM,          cchMAMH,    L"Int:FreeBytes",           szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
     { eSPFieldIntNodeCountsMAM,         cchMAMH,    L"Int:Nodes",               szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
+    { eSPFieldIntNodeCounts,            cchNodesH,  L"Int:Nodes(histo)",        szNodesH, JET_bitDBUtilSpaceInfoParentOfLeaf},
     { eSPFieldIntKeySizesMAM,           cchMAMH,    L"Int:KeySizes",            szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
     // Avoided as its fundamentally not interesting because DataSize is almost always 4 (a pgno).
     //eSPFieldIntDataSizesMAM,  cchMAMH,    L"Int:DataSizes",   szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
@@ -1173,6 +1175,9 @@ JET_ERR ErrPrintField(
             assert( pBTStats->pParentOfLeaf );
             assert( pBTStats->pParentOfLeaf->pInternalPageStats );
             PrintMAM( pBTStats->pParentOfLeaf->pInternalPageStats->phistoNodeCounts );
+            break;
+        case eSPFieldIntNodeCounts:
+            PrintHisto( eField, rgNodesHistoDivisions, _countof( rgNodesHistoDivisions ), pBTStats->pParentOfLeaf->pInternalPageStats->phistoNodeCounts );
             break;
         case eSPFieldIntKeySizesMAM:
             assert( pBTStats->pParentOfLeaf );
