@@ -1600,6 +1600,14 @@ ERR LOG::ErrLGRIInitSession(
             Call( m_pinst->m_prbs->ErrRollSnapshot( fTrue, fTrue ) );
         }
 
+        // Start cleanup thread after main RBS thread is initialized.
+        // This is because the main RBS thread can now do cleanup during initialization as well for empty RBS
+        // and not waiting on signal might lead to FileAccess related errors.
+        if ( m_pinst->m_prbscleaner )
+        {
+            Call( m_pinst->m_prbscleaner->ErrStartCleaner() );
+        }
+
         err = ErrLGLoadFMPFromAttachments( pbAttach );
         CallS( err );
         Call( err );
