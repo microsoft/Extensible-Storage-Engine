@@ -3867,7 +3867,7 @@ ERR RBSCleaner::ErrStartCleaner( )
 {
     ERR err = JET_errSuccess;
 
-    if ( !m_prbscleanerconfig->FEnableCleanup( ) )
+    if ( !m_prbscleanerconfig->FEnableCleanup() || FIsCleanerRunning() )
     {
         return err;
     }
