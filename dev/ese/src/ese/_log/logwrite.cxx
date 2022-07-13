@@ -2545,7 +2545,7 @@ ERR LOG_WRITE_BUFFER::ErrLGIWriteFullSectors(
         Assert( pbToWrite >= m_pbLGBufMin && pbToWrite < m_pbLGBufMax );
         
         Call( m_pLogStream->ErrLGWriteSectorData(
-            IOR( iorp, iorfShadow ),
+            IOR( iorp, iorfNone ),
             m_pLogStream->GetCurrentFileGen(),
             QWORD( isecToWrite ) * m_pLogStream->CbSec(),
             m_pLogStream->CbSec() * 1,
@@ -2568,7 +2568,7 @@ ERR LOG_WRITE_BUFFER::ErrLGIWriteFullSectors(
             //  m_fHaveShadow is set to false in this case because the next log flush will not overwrite the original. It will just overwrite the shadow sector.
 
             Call( m_pLogStream->ErrLGWriteSectorData(
-                IOR( iorp, iorfShadow ),
+                IOR( iorp, iorfNone ),
                 m_pLogStream->GetCurrentFileGen(),
                 QWORD( isecToWrite ) * m_pLogStream->CbSec(),
                 m_pLogStream->CbSec() * 1,
@@ -2843,7 +2843,7 @@ ERR LOG_WRITE_BUFFER::ErrLGIWritePartialSector(
 
         // write shadow sector
         Call( m_pLogStream->ErrLGWriteSectorData(
-                    IOR( iorp, iorfShadow ),
+                    IOR( iorp, iorfNone ),
                     m_pLogStream->GetCurrentFileGen(),
                     QWORD( isecWrite + 1 ) * m_pLogStream->CbSec(),
                     m_pLogStream->CbSec() * 1,
@@ -2857,7 +2857,7 @@ ERR LOG_WRITE_BUFFER::ErrLGIWritePartialSector(
     }
     else
     {
-        const IOREASON rgIor[] = { ior, IOR( iorp, iorfShadow ) };
+        const IOREASON rgIor[] = { ior, IOR( iorp, iorfNone ) };
         const BYTE * rgpbLogData[] = { m_pvPartialSegment, m_pvPartialSegment };
         const ULONG rgcbLogData[] = { m_pLogStream->CbSec(), m_pLogStream->CbSec() };
 

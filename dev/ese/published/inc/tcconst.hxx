@@ -226,7 +226,7 @@ enum IOREASONFLAGS : BYTE
 {
     //iorfNone = 0, defined generically by OS layer
 
-    iorfShadow                  = 0x01,
+    iorfNewPage                 = 0x01, //  used to be iorfShadow, only emitted for iorpLGWriteCapacity, iorpLGWriteCommit, iorpLGWriteSignal
     iorfFill                    = 0x02,
     iorfOpportune               = 0x04,
     iorfForeground              = 0x08,

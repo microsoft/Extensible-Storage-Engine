@@ -16371,6 +16371,8 @@ void BFIAssertNewlyAllocatedPage( const PBF pbfNew, const BOOL fAvailPoolAdd )
     //  Very definition of an allocated page, is NOT available
     Assert( !pbfNew->fAvailable );
 
+    Assert( !pbfNew->fNewPage );
+
     Assert( FBFIValidPvAllocType( pbfNew ) );
     Assert( pbfNew->bfat == bfatFracCommit || ( UlParam( JET_paramEnableViewCache ) && pbfNew->bfat == bfatNone ) );
     Assert( UlParam( JET_paramEnableViewCache ) || ( pbfNew->pv != NULL ) );
@@ -16905,6 +16907,8 @@ void BFIFreePage( PBF pbf, const BOOL fMRU, const BFFreePageFlags bffpfDangerous
 
     pbf->fSyncRead = fFalse;
 
+    pbf->fNewPage = fFalse;
+
     //  reset the page / buffer size
 
     pbf->icbPage = icbPageInvalid;
@@ -17171,6 +17175,10 @@ ERR ErrBFICachePage(    PBF* const ppbf,
     //  mark this BF as the current version of this IFMP / PGNO
 
     pgnopbf.pbf->fCurrentVersion = fTrue;
+
+    //  mark this BF as a new page if appropriate
+
+    pgnopbf.pbf->fNewPage = fNewPage;
 
     //  return success
 
@@ -22454,6 +22462,10 @@ ERR ErrBFIFlushExclusiveLatchedAndPreparedBF(   __inout const PBF       pbf,
     if ( pbf->lrukic.FSuperColded() || pbf->lrukic.PctCachePriority() < 50 )
     {
         tcFlush->iorReason.AddFlag( iorfSuperColdOrLowPriority );
+    }
+    if ( pbf->fNewPage )
+    {
+        tcFlush->iorReason.AddFlag( iorfNewPage );
     }
     if ( pbf->fFlushed )
     {

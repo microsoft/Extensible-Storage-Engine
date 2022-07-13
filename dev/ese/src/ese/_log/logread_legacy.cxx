@@ -3943,7 +3943,7 @@ Assert( m_pLogStream->CbSec() == m_pLogStream->CbSecVolume() );
                     // We modify the checksum by adding a special shadow sector checksum.
                     plrck->le_ulChecksum = UlComputeShadowChecksum( plrck->le_ulChecksum );
                     err = m_pLogStream->ErrLGWriteSectorData(
-                            IOR( iorpPatchFix, iorfShadow ),
+                            IOR( iorpPatchFix, iorfNone ),
                             m_lgposLastRec.lGeneration,
                             QWORD( isecWrite + 1 ) * m_pLogStream->CbSec(),
                             m_pLogStream->CbSec(),

@@ -225,7 +225,7 @@ struct BF                                           //  BF  --  IFMP/PGNO buffer
     BYTE                fNewlyEvicted:1;            //  BF cache memory is newly evicted
     BYTE                fQuiesced:1;                //  BF is quiesced for shrinking the cache
     BYTE                fAvailable:1;               //  BF is in the avail pool
-    BYTE                fReserved4:1;               //  Available for re-use (was fMemory)
+    BYTE                fNewPage:1;                 //  BF was cached as a new page via bflfNew or bflfNewIfUncached
     BYTE                fWARLatch:1;                //  BF is WAR Latched (valid only if exclusively latched)
     BYTE                bfdf:2;                     //  BF dirty flags
     BYTE                fInOB0OL:1;                 //  BF is in the Oldest Begin 0 index Overflow List
@@ -328,7 +328,7 @@ struct BF                                           //  BF  --  IFMP/PGNO buffer
     BYTE                fNewlyEvicted:1;            //  BF cache memory is newly evicted
     BYTE                fQuiesced:1;                //  BF is quiesced for shrinking the cache
     BYTE                fAvailable:1;               //  BF is in the avail pool
-    BYTE                fReserved4:1;               //  Available for re-use (was fMemory)
+    BYTE                fNewPage:1;                 //  BF was cached as a new page via bflfNew or bflfNewIfUncached
     BYTE                fWARLatch:1;                //  BF is WAR Latched (valid only if exclusively latched)
     BYTE                bfdf:2;                     //  BF dirty flags
     BYTE                fInOB0OL:1;                 //  BF is in the Oldest Begin 0 index Overflow List
