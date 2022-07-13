@@ -395,6 +395,13 @@ INLINE TCacheRepository<I>::CCachePathTableEntry::CCachePathTableEntry( _Deref_i
 template< class I >
 INLINE TCacheRepository<I>::CCachePathTableEntry::~CCachePathTableEntry()
 {
+    //  perform a best effort clean dismount of the cache
+
+    if ( m_pc )
+    {
+        (void)m_pc->ErrPrepareToDismount();
+    }
+
     delete[] m_wszKeyPath;
     delete m_pc;
 }

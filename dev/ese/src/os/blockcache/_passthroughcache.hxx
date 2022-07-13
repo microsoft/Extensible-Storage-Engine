@@ -25,6 +25,8 @@ class TPassThroughCache
 
         ERR ErrMount() override;
 
+        ERR ErrPrepareToDismount() override;
+
         ERR ErrDump( _In_ CPRINTF* const pcprintf ) override;
 
         ERR ErrFlush(   _In_ const VolumeId     volumeid,
@@ -103,6 +105,14 @@ ERR TPassThroughCache<I>::ErrCreate()
 
 template< class I >
 ERR TPassThroughCache<I>::ErrMount()
+{
+    //  trivial implementation:  nothing to do
+
+    return JET_errSuccess;
+}
+
+template< class I >
+ERR TPassThroughCache<I>::ErrPrepareToDismount()
 {
     //  trivial implementation:  nothing to do
 

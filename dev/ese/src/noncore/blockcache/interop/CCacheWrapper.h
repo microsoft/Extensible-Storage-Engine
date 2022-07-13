@@ -26,6 +26,8 @@ namespace Internal
 
                         ERR ErrMount() override;
 
+                        ERR ErrPrepareToDismount() override;
+
                         ERR ErrDump( _In_ CPRINTF* const pcprintf ) override;
 
                         BOOL FEnabled() override;
@@ -100,6 +102,17 @@ namespace Internal
                     ERR err = JET_errSuccess;
 
                     ExCall( I()->Mount() );
+
+                HandleError:
+                    return err;
+                }
+
+                template< class TM, class TN >
+                inline ERR CCacheWrapper<TM, TN>::ErrPrepareToDismount()
+                {
+                    ERR err = JET_errSuccess;
+
+                    ExCall( I()->PrepareToDismount() );
 
                 HandleError:
                     return err;

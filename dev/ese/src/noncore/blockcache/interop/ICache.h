@@ -55,6 +55,11 @@ namespace Internal
                     void Mount();
 
                     /// <summary>
+                    /// Prepares for a clean dismount of the cache.
+                    /// </summary>
+                    void PrepareToDismount();
+
+                    /// <summary>
                     /// Indicates if the cache is currently enabled.
                     /// </summary>
                     /// <returns>True if the cache is currently enabled.</returns>

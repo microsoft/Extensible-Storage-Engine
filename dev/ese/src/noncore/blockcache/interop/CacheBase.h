@@ -28,6 +28,8 @@ namespace Internal
 
                         virtual void Mount();
 
+                        virtual void PrepareToDismount();
+
                         virtual bool IsEnabled();
 
                         virtual void GetPhysicalId( [Out] VolumeId% volumeid, [Out] FileId% fileid, [Out] Guid% guid );
@@ -94,6 +96,19 @@ namespace Internal
                     ERR err = JET_errSuccess;
 
                     Call( Pi->ErrMount() );
+
+                    return;
+
+                HandleError:
+                    throw EseException( err );
+                }
+
+                template< class TM, class TN, class TW >
+                inline void CacheBase<TM, TN, TW>::PrepareToDismount()
+                {
+                    ERR err = JET_errSuccess;
+
+                    Call( Pi->ErrPrepareToDismount() );
 
                     return;
 

@@ -26,6 +26,8 @@ class THashedLRUKCache
 
         ERR ErrMount() override;
 
+        ERR ErrPrepareToDismount() override;
+
         ERR ErrDump( _In_ CPRINTF* const pcprintf ) override;
 
         BOOL FEnabled() override;
@@ -2972,7 +2974,28 @@ class THashedLRUKCache
 
                 ERR ErrFlush() override
                 {
-                    ERR err = JET_errSuccess;
+                    ERR             err                     = JET_errSuccess;
+                    JournalPosition jposDurableForWriteBack = jposInvalid;
+                    JournalPosition jposDurable             = jposInvalid;
+                    JournalPosition jposLastEnd             = jposInvalid;
+
+                    //  if this flush would not advance the durable for write back or durable pointers then ignore it
+
+                    Call( m_pjInner->ErrGetProperties( NULL, &jposDurableForWriteBack, &jposDurable, NULL, NULL ) );
+
+                    jposLastEnd = m_jposLastEnd;
+
+                    if ( jposDurableForWriteBack >= jposDurable && jposDurable >= jposLastEnd )
+                    {
+                        OSTrace(    JET_tracetagBlockCacheOperations,
+                                    OSFormat(   "C=%s Flush Ignored (jposDurableForWriteback=0x%016I64x, jposDurable=0x%016I64x, jposLastEnd=0x%016I64x)",
+                                                OSFormatFileId( m_pc ),
+                                                QWORD( jposDurableForWriteBack ),
+                                                QWORD( jposDurable ),
+                                                QWORD( jposLastEnd ) ) );
+
+                        Error( JET_errSuccess );
+                    }
 
                     //  ensure that any previously requested cluster writes are completed before flushing the journal.
                     //  this write barrier guarantees that journal entries that refer to clusters will only point to
@@ -4542,6 +4565,7 @@ class THashedLRUKCache
         ERR ErrProcessClusterReference( _In_ const ClusterNumber    clno,
                                         _In_ const ERR              errCluster,
                                         _In_ const JournalPosition  jpos );
+        void ProcessClusterInvalidate( _In_ const ClusterNumber clno );
         ERR ErrCheckForUnresolvedFailedClusterReferences();
 
         ERR ErrRedoJournalEntries();
@@ -5124,6 +5148,20 @@ ERR THashedLRUKCache<I>::ErrMount()
     //  recover the cache by replaying operations from the journal
 
     Call( ErrRecover() );
+
+HandleError:
+    return err;
+}
+
+
+template< class I >
+ERR THashedLRUKCache<I>::ErrPrepareToDismount()
+{
+    ERR err = JET_errSuccess;
+
+    //  flush our state for all files
+
+    Call( ErrFlush() );
 
 HandleError:
     return err;
@@ -6505,6 +6543,15 @@ BOOL THashedLRUKCache<I>::FVisitJournalEntry(   _In_ const JournalPosition  jpos
                         Call( ErrProcessClusterReference( pcbu->Clno(), errCluster, jpos ) );
                     }
                 }
+
+                //  if this update contains an evict/invalidate of a cluster then forget any previous failed cluster
+                //  reference.  this covers the case where a cluster is used, evicted, and then the cluster is reused
+                //  but we lose the journal entry that indicates that it was reused because it wasn't durable
+
+                else if ( pcbu->FSlotUpdated() && pcbu->Cbid().Cbno() != cbnoInvalid && !pcbu->FValid() )
+                {
+                    ProcessClusterInvalidate( pcbu->Clno() );
+                }
             }
             break;
 
@@ -6536,6 +6583,11 @@ ERR THashedLRUKCache<I>::ErrProcessClusterReference(    _In_ const ClusterNumber
     CClusterReferenceHash::ERR      errClusterReferenceHash = CClusterReferenceHash::ERR::errSuccess;
     CClusterReferenceEntry          entry;
 
+    if ( errCluster < JET_errSuccess )
+    {
+        Error( JET_errSuccess );
+    }
+
     key = CClusterReferenceKey( clno );
     m_clusterReferenceHash.WriteLockKey( key, &lock );
     fWriteLocked = fTrue;
@@ -6543,32 +6595,18 @@ ERR THashedLRUKCache<I>::ErrProcessClusterReference(    _In_ const ClusterNumber
     errClusterReferenceHash = m_clusterReferenceHash.ErrRetrieveEntry( &lock, &entry );
     if ( errClusterReferenceHash == CClusterReferenceHash::ERR::errSuccess )
     {
-        if ( errCluster >= JET_errSuccess )
-        {
-            errClusterReferenceHash = m_clusterReferenceHash.ErrDeleteEntry( &lock );
-            Assert( errClusterReferenceHash == CClusterReferenceHash::ERR::errSuccess );
-        }
-        else
-        {
-            entry = CClusterReferenceEntry( key, errCluster, jpos );
-            errClusterReferenceHash = m_clusterReferenceHash.ErrReplaceEntry( &lock, entry );
-            Assert( errClusterReferenceHash == CClusterReferenceHash::ERR::errSuccess );
-        }
     }
     else
     {
         Assert( errClusterReferenceHash == CClusterReferenceHash::ERR::errEntryNotFound );
 
-        if ( errCluster < JET_errSuccess )
+        entry = CClusterReferenceEntry( key, errCluster, jpos );
+        errClusterReferenceHash = m_clusterReferenceHash.ErrInsertEntry( &lock, entry );
+        if ( errClusterReferenceHash == CClusterReferenceHash::ERR::errOutOfMemory )
         {
-            entry = CClusterReferenceEntry( key, errCluster, jpos );
-            errClusterReferenceHash = m_clusterReferenceHash.ErrInsertEntry( &lock, entry );
-            if ( errClusterReferenceHash == CClusterReferenceHash::ERR::errOutOfMemory )
-            {
-                Error( ErrERRCheck( JET_errOutOfMemory ) );
-            }
-            Assert( errClusterReferenceHash == CClusterReferenceHash::ERR::errSuccess );
+            Error( ErrERRCheck( JET_errOutOfMemory ) );
         }
+        Assert( errClusterReferenceHash == CClusterReferenceHash::ERR::errSuccess );
     }
 
 HandleError:
@@ -6577,6 +6615,31 @@ HandleError:
         m_clusterReferenceHash.WriteUnlockKey( &lock );
     }
     return err;
+}
+
+template<class I>
+void THashedLRUKCache<I>::ProcessClusterInvalidate( _In_ const ClusterNumber clno )
+{
+    CClusterReferenceKey            key;
+    CClusterReferenceHash::CLock    lock;
+    CClusterReferenceHash::ERR      errClusterReferenceHash = CClusterReferenceHash::ERR::errSuccess;
+    CClusterReferenceEntry          entry;
+
+    key = CClusterReferenceKey( clno );
+    m_clusterReferenceHash.WriteLockKey( key, &lock );
+
+    errClusterReferenceHash = m_clusterReferenceHash.ErrRetrieveEntry( &lock, &entry );
+    if ( errClusterReferenceHash == CClusterReferenceHash::ERR::errSuccess )
+    {
+        errClusterReferenceHash = m_clusterReferenceHash.ErrDeleteEntry( &lock );
+        Assert( errClusterReferenceHash == CClusterReferenceHash::ERR::errSuccess );
+    }
+    else
+    {
+        Assert( errClusterReferenceHash == CClusterReferenceHash::ERR::errEntryNotFound );
+    }
+
+    m_clusterReferenceHash.WriteUnlockKey( &lock );
 }
 
 template<class I>
@@ -7162,25 +7225,34 @@ void THashedLRUKCache<I>::PerformOpportunisticSlabWriteBacks()
     const size_t            cbSlabCacheMax          = (size_t)( Pcconfig()->CbSlabMaximumCacheSize() );
     const size_t            cbSlab                  = (size_t)CbChunkPerSlab();
     const size_t            cSlabCacheMax           = cbSlabCacheMax / cbSlab;
-    JournalPosition         jposReplay              = jposInvalid;
-    JournalPosition         jposFull                = jposInvalid;
+    JournalPosition         jposAppend              = jposInvalid;
+    const QWORD             cbJournalTotal          = m_pch->CbJournal();
     const double            pctJournalUsedMax       = max( 0, min( 100, Pcconfig()->PctJournalSegmentsInUse() ) );
     JournalPosition         jposReplayTarget        = jposInvalid;
     BOOL                    fListLocked             = fFalse;
     size_t                  cSlabWriteBack          = 0;
     CArray<QWORD>           arrayIbSlab;
-    JournalPosition         jposEndLastMost         = jposInvalid;
+    JournalPosition         jposEndLastMin          = jposInvalid;
+    JournalPosition         jposReplay              = jposInvalid;
     JournalPosition         jposDurableForWriteBack = jposInvalid;
     JournalPosition         jposRedo                = jposInvalid;
     JournalPosition         jposReplaySlab          = jposInvalid;
     JournalPosition         jposReplayWriteCounts   = jposInvalid;
     JournalPosition         jposReplayCandidate     = jposInvalid;
 
+    //  do not perform opportunistic slab write back until we have recovered.  we don't want to modify the journal
+    //  until recovery has finished.  we also cannot handle journal full during recovery
+
+    if ( !m_fRecovered )
+    {
+        Error( JET_errSuccess );
+    }
+
     //  compute our replay target
 
-    Call( m_pj->ErrGetProperties( &jposReplay, NULL, NULL, NULL, &jposFull ) );
+    Call( m_pj->ErrGetProperties( NULL, NULL, NULL, &jposAppend, NULL ) );
 
-    jposReplayTarget = jposFull - (QWORD)( ( jposFull - jposReplay ) * pctJournalUsedMax / 100 );
+    jposReplayTarget = jposAppend + cbJournalSegment - (QWORD)( cbJournalTotal * pctJournalUsedMax / 100 );
 
     //  get the slabs we want to write back
 
@@ -7209,11 +7281,11 @@ void THashedLRUKCache<I>::PerformOpportunisticSlabWriteBacks()
 
         Call( ErrToErr<CArray<QWORD>>( arrayIbSlab.ErrSetEntry( arrayIbSlab.Size(), pswbT->IbSlab() ) ) );
 
-        //  remember the youngest journal position affecting any of the slabs to write back
+        //  remember the min of the youngest journal positions affecting any of the slabs to write back
 
-        if ( jposEndLastMost == jposInvalid || jposEndLastMost < pswbT->JposEndLast() )
+        if ( jposEndLastMin == jposInvalid || pswbT->JposEndLast() < jposEndLastMin )
         {
-            jposEndLastMost = pswbT->JposEndLast();
+            jposEndLastMin = pswbT->JposEndLast();
         }
     }
 
@@ -7222,13 +7294,13 @@ void THashedLRUKCache<I>::PerformOpportunisticSlabWriteBacks()
 
     //  if we found slabs we need to write back then do so
 
-    if ( jposEndLastMost != jposInvalid )
+    if ( jposEndLastMin != jposInvalid )
     {
-        //  if we need to flush the log to make these slabs durable for write back then do so
+        //  if we need to flush the log to make at least one of these slabs durable for write back then do so
 
         Call( m_pj->ErrGetProperties( NULL, &jposDurableForWriteBack, NULL, NULL, NULL ) );
 
-        while ( jposEndLastMost > jposDurableForWriteBack )
+        while ( jposEndLastMin > jposDurableForWriteBack )
         {
             Call( m_pj->ErrFlush() );
             Call( m_pj->ErrGetProperties( NULL, &jposDurableForWriteBack, NULL, NULL, NULL ) );
@@ -7241,14 +7313,14 @@ void THashedLRUKCache<I>::PerformOpportunisticSlabWriteBacks()
 
     //  save our write counts if they are impeding the replay pointer
 
-    if ( m_jposReplayWriteCounts < jposReplayTarget )
+    if ( m_jposReplayWriteCounts != jposInvalid && m_jposReplayWriteCounts < jposReplayTarget )
     {
         Call( ErrSaveWriteCounts() );
     }
 
     //  truncate the journal if possible
 
-    Call( m_pj->ErrGetProperties( NULL, &jposDurableForWriteBack, NULL, NULL, NULL ) );
+    Call( m_pj->ErrGetProperties( &jposReplay, &jposDurableForWriteBack, NULL, NULL, NULL ) );
 
     jposRedo = m_jposRedo;
 

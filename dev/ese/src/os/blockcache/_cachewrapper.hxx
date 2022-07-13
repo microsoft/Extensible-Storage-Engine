@@ -22,6 +22,8 @@ class TCacheWrapper  //  cw
 
         ERR ErrMount() override;
 
+        ERR ErrPrepareToDismount() override;
+
         ERR ErrDump( _In_ CPRINTF* const pcprintf ) override;
 
         BOOL FEnabled() override;
@@ -118,6 +120,12 @@ template< class I >
 ERR TCacheWrapper<I>::ErrMount()
 {
     return m_piInner->ErrMount();
+}
+
+template< class I >
+ERR TCacheWrapper<I>::ErrPrepareToDismount()
+{
+    return m_piInner->ErrPrepareToDismount();
 }
 
 template< class I >
