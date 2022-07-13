@@ -578,6 +578,11 @@ class TFileFilter  //  ff
                     return ErrToErr( "Mount", m_pcInner->ErrMount() );
                 }
 
+                ERR ErrPrepareToDismount() override
+                {
+                    return ErrToErr( "PrepareToDismount", m_pcInner->ErrPrepareToDismount() );
+                }
+
                 ERR ErrDump( _In_ CPRINTF* const pcprintf ) override
                 {
                     return ErrToErr( "Dump", m_pcInner->ErrDump( pcprintf ) );

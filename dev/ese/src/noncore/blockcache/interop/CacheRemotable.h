@@ -36,6 +36,11 @@ namespace Internal
                             this->target->Mount();
                         }
 
+                        virtual void PrepareToDismount()
+                        {
+                            this->target->PrepareToDismount();
+                        }
+
                         virtual bool IsEnabled()
                         {
                             return this->target->IsEnabled();

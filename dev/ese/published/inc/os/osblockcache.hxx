@@ -193,6 +193,10 @@ class ICache  //  c
 
         virtual ERR ErrMount() = 0;
 
+        //  Prepares for a clean dismount of the cache.
+
+        virtual ERR ErrPrepareToDismount() = 0;
+
         //  Dumps information for an existing cache.
 
         virtual ERR ErrDump( _In_ CPRINTF* const pcprintf ) = 0;
