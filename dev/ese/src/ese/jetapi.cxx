@@ -3043,6 +3043,11 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         {
         }
 
+        static void SetBlockCacheTestEnabled( _In_ const BOOL fBlockCacheTestEnabled )
+        {
+            s_fBlockCacheTestEnabled = fBlockCacheTestEnabled;
+        }
+
     public:
 
         //ULONG CbZeroExtend() override
@@ -3184,6 +3189,8 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
     private:
 
+        static BOOL s_fBlockCacheTestEnabled;
+
         static BOOL FBlockCacheTestEnabled()
         {
             WCHAR wszBuf[16] = { 0 };
@@ -3191,6 +3198,11 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
             if (    FOSConfigGet( L"DEBUG", L"BlockCacheEnabled", wszBuf, sizeof( wszBuf ) ) &&
                     wszBuf[0] &&
                     !!_wtol( wszBuf ) )
+            {
+                return fTrue;
+            }
+
+            if ( s_fBlockCacheTestEnabled )
             {
                 return fTrue;
             }
@@ -3342,6 +3354,8 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
                     m_fCacheEnabled = fBlockCacheTestEnabled && m_wszAbsPathCachingFile[ 0 ] != 0;
 
                     m_cbCachedFilePerSlab = (ULONG)UlParam( JET_paramDatabasePageSize );
+
+                    m_pctWrite = 50;
                 }
         };
 
@@ -3439,6 +3453,8 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
         ULONG       m_cioOutstandingMax;
         ULONG       m_permillageSmoothIo;
 };
+
+BOOL CInstanceFileSystemConfiguration::s_fBlockCacheTestEnabled = fFalse;
 
 CInstanceFileSystemConfiguration g_fsconfigGlobal( pinstNil );
 IFileSystemConfiguration* const g_pfsconfigGlobal = &g_fsconfigGlobal;
@@ -23846,6 +23862,10 @@ JET_ERR JET_API JetTestHook(
             const LGPOS lgposNewest = pinst->m_plog->LgposLGLogTipNoLock();
             *((__int64*)pv) = lgposNewest.qw;
         }
+            break;
+
+        case opTestHookBlockCacheTestEnabled:
+            CInstanceFileSystemConfiguration::SetBlockCacheTestEnabled( *( (BOOL*)pv ) );
             break;
 
         default:

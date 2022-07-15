@@ -11616,6 +11616,7 @@ typedef enum
     opTestHookGetTablePgnoFDP,                          //  takes a JET_TABLEID in, returns a pgno
     opTestHookAlterDatabaseFileHeader,                  //  takes a JET_TESTHOOKALTERDBFILEHDR.
     opTestHookGetLogTip,                                //  returns the current log tip LGPOS as a 64 bit integer
+    opTestHookBlockCacheTestEnabled,                    //  takes a BOOL* indicating if the block cache should be forced on for test purposes
 } TESTHOOK_OP;
 
 //  This is the list of "forgiveable" sins that test can commit against ESE:
