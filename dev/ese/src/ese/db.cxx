@@ -6482,7 +6482,7 @@ ERR ErrDBOpenDatabaseByIfmp( PIB *ppib, IFMP ifmp )
     // Allow LV create, RCE clean, and OLD sessions to bypass exclusive lock.
     if ( pfmp->FExclusiveByAnotherSession( ppib )
         && !FPIBSessionLV( ppib )
-        && !FPIBSessionSystemCleanup( ppib ) )
+        && !FPIBSessionSystemInternal( ppib ) )
     {
         //  It is opened by others already.
         err = ErrERRCheck( JET_errDatabaseLocked );

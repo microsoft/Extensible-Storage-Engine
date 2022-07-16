@@ -15199,7 +15199,7 @@ ERR ErrSPGetInfo(
         }
 
         // We must have passed in a specific tree/FUCB.
-        if ( pfucb == pfucbNil )
+        if ( ( pfucb == pfucbNil ) || ( pfucb->pcsrRoot == pcsrNil ) || !pfucb->pcsrRoot->FLatched() )
         {
             Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
@@ -15485,34 +15485,56 @@ ERR ErrSPGetInfo(
         }
     }
 
-    if ( pfucbNil == pfucb )
+    // If the FUCB we passed in its root already latched, we don't need to open a second one
+    // and latch it.
+    Assert( ( pfucb == pfucbNil ) || ( pfucb->pcsrRoot == pcsrNil ) || pfucb->pcsrRoot->FLatched() );
+    if ( ( pfucb == pfucbNil ) || ( pfucb->pcsrRoot == pcsrNil ) || !pfucb->pcsrRoot->FLatched() )
     {
         Assert( !FSPReachablePages( fSPExtents ) );
-        err = ErrBTOpen( ppib, pgnoSystemRoot, ifmp, &pfucbT );
+        if ( pfucbNil == pfucb )
+        {
+            err = ErrBTOpen( ppib, pgnoSystemRoot, ifmp, &pfucbT );
+        }
+        else
+        {
+            Assert( !FFUCBSpace( pfucb ) );
+            err = ErrBTOpen( ppib, pfucb->u.pfcb, &pfucbT );
+        }
+        CallR( err );
     }
     else
     {
-        Assert( !FFUCBSpace( pfucb ) || FSPReachablePages( fSPExtents ) );
-        err = ErrBTOpen( ppib, pfucb->u.pfcb, &pfucbT );
+        Assert( !fSetCachedValue || ( ObjidFDP( pfucb ) == objidSystemRoot ) ||  ( pfucb->pcsrRoot->Latch() == latchRIW ) );
+        Assert( Pcsr( pfucb ) == pfucb->pcsrRoot );
+        pfucbT = pfucb;
     }
-    CallR( err );
+
     Assert( pfucbNil != pfucbT );
     tcScope->nParentObjectClass = TceFromFUCB( pfucbT );
     tcScope->SetDwEngineObjid( ObjidFDP( pfucbT ) );
 
-    if ( fSetCachedValue )
+    if ( pfucbT != pfucb )
     {
-        // Since we're going to write a value to the cache if we can, we need to hold a write
-        // or RIW latch on the root page in order to have the cache and the space trees be
-        // consistent.
-        Call( ErrBTIGotoRoot( pfucbT, latchRIW ) );
+        if ( fSetCachedValue )
+        {
+            // Since we're going to write a value to the cache if we can, we need to hold a write
+            // or RIW latch on the root page in order to have the cache and the space trees be
+            // consistent.
+            Call( ErrBTIGotoRoot( pfucbT, latchRIW ) );
+        }
+        else
+        {
+            Call( ErrBTIGotoRoot( pfucbT, latchReadTouch ) );
+        }
+        Assert( pcsrNil == pfucbT->pcsrRoot );
+        pfucbT->pcsrRoot = Pcsr( pfucbT );
     }
     else
     {
-        Call( ErrBTIGotoRoot( pfucbT, latchReadTouch ) );
+        Assert( Pcsr( pfucb ) == pfucb->pcsrRoot );
+        Assert( pfucb->pcsrRoot != pcsrNil );
+        Assert( pfucb->pcsrRoot->FLatched() );
     }
-    Assert( pcsrNil == pfucbT->pcsrRoot );
-    pfucbT->pcsrRoot = Pcsr( pfucbT );
 
     if ( !pfucbT->u.pfcb->FSpaceInitialized() )
     {
@@ -15820,43 +15842,8 @@ ERR ErrSPGetInfo(
     {
         Assert( pcpgReachableTotal != NULL );
         Assert( pfucb != pfucbNil );
-
-        FUCB* pfucbTree = pfucbNil;
-
-        if ( FFUCBSpace( pfucb ) )
-        {
-            Assert( pfucbSpace == pfucbNil );
-
-            if ( FFUCBOwnExt( pfucb ) )
-            {
-                Call( ErrSPIOpenOwnExt( pfucb, &pfucbSpace ) );
-            }
-            else if ( FFUCBAvailExt( pfucb ) )
-            {
-                Call( ErrSPIOpenAvailExt( pfucb, &pfucbSpace ) );
-            }
-            else
-            {
-                Assert( fFalse );
-            }
-
-            pfucbTree = pfucbSpace;
-            Call( ErrBTIGotoRoot( pfucbTree, latchReadTouch ) );
-        }
-        else
-        {
-            pfucbTree = pfucbT;
-        }
-
-        Assert( pfucbTree != pfucbNil );
-        Call( ErrBTIGetReachablePageCount( pfucbTree, pcpgReachableTotal ) );
-
-        if ( pfucbTree == pfucbSpace )
-        {
-            Assert( pfucbSpace != pfucbNil );
-            BTClose( pfucbSpace );
-            pfucbSpace = pfucbNil;
-        }
+        Assert( pfucb == pfucbT );
+        Call( ErrBTIGetReachablePageCount( pfucb, pcpgReachableTotal ) );
     }
 
     Assert( 0 == cextSentinelsRemaining );
@@ -15935,7 +15922,7 @@ HandleError:
         BTClose( pfucbSpace );
     }
 
-    if ( pfucbT != pfucbNil )
+    if ( ( pfucbT != pfucbNil ) && ( pfucbT != pfucb ) )
     {
         pfucbT->pcsrRoot = pcsrNil;
         BTClose( pfucbT );

@@ -2607,7 +2607,7 @@ Available space: %10 page(s) (%11 bytes, %12%%).%n
 Used space: %13 page(s) (%14 bytes, %15%%).%n
 Space owned within known file size: %16 page(s) (%17 bytes, %18%%).%n
 Space owned beyond known file size: %19 page(s) (%20 bytes, %21%%).%n
-Space used by primary objects: %22 page(s) (%23 bytes, %24%%).%n
+Space owned by primary objects: %22 page(s) (%23 bytes, %24%%).%n
 Space used by root object: %25 page(s) (%26 bytes, %27%%).%n
 Space used by root owned-extent tree: %28 page(s) (%29 bytes, %30%%).%n
 Space used by root available-extent tree: %31 page(s) (%32 bytes, %33%%).%n

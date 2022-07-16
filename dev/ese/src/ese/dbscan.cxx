@@ -4086,7 +4086,7 @@ VOID DBMScanObserverCleanup::RedeleteRevertedFDP_( CSR* const pcsr, DBMObjectCac
     Assert( pcsr->Cpage().FPrimaryPage() );
     Assert( !FCATSystemTableByObjid( pcsr->Cpage().ObjidFDP() ) );
 
-    Assert( FPIBSessionSystemCleanup( m_ppib ) );
+    Assert( FPIBSessionSystemInternal( m_ppib ) );
 
     BOOL fFDPExists     = fTrue;
     BOOL fInTransaction = fFalse;
@@ -4264,7 +4264,7 @@ ERR DBMScanObserverCleanup::ErrOpenTableGetFucb_( const OBJID objid, BOOL* const
 
     // If the PIB isn't marked as a system cleanup session then we will conflict with
     // JetDeleteTable.
-    Assert( FPIBSessionSystemCleanup( m_ppib ) );
+    Assert( FPIBSessionSystemInternal( m_ppib ) );
     Call( ErrDIRBeginTransaction( m_ppib, 54683, JET_bitTransactionReadOnly ) );
 
     err = ErrCATSeekTableByObjid(

@@ -1071,7 +1071,7 @@ LOCAL ERR ErrFILEISetMode( FUCB *pfucb, const JET_GRBIT grbit )
             pfucbT = pfcb->FucbList()[ifucbList];
 
             Assert( pfucbT->ppib == pfcb->PpibDomainDenyRead()
-                || FPIBSessionSystemCleanup( pfucbT->ppib ) );
+                || FPIBSessionSystemInternal( pfucbT->ppib ) );
         }
         pfcb->FucbList().UnlockForEnumeration();
 #endif
@@ -1123,7 +1123,7 @@ LOCAL ERR ErrFILEISetMode( FUCB *pfucb, const JET_GRBIT grbit )
 
             if ( pfucbT->ppib != ppib
                 && FFUCBUpdatable( pfucbT )
-                && !FPIBSessionSystemCleanup( pfucbT->ppib ) )
+                && !FPIBSessionSystemInternal( pfucbT->ppib ) )
             {
                 pfcb->FucbList().UnlockForEnumeration();
                 return ErrERRCheck( JET_errTableInUse );
@@ -1157,7 +1157,7 @@ LOCAL ERR ErrFILEISetMode( FUCB *pfucb, const JET_GRBIT grbit )
 
             if ( pfucbT != pfucb )      // Ignore current cursor
             {
-                if ( FPIBSessionSystemCleanup( pfucbT->ppib ) )
+                if ( FPIBSessionSystemInternal( pfucbT->ppib ) )
                 {
                     fOpenSystemCursor = fTrue;
                 }
@@ -1873,8 +1873,8 @@ ERR ErrFILEIOpenTable(
 
     //  System cleanup threads (OLD and RCEClean) are permitted to open
     //  a cursor on a deleted table
-    Assert( !pfcb->FDeletePending() || FPIBSessionSystemCleanup( ppib ) );
-    Assert( !pfcb->FDeleteCommitted() || FPIBSessionSystemCleanup( ppib ) );
+    Assert( !pfcb->FDeletePending() || FPIBSessionSystemInternal( ppib ) );
+    Assert( !pfcb->FDeleteCommitted() || FPIBSessionSystemInternal( ppib ) );
 
     //  set FUCB for sequential access if requested
     //

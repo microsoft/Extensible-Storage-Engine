@@ -1621,6 +1621,21 @@ ERR VTAPI ErrIsamGetTableInfo(
             Call( ErrRECRetrieveAndReserveAutoInc( pfucb, pvResult, cbMax ) );
             break;
 
+        case JET_TblInfoObjectId:
+            if ( pfucb->u.pfcb->FTypeTemporaryTable() )
+            {
+                Error( ErrERRCheck( JET_errInvalidOperation ) );
+            }
+
+            if ( cbMax < sizeof(OBJID) )
+            {
+                // check buffer size
+                Error( ErrERRCheck( JET_errBufferTooSmall ) );
+            }
+
+            *(OBJID *)pvResult = (OBJID)pfucb->u.pfcb->ObjidFDP();
+            break;
+
         default:
             Expected( fFalse );
             return ErrERRCheck( JET_errFeatureNotAvailable );

@@ -5125,6 +5125,7 @@ ERR ErrBTIGetReachablePageCount( FUCB* const pfucb, CPG* const pcpg )
 
     Expected( FFUCBSpace( pfucb ) || ( ObjidFDP( pfucb ) == objidSystemRoot ) );  // Calling this on a large tree might be too expensive.
     Assert( pcsr->FLatched() );
+    Assert( pcsr == pfucb->pcsrRoot );
     Assert( pcsr->Cpage().FRootPage() );
 
     *pcpg = 1;
@@ -7885,7 +7886,7 @@ ERR ErrBTIGotoRoot( FUCB *pfucb, LATCH latch )
         {
             pfucb->u.pfcb->SetRevertedFDPToDelete();
         }
-        else
+        else if ( !pfucb->ppib->FSessionLeakReport() )
         {
             const OBJID objidFDP = pfucb->u.pfcb->ObjidFDP();
             FUCBIllegalOperationFDPToBeDeleted( pfucb, objidFDP == 0 ? Pcsr( pfucb )->Cpage().ObjidFDP() : objidFDP );

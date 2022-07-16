@@ -279,6 +279,7 @@ private:
             FLAG32      m_fOLD2:1;                          //    session is for OLD2
             FLAG32      m_fMustRollbackToLevel0:1;          //    session must rollback to level 0 before being able to commit
             FLAG32      m_fDBScan:1;                        //    session is for DBSCAN
+            FLAG32      m_fLeakReport:1;                    //    session is for the leak report
 #if defined(DEBUG) || defined(EXPENSIVE_INLINE_EXTENT_PAGE_COUNT_CACHE_VALIDATION)
             FLAG32      m_fUpdatingExtentPageCountCache:1;  //    session is currently updating the cached CPG values in the catalog
 #endif
@@ -454,6 +455,10 @@ public:
 
     BOOL                FSessionDBScan() const                              { return m_fDBScan; }
     VOID                SetFSessionDBScan()                                 { m_fDBScan = fTrue; }
+
+    BOOL                FSessionLeakReport() const                          { return m_fLeakReport; }
+    VOID                SetFSessionLeakReport()                             { m_fLeakReport = fTrue; }
+    VOID                ResetFSessionLeakReport()                           { m_fLeakReport = fFalse; }
 
     BOOL                FSessionSystemTask() const                          { return ( FSessionOLD() || FSessionOLD2() || FSessionDBScan() ); }
 
@@ -1170,13 +1175,14 @@ INLINE BOOL FPIBUserOpenedDatabase( _In_ const PIB * const ppib, _In_ const DBID
 BOOL FPIBSessionLV( PIB *ppib );
 BOOL FPIBSessionRCEClean( PIB *ppib );
 
-INLINE BOOL FPIBSessionSystemCleanup( PIB *ppib )
+INLINE BOOL FPIBSessionSystemInternal( PIB *ppib )
 {
     return ( FPIBSessionRCEClean( ppib )
         || ppib->FSystemCallback()
         || ppib->FSessionOLD()
         || ppib->FSessionOLD2()
-        || ppib->FSessionDBScan() );
+        || ppib->FSessionDBScan()
+        || ppib->FSessionLeakReport() );
 }
 
 /*  PIB validation

@@ -5555,6 +5555,9 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #if ( JET_VERSION >= 0x0A01 )
 #define JET_TblInfoSpaceOwnedLV       17U         // OwnExt for LV
 #define JET_TblInfoSpaceAvailableLV   18U         // AvailExt for LV
+// end_PubEsent
+#define JET_TblInfoObjectId           19U
+// begin_PubEsent
 #endif
 
     /* Info levels for JetGetIndexInfo and JetGetTableIndexInfo */
