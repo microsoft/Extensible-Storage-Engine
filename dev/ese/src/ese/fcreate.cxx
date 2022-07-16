@@ -8592,7 +8592,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
     Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucbParent ) );
 
     {
-    JET_GRBIT grbitOpen = JET_bitTableDelete|JET_bitTableDenyRead ;
+    JET_GRBIT grbitOpen = JET_bitTableDelete | JET_bitTableDenyRead;
     if ( fAllowTableDeleteSensitive )
     {
         grbitOpen |= JET_bitTableAllowSensitiveOperation;
@@ -8804,7 +8804,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
         {
             FUCB * pfucbT = pfcb->FucbList()[ifucbList];
 
-            if ( FPIBSessionSystemCleanup( pfucbT->ppib ) )
+            if ( FPIBSessionSystemInternal( pfucbT->ppib ) )
             {
                 //  don't care about RCE clean, because any outstanding versions will be cleaned
                 //  before the DeleteTable version is cleaned.

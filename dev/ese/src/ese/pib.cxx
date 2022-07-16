@@ -763,6 +763,7 @@ ERR ErrPIBBeginSession( INST *pinst, _Outptr_ PIB ** pppib, PROCID procidTarget,
     Assert( !ppib->FSessionOLD() );
     Assert( !ppib->FSessionOLD2() );
     Assert( !ppib->FSessionDBScan() );
+    Assert( !ppib->FSessionLeakReport() );
     Assert( ppib->levelBegin == 0 );
     Assert( ppib->clevelsDeferBegin == 0 );
     Assert( ppib->levelRollback == 0 );

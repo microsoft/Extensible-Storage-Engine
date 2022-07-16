@@ -3933,13 +3933,15 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
                     ptabledef->pgnoFDP,
                     pbts,
                     pcprintf );
-
     if ( err == JET_errRBSFDPToBeDeleted )
     {
         pbts->fPgnoFDPRootDelete = fTrue;
         Call( pdbues->pfnBTreeStatsAnalysisFunc( pbts, pdbues->pvBTreeStatsAnalysisFuncCtx ) );
         return JET_errSuccess;
     }
+    Call( err );
+
+    pbts->fPgnoFDPRootDelete = fFalse;
 
     //  Callback to client.
     //
@@ -5143,7 +5145,7 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
     const CPG cpgAvailable,
     const CPG cpgOwnedBelowEof,
     const CPG cpgOwnedBeyondEof,
-    const CPG cpgUsedPrimary,
+    const CPG cpgOwnedPrimary,
     const CPG cpgUsedRoot,
     const CPG cpgUsedOe,
     const CPG cpgUsedAe,
@@ -5158,7 +5160,7 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
     const CPG cpgOwned = cpgOwnedBelowEof + cpgOwnedBeyondEof;
     Assert( cpgOwned > 0 );
 
-    const CPG cpgUsed = cpgUsedPrimary + cpgUsedRoot + cpgUsedOe + cpgUsedAe;
+    const CPG cpgUsed = cpgOwnedPrimary + cpgUsedRoot + cpgUsedOe + cpgUsedAe;
     Assert( ( cpgUsed <= cpgOwned ) || ( !pfmp->FReadOnlyAttach() && !pfmp->FExclusiveOpen() ) );
 
     CPG cpgLeaked = cpgOwned - ( cpgAvailable + cpgSplitBuffers + cpgUsed );
@@ -5175,7 +5177,7 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
         OSFormatW( L"%d", cpgUsed ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsed ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsed ) / (double)cpgOwned ),
         OSFormatW( L"%d", cpgOwnedBelowEof ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgOwnedBelowEof ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedBelowEof ) / (double)cpgOwned ),
         OSFormatW( L"%d", cpgOwnedBeyondEof ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgOwnedBeyondEof ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedBeyondEof ) / (double)cpgOwned ),
-        OSFormatW( L"%d", cpgUsedPrimary ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsedPrimary ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsedPrimary ) / (double)cpgOwned ),
+        OSFormatW( L"%d", cpgOwnedPrimary ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgOwnedPrimary ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedPrimary ) / (double)cpgOwned ),
         OSFormatW( L"%d", cpgUsedRoot ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsedRoot ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsedRoot ) / (double)cpgOwned ),
         OSFormatW( L"%d", cpgUsedOe ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsedOe ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsedOe ) / (double)cpgOwned ),
         OSFormatW( L"%d", cpgUsedAe ), OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgUsedAe ) ), OSFormatW( L"%.3f", ( 100.0 * (double)cpgUsedAe ) / (double)cpgOwned ),
@@ -5239,7 +5241,7 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
     BOOL fRunning = fFalse;
     JET_THREADSTATS jtsStart = { 0 }, jtsEnd = { 0 };
     OBJID objidLast = objidNil;
-    CPG cpgUsedPrimary = 0;
+    CPG cpgOwnedPrimary = 0;
     ULONG cCachedPrimary = 0, cUncachedPrimary = 0;
     CPG cpgUsedRoot = 0, cpgUsedOe = 0, cpgUsedAe = 0;
     CPG rgcpgRootSpaceInfo[ 4 ] = { 0 };
@@ -5248,12 +5250,19 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
     FUCB* pfucbTable = pfucbNil;
     FUCB* pfucb = pfucbNil;
 
+    szContext = "CheckInTrx";
+    if ( ppib->Level() > 0 )
+    {
+        // Being in a transaction means we might miss some catalog entries that get
+        // inserted while we process all the tables.
+        Error( ErrERRCheck( JET_errInTransaction ) );
+    }
+
     szContext = "CheckAlreadyRunning";
     Call( pfmp->ErrStartRootSpaceLeakEstimation() );
     fRunning = fTrue;
 
     szContext = "ThreadStatsStart";
-    PGNO pgnoFDP = pgnoNull, pgnoFDPParent = pgnoNull;
     jtsStart.cbStruct = sizeof( jtsStart );
     jtsEnd.cbStruct = sizeof( jtsStart );
     Call( JetGetThreadStats( &jtsStart, jtsStart.cbStruct ) );
@@ -5261,27 +5270,31 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
     szContext = "PrimaryObjects";
     OnDebug( OBJID objidPrev = objidNil );
 
+    ppib->SetFSessionLeakReport();
+
     CHAR szObjectName[ JET_cbNameMost + 1 ];
     for ( err = ErrCATGetNextRootObject( ppib, ifmp, fTrue, &pfucbCatalog, &objidLast, szObjectName );
         ( err >= JET_errSuccess ) && ( objidLast != objidNil );
         err = ErrCATGetNextRootObject( ppib, ifmp, fTrue, &pfucbCatalog, &objidLast, szObjectName ) )
     {
+#ifdef DEBUG
         Assert( objidLast != objidSystemRoot );  // Root object is not supposed to be returned here.
         Assert( objidLast > objidPrev );
-        OnDebug( objidPrev = objidLast );
+        objidPrev = objidLast;
 
         // Test injection.
-        OnDebug( while ( objidLast >= (OBJID)UlConfigOverrideInjection( 35366, objidFDPOverMax ) ) );
-        OnDebug( Call( ErrFaultInjection( 55190 ) ) );
+        while ( objidLast >= (OBJID)UlConfigOverrideInjection( 35366, objidFDPOverMax ) );
+        Call( ErrFaultInjection( 55190 ) );
+#endif // DEBUG
 
-        CPG cpgRootObject = cpgNil;
+        CPG cpgPrimaryObject = cpgNil;
 
         // Check if it is cached.
-        err = ErrCATGetExtentPageCounts( ppib, ifmp, objidLast, &cpgRootObject, NULL );
+        err = ErrCATGetExtentPageCounts( ppib, ifmp, objidLast, &cpgPrimaryObject, NULL );
         if ( err >= JET_errSuccess )
         {
             cCachedPrimary++;
-            cpgUsedPrimary += cpgRootObject;
+            cpgOwnedPrimary += cpgPrimaryObject;
         }
         else
         {
@@ -5291,21 +5304,39 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
             }
             Call( err );
 
-            cUncachedPrimary++;
+            // Test injection.
+            OnDebug( while ( objidLast >= (OBJID)UlConfigOverrideInjection( 48550, objidFDPOverMax ) ) );
 
-            Call( ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szObjectName, JET_bitTableReadOnly ) );
-            Call( ErrSPGetInfo(
-                ppib,
-                ifmp,
-                pfucbTable,
-                (BYTE*)&cpgRootObject,
-                sizeof( cpgRootObject ),
-                fSPOwnedExtent,
-                gci::Allow ) );
-            cpgUsedPrimary += cpgRootObject;
+            err = ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szObjectName, JET_bitTableReadOnly | JET_bitTableTryPurgeOnClose );
+            if ( err == JET_errObjectNotFound )
+            {
+                err = JET_errSuccess;
+            }
+            else
+            {
+                Call( err );
 
-            Call( ErrFILECloseTable( ppib, pfucbTable ) );
-            pfucbTable = pfucbNil;
+                cUncachedPrimary++;
+                
+                // Test injection.
+                OnDebug( while ( objidLast >= (OBJID)UlConfigOverrideInjection( 57894, objidFDPOverMax ) ) );
+
+                Call( ErrSPGetInfo(
+                    ppib,
+                    ifmp,
+                    pfucbTable,
+                    (BYTE*)&cpgPrimaryObject,
+                    sizeof( cpgPrimaryObject ),
+                    fSPOwnedExtent,
+                    gci::Allow ) );
+
+                cpgOwnedPrimary += cpgPrimaryObject;
+
+                Call( ErrFILECloseTable( ppib, pfucbTable ) );
+                pfucbTable = pfucbNil;
+            }
+
+            Assert( pfucbTable == pfucbNil );
         }
     }
     Call( err );
@@ -5313,20 +5344,26 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
     pfucbCatalog = pfucbNil;
     objidLast = objidSystemRoot;
 
-    // Global space
-    szContext = "RootObject";
+    // Root space
+    //
+    szContext = "RootSpace";
+
+    // Open root.
+    Call( ErrBTIOpen( ppib, ifmp, pgnoSystemRoot, objidNil, openNormal, &pfucb, fFalse ) );
+    Call( ErrBTIGotoRoot( pfucb, latchReadNoTouch ) );
+    pfucb->pcsrRoot = Pcsr( pfucb );
+    Assert( pfucb->u.pfcb->FSpaceInitialized() );
+
+    // Root object.
     CPG rgcpgRootInfo[ 4 ] = { cpgNil };
     Call( ErrSPGetInfo(
         ppib,
         ifmp,
-        pfucbNil,
+        pfucb,
         (BYTE*)rgcpgRootInfo,
         sizeof( rgcpgRootInfo ),
         fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers | fSPShelvedExtent,
         gci::Allow ) );
-    
-    Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucb ) );
-    Expected( pfucb->u.pfcb );
     Call( ErrSPGetInfo(
         ppib,
         ifmp,
@@ -5337,8 +5374,11 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
         gci::Allow ) );
     Expected( cpgUsedRoot == 1 );
 
+    // Root OE.
     szContext = "RootOe";
     Call( ErrSPIOpenOwnExt( pfucb, &pfucbSpaceTree ) );
+    Call( ErrBTIGotoRoot( pfucbSpaceTree, latchReadNoTouch ) );
+    pfucbSpaceTree->pcsrRoot = Pcsr( pfucbSpaceTree );
     Call( ErrSPGetInfo(
         ppib,
         ifmp,
@@ -5347,11 +5387,15 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
         sizeof( cpgUsedOe ),
         fSPReachablePages,
         gci::Allow ) );
+    pfucbSpaceTree->pcsrRoot = pcsrNil;
     BTClose( pfucbSpaceTree );
     pfucbSpaceTree = pfucbNil;
 
+    // Root AE.
     szContext = "RootAe";
     Call( ErrSPIOpenAvailExt( pfucb, &pfucbSpaceTree ) );
+    Call( ErrBTIGotoRoot( pfucbSpaceTree, latchReadNoTouch ) );
+    pfucbSpaceTree->pcsrRoot = Pcsr( pfucbSpaceTree );
     Call( ErrSPGetInfo(
         ppib,
         ifmp,
@@ -5360,39 +5404,31 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
         sizeof( cpgUsedAe ),
         fSPReachablePages,
         gci::Allow ) );
+    pfucbSpaceTree->pcsrRoot = pcsrNil;
     BTClose( pfucbSpaceTree );
     pfucbSpaceTree = pfucbNil;
-    DIRClose( pfucb );
-    pfucb = pfucbNil;
-    pgnoFDP = pgnoFDPParent = pgnoNull;
 
+    // Root space.
     szContext = "RootSpace";
     Call( ErrSPGetInfo(
         ppib,
         ifmp,
-        pfucbNil,
+        pfucb,
         (BYTE*)rgcpgRootSpaceInfo,
         sizeof( rgcpgRootSpaceInfo ),
         fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers | fSPShelvedExtent,
         gci::Allow ) );
+
+    // Close root.
+    pfucb->pcsrRoot = pcsrNil;
+    BTClose( pfucb );
+    pfucb = pfucbNil;
 
     // We are done with the part that requires exclusivity.
     pfmp->StopRootSpaceLeakEstimation();
     fRunning = fFalse;
 
     szContext = "ThreadStatsEnd";
-    const CPG cpgOwned = rgcpgRootInfo[ 0 ] + rgcpgRootInfo[ 3 ];
-    const CPG cpgAvailable = rgcpgRootInfo[ 1 ] + rgcpgRootInfo[ 2 ];
-    const CPG cpgLeaked =
-        cpgOwned -
-        (
-            cpgAvailable +
-            cpgUsedRoot +
-            cpgUsedOe +
-            cpgUsedAe +
-            cpgUsedPrimary
-        );
-    Assert( cpgLeaked >= 0 );
     Call( JetGetThreadStats( &jtsEnd, jtsEnd.cbStruct ) );
 
 HandleError:
@@ -5411,6 +5447,7 @@ HandleError:
     if ( pfucbSpaceTree != pfucbNil )
     {
         Assert( err < JET_errSuccess );
+        pfucbSpaceTree->pcsrRoot = pcsrNil;
         BTClose( pfucbSpaceTree );
         pfucbSpaceTree = pfucbNil;
     }
@@ -5418,16 +5455,19 @@ HandleError:
     if ( pfucbTable != pfucbNil )
     {
         Assert( err < JET_errSuccess );
-        Call( ErrFILECloseTable( ppib, pfucbTable ) );
+        CallS( ErrFILECloseTable( ppib, pfucbTable ) );
         pfucbTable = pfucbNil;
     }
 
     if ( pfucb != pfucbNil )
     {
         Assert( err < JET_errSuccess );
-        DIRClose( pfucb );
+        pfucb->pcsrRoot = pcsrNil;
+        BTClose( pfucb );
         pfucb = pfucbNil;
     }
+
+    ppib->ResetFSessionLeakReport();
 
     const double dblSecTotalElapsed = DblHRTSecondsElapsed( DhrtHRTElapsedFromHrtStart( hrtStart ) );
     const ULONG ulMinElapsed = (ULONG)( dblSecTotalElapsed / 60.0 );
@@ -5446,7 +5486,7 @@ HandleError:
             rgcpgRootSpaceInfo[ 1 ],    // cpgAvailable
             rgcpgRootSpaceInfo[ 0 ],    // cpgOwnedBelowEof
             rgcpgRootSpaceInfo[ 3 ],    // cpgOwnedBeyondEof (shelved)
-            cpgUsedPrimary,
+            cpgOwnedPrimary,
             cpgUsedRoot,
             cpgUsedOe,
             cpgUsedAe,
@@ -5461,6 +5501,9 @@ HandleError:
     }
     else
     {
+        Assert( err != JET_errObjectNotFound );
+        Assert( err != JET_errRBSFDPToBeDeleted );
+
         DBUTLIReportSpaceLeakEstimationFailed(
             pfmp,
             err,
