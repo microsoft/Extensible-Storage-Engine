@@ -6140,14 +6140,18 @@ ERR THashedLRUKCache<I>::ErrDumpWriteCounts(    _In_ const QWORD    ibChunkBase,
 
         if ( icbwc == icbwcBase || icbwc % ccbwcPerPage == 0 )
         {
+            if ( icbwc != icbwcBase )
+            {
+                (*pcprintf)( "\n" );
+            }
             (*pcprintf)( "\n" );
             (*pcprintf)( "    0x%016I64x\n", QWORD( ibWriteCounts ) );
             (*pcprintf)( "\n" );
         }
 
-        if ( icbwc == icbwcBase || icbwc % ccbwcPerRow == 0 )
+        if ( icbwc == icbwcBase || icbwc % ccbwcPerPage == 0 || icbwc % ccbwcPerRow == 0 )
         {
-            if ( icbwc > icbwcBase )
+            if ( icbwc != icbwcBase )
             {
                 (*pcprintf)( "\n" );
             }
@@ -6162,10 +6166,7 @@ ERR THashedLRUKCache<I>::ErrDumpWriteCounts(    _In_ const QWORD    ibChunkBase,
     }
 
 HandleError:
-    if ( ccbwc > 0 )
-    {
-        (*pcprintf)( "\n" );
-    }
+    (*pcprintf)( "\n" );
     return err;
 }
 
@@ -6227,33 +6228,28 @@ BOOL THashedLRUKCache<I>::CChunkDumper::FVisitSlot( _In_ const ERR              
                                                     _In_ const CCachedBlockSlotState&   slotstAccepted,
                                                     _In_ const CCachedBlockSlotState&   slotstCurrent )
 {
-    ERR             err         = JET_errSuccess;
     CPRINTF* const  pcprintf    = m_pcprintf;
 
     (*pcprintf)( "        " );
 
-    if ( errChunk < JET_errSuccess && errChunk != JET_errReadLostFlushVerifyFailure )
+    if ( errChunk < JET_errSuccess )
     {
         if ( slotstCurrent.Slno() == (SlotNumber)0 )
         {
-            (*pcprintf)( OSFormat(  "0x%016I64x,0x%01x,0x%02x  %d",
+            (*pcprintf)( OSFormat(  "0x%016I64x,0x%01x  %d\n",
                                     QWORD( slotstCurrent.IbSlab() ),
                                     slotstCurrent.Chno(),
                                     slotstCurrent.Slno(),
                                     errChunk ) );
         }
-
-        Call( errChunk );
     }
 
-
-    CCachedBlockSlot::Dump( slotstCurrent, pcprintf, m_pc->Pfident() );
+    CCachedBlockSlotState::Dump( slotstCurrent, pcprintf, m_pc->Pfident() );
     if ( slotstCurrent.FSuperceded() )
     {
         (*pcprintf)( " (Superceded)" );
     }
 
-HandleError:
     (*pcprintf)( "\n" );
     return fTrue;
 }

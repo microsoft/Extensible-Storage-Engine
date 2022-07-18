@@ -388,10 +388,13 @@ namespace Internal
                             Int64 cachedBlockWriteCountNumberBase,
                             ClusterNumber clusterNumberMin,
                             ClusterNumber clusterNumberMax,
-                            bool ignoreVerificationErrors )
+                            bool ignoreVerificationErrors,
+                            [Out] EsentErrorException^% ex )
                         {
                             ERR                 err     = JET_errSuccess;
                             ::ICachedBlockSlab* pcbs    = NULL;
+
+                            ex = nullptr;
 
                             Call( Pi->ErrLoadCachedBlockSlab(   ff->Pi,
                                                                 offsetInBytes,
@@ -403,11 +406,19 @@ namespace Internal
                                                                 ignoreVerificationErrors ? fTrue : fFalse,
                                                                 &pcbs ) );
 
-                            return gcnew CachedBlockSlab( &pcbs );
-
                         HandleError:
-                            delete pcbs;
-                            throw EseException( err );
+                            if ( err < JET_errSuccess )
+                            {
+                                if ( !pcbs )
+                                {
+                                    throw EseException( err );
+                                }
+                                else
+                                {
+                                    ex = EseException( err );
+                                }
+                            }
+                            return pcbs ? gcnew CachedBlockSlab( &pcbs ) : nullptr;
                         }
 
                         virtual CachedBlockSlab^ CreateCachedBlockSlabWrapper( ICachedBlockSlab^ icbsInner )
