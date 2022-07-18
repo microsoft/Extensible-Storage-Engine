@@ -979,6 +979,9 @@ class CCachedBlockSlot : public CCachedBlock
             C_ASSERT( 55 == sizeof( CCachedBlockSlot ) );
         }
 
+        static void DumpFile(   _In_ const CCachedBlockSlot&    slot,
+                                _In_ CPRINTF* const             pcprintf,
+                                _In_ IFileIdentification* const pfident );
     private:
 
         const UnalignedLittleEndian<QWORD>          m_le_ibSlab;
@@ -1013,6 +1016,10 @@ class CCachedBlockSlotState : public CCachedBlockSlot
         BOOL FClusterUpdated() const { return m_fClusterUpdated; }
         BOOL FSuperceded() const { return m_fSuperceded; }
         BOOL FFirstUpdate() const { return Updno() == (UpdateNumber)1; }
+
+        static void Dump(   _In_ const CCachedBlockSlotState&   slotst,
+                            _In_ CPRINTF* const                 pcprintf,
+                            _In_ IFileIdentification* const     pfident );
 
     protected:
 

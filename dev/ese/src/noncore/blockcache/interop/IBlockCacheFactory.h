@@ -109,7 +109,8 @@ namespace Internal
                         Int64 cachedBlockWriteCountNumberBase,
                         ClusterNumber clusterNumberMin,
                         ClusterNumber clusterNumberMax,
-                        bool ignoreVerificationErrors );
+                        bool ignoreVerificationErrors,
+                        [Out] EsentErrorException^% ex );
 
                     CachedBlockSlab^ CreateCachedBlockSlabWrapper( ICachedBlockSlab^ icbsInner );
 

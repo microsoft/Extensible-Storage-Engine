@@ -258,14 +258,10 @@ const char* OSFormat( _In_ const CCachedBlockSlotState& slotst )
                         slotst.FFirstUpdate() ? 'F' : '_' );
 }
 
-void CCachedBlockSlot::Dump(    _In_ const CCachedBlockSlot&    slot,
-                                _In_ CPRINTF* const             pcprintf,
-                                _In_ IFileIdentification* const pfident )
+void CCachedBlockSlot::DumpFile(    _In_ const CCachedBlockSlot&    slot,
+                                    _In_ CPRINTF* const             pcprintf,
+                                    _In_ IFileIdentification* const pfident )
 {
-    OSTraceSuspendGC();
-    (*pcprintf)( OSFormat( slot ) );
-    OSTraceResumeGC();
-
     if ( slot.Cbid().Cbno() != cbnoInvalid )
     {
         WCHAR   wszAnyAbsPath[ IFileSystemAPI::cchPathMax ]         = { };
@@ -281,6 +277,28 @@ void CCachedBlockSlot::Dump(    _In_ const CCachedBlockSlot&    slot,
                         (QWORD)slot.Cbid().Cbno() * cbCachedBlock,
                         cbCachedBlock );
     }
+}
+
+void CCachedBlockSlot::Dump(    _In_ const CCachedBlockSlot&    slot,
+                                _In_ CPRINTF* const             pcprintf,
+                                _In_ IFileIdentification* const pfident )
+{
+    OSTraceSuspendGC();
+    (*pcprintf)( OSFormat( slot ) );
+    OSTraceResumeGC();
+
+    DumpFile( slot, pcprintf, pfident );
+}
+
+void CCachedBlockSlotState::Dump(   _In_ const CCachedBlockSlotState&   slotst,
+                                    _In_ CPRINTF* const                 pcprintf,
+                                    _In_ IFileIdentification* const     pfident )
+{
+    OSTraceSuspendGC();
+    (*pcprintf)( OSFormat( slotst ) );
+    OSTraceResumeGC();
+
+    DumpFile( slotst, pcprintf, pfident );
 }
 
 //  Block Cache Factory

@@ -417,7 +417,8 @@ namespace Internal
                             Int64 cachedBlockWriteCountNumberBase,
                             ClusterNumber clusterNumberMin,
                             ClusterNumber clusterNumberMax,
-                            bool ignoreVerificationErrors )
+                            bool ignoreVerificationErrors,
+                            [Out] EsentErrorException^% ex )
                         {
                             return factory->LoadCachedBlockSlab(
                                 ff,
@@ -427,7 +428,8 @@ namespace Internal
                                 cachedBlockWriteCountNumberBase, 
                                 clusterNumberMin, 
                                 clusterNumberMax,
-                                ignoreVerificationErrors );
+                                ignoreVerificationErrors,
+                                ex );
                         }
 
                         static CachedBlockSlab^ CreateCachedBlockSlabWrapper( ICachedBlockSlab^ icbsInner )
