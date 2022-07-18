@@ -2924,6 +2924,7 @@ class THashedLRUKCache
                     :   m_pc( pc ),
                         m_pjInner( *ppj ),
                         m_errAppend( JET_errSuccess ),
+                        m_jposAppendLastEnd( jposInvalid ),
                         m_jposLastEnd( jposInvalid ),
                         m_semTruncate( CSyncBasicInfo( "THashedLRUKCache<I>::CJournalWrapper::m_semTruncate" ) )
                 {
@@ -2969,7 +2970,7 @@ class THashedLRUKCache
                                     _Out_               JournalPosition* const  pjpos,
                                     _Out_               JournalPosition* const  pjposEnd ) override
                 {
-                    return ErrAppendEntryInternal( cjb, rgjb, pjpos, pjposEnd );
+                    return ErrAppendEntryInternal( cjb, rgjb, fFalse, pjpos, pjposEnd );
                 }
 
                 ERR ErrFlush() override
@@ -2977,22 +2978,22 @@ class THashedLRUKCache
                     ERR             err                     = JET_errSuccess;
                     JournalPosition jposDurableForWriteBack = jposInvalid;
                     JournalPosition jposDurable             = jposInvalid;
-                    JournalPosition jposLastEnd             = jposInvalid;
+                    JournalPosition jposAppendLastEnd       = jposInvalid;
 
                     //  if this flush would not advance the durable for write back or durable pointers then ignore it
 
                     Call( m_pjInner->ErrGetProperties( NULL, &jposDurableForWriteBack, &jposDurable, NULL, NULL ) );
 
-                    jposLastEnd = m_jposLastEnd;
+                    jposAppendLastEnd = m_jposAppendLastEnd;
 
-                    if ( jposDurableForWriteBack >= jposDurable && jposDurable >= jposLastEnd )
+                    if ( jposDurableForWriteBack >= jposDurable && ( jposDurable >= jposAppendLastEnd || jposAppendLastEnd == jposInvalid ) )
                     {
                         OSTrace(    JET_tracetagBlockCacheOperations,
-                                    OSFormat(   "C=%s Flush Ignored (jposDurableForWriteback=0x%016I64x, jposDurable=0x%016I64x, jposLastEnd=0x%016I64x)",
+                                    OSFormat(   "C=%s Flush Ignored (jposDurableForWriteback=0x%016I64x, jposDurable=0x%016I64x, jposAppendLastEnd=0x%016I64x)",
                                                 OSFormatFileId( m_pc ),
                                                 QWORD( jposDurableForWriteBack ),
                                                 QWORD( jposDurable ),
-                                                QWORD( jposLastEnd ) ) );
+                                                QWORD( jposAppendLastEnd ) ) );
 
                         Error( JET_errSuccess );
                     }
@@ -3060,6 +3061,7 @@ class THashedLRUKCache
 
                 ERR ErrAppendEntryInternal( _In_                const size_t            cjb,
                                             _In_reads_( cjb )   CJournalBuffer* const   rgjb,
+                                            _In_                const BOOL              fFlush,
                                             _Out_               JournalPosition* const  pjpos,
                                             _Out_               JournalPosition* const  pjposEnd )
                 {
@@ -3088,6 +3090,12 @@ class THashedLRUKCache
                         {
                             HandleJournalFull( &group );
                         }
+                    }
+
+                    if ( !fFlush )
+                    {
+                        AtomicCompareExchange( (QWORD*)&m_jposAppendLastEnd, (QWORD)jposInvalid, (QWORD)*pjposEnd );
+                        AtomicExchangeMax( (QWORD*)&m_jposAppendLastEnd, (QWORD)*pjposEnd );
                     }
 
                     AtomicCompareExchange( (QWORD*)&m_jposLastEnd, (QWORD)jposInvalid, (QWORD)*pjposEnd );
@@ -3255,7 +3263,7 @@ class THashedLRUKCache
 
                     {
                         CJournalBuffer rgjb[] = { { pfje->Cb(), (const BYTE*)pfje }, };
-                        Call( ErrAppendEntryInternal( _countof( rgjb ), rgjb, &jposFlush, &jposFlushEnd ) );
+                        Call( ErrAppendEntryInternal( _countof( rgjb ), rgjb, fTrue, &jposFlush, &jposFlushEnd ) );
                     }
 
                     OSTrace(    JET_tracetagBlockCacheOperations,
@@ -3287,6 +3295,7 @@ class THashedLRUKCache
                 IJournal* const             m_pjInner;
                 CMeteredSection             m_msAppend;
                 ERR                         m_errAppend;
+                volatile JournalPosition    m_jposAppendLastEnd;
                 volatile JournalPosition    m_jposLastEnd;
                 CSemaphore                  m_semTruncate;
         };
