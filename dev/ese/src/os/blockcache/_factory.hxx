@@ -522,7 +522,7 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrDumpCacheFile(  _In_z_  const WCHAR* con
 
     Call( ErrOSFSCreate( &fsconfig, (IFileSystemAPI**)&pfsf ) );
 
-    Call( pfsf->ErrFileOpen( wszFilePath, IFileAPI::fmfNone, (IFileAPI**)&pff ) );
+    Call( pfsf->ErrFileOpen( wszFilePath, IFileAPI::fmfReadOnly, (IFileAPI**)&pff ) );
 
     Call( CCacheFactory::ErrDump( pfsf, &g_fident, &fsconfig, &pcconfig, &g_ctm, &pff, pcprintf ) );
 
