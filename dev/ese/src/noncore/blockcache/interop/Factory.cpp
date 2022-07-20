@@ -15,6 +15,11 @@ namespace Internal
                 {
                     public:
 
+                        static void DisableLeakDetection()
+                        {
+                            RFSSetKnownResourceLeak();
+                        }
+
                         static IDisposable^ CreateOSLayer()
                         {
                             return gcnew OSLayer();
