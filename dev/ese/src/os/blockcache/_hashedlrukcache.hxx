@@ -96,6 +96,8 @@ class THashedLRUKCache
         friend CHashedLRUKCacheThreadLocalStorage<I>;
         friend CHashedLRUKCachedFileTableEntry<I>;
 
+        using CCachedBlockPool = TPool<BYTE[ cbCachedBlock ], fFalse>;
+
         //  Request context.
 
         class CRequest
@@ -1238,14 +1240,14 @@ class THashedLRUKCache
 
                     *ppwb = NULL;
 
-                    Alloc( rgbData = (BYTE*)PvOSMemoryPageAlloc( cbCachedBlock, NULL ) );
+                    Alloc( rgbData = (BYTE*)CCachedBlockPool::PvAllocate( fFalse ) );
                     Alloc( pwb = new CWriteBack( pc, prequest, pcbs, slot, pcfte, offsets, &rgbData ) );
 
                     *ppwb = pwb;
                     pwb = NULL;
 
                 HandleError:
-                    OSMemoryPageFree( rgbData );
+                    CCachedBlockPool::Free( (void**)&rgbData );
                     return err;
                 }
 
@@ -1281,8 +1283,7 @@ class THashedLRUKCache
                 {
                     m_msigRead.Wait();
                     m_msigWrite.Wait();
-                    OSMemoryPageFree( m_rgbData );
-                    m_rgbData = NULL;
+                    CCachedBlockPool::Free( (void**)&m_rgbData );
                     m_pc->ReleaseCachedFile( &m_pcfte );
                 }
 
@@ -6384,7 +6385,7 @@ ERR THashedLRUKCache<I>::ErrAnalyzeJournal( _In_ const BOOL fAll )
 
     //  allocate temp storage to validate cluster references
 
-    Alloc( m_rgbCluster = (BYTE*)PvOSMemoryPageAlloc( cbCachedBlock, NULL ) );
+    Alloc( m_rgbCluster = (BYTE*)CCachedBlockPool::PvAllocate() );
 
     //  init our cluster reference hash table
 
@@ -6448,7 +6449,7 @@ HandleError:
     {
         m_clusterReferenceHash.Term();
     }
-    OSMemoryPageFree( m_rgbCluster );
+    CCachedBlockPool::Free( (void**)&m_rgbCluster );
     Assert( !FAnyOpenSlab() );
     return err;
 }

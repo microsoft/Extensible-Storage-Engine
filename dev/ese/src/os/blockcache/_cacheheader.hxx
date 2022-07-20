@@ -53,6 +53,10 @@ class CCacheHeader : CBlockCacheHeaderHelpers  // ch
 
     private:
 
+        using CCacheHeaderPool = TPool<BYTE[ cbCacheHeader ], fFalse>;
+
+    private:
+
         LittleEndian<ULONG>             m_le_ulChecksum;            //  offset 0:  checksum
         BYTE                            m_rgbHeaderType[ cbGuid ];  //  header type
         LittleEndian<VolumeId>          m_le_volumeid;              //  volume id when created
@@ -219,11 +223,7 @@ HandleError:
 
 INLINE void* CCacheHeader::operator new( _In_ const size_t cb )
 {
-#ifdef MEM_CHECK
-    return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else  //  !MEM_CHECK
-    return PvOSMemoryPageAlloc( cb, NULL );
-#endif  //  MEM_CHECK
+    return CCacheHeaderPool::PvAllocate();
 }
 
 INLINE void* CCacheHeader::operator new( _In_ const size_t cb, _In_ const void* const pv )
@@ -233,7 +233,8 @@ INLINE void* CCacheHeader::operator new( _In_ const size_t cb, _In_ const void* 
 
 INLINE void CCacheHeader::operator delete( _In_opt_ void* const pv )
 {
-    OSMemoryPageFree( pv );
+    void* pvT = pv;
+    CCacheHeaderPool::Free( &pvT );
 }
 
 #pragma pop_macro( "new" )

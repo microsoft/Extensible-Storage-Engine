@@ -59,6 +59,10 @@ class CCachedBlockChunk : CBlockCacheHeaderHelpers  // cbc
 
     private:
 
+        using CChunkPool = TPool<BYTE[ cbChunk ], fFalse>;
+
+    private:
+
         LittleEndian<ULONG>                 m_le_ulChecksum;        //  offset 0:  checksum
         BYTE                                m_rgbZero[ 4 ];         //  unused because it is not protected by the ECC
         LittleEndian<ClusterNumber>         m_le_clno;              //  location of this chunk
@@ -175,7 +179,8 @@ INLINE ERR CCachedBlockChunk::ErrFinalize()
 
 INLINE void CCachedBlockChunk::operator delete( _In_opt_ void* const pv )
 {
-    OSMemoryPageFree( pv );
+    void* pvT = pv;
+    CChunkPool::Free( &pvT );
 }
 
 INLINE ERR CCachedBlockChunk::ErrDump( _In_ CPRINTF* const pcprintf )
@@ -194,11 +199,7 @@ INLINE ERR CCachedBlockChunk::ErrDump( _In_ CPRINTF* const pcprintf )
 
 INLINE void* CCachedBlockChunk::operator new( _In_ const size_t cb )
 {
-#ifdef MEM_CHECK
-    return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else  //  !MEM_CHECK
-    return PvOSMemoryPageAlloc( cb, NULL );
-#endif  //  MEM_CHECK
+    return CChunkPool::PvAllocate();
 }
 
 INLINE void* CCachedBlockChunk::operator new( _In_ const size_t cb, _In_ const void* const pv )

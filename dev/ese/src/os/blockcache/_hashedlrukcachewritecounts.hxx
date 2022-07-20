@@ -56,7 +56,7 @@ class CCachedBlockWriteCounts : CBlockCacheHeaderHelpers  // cbwcs
 
         friend class CBlockCacheHeaderHelpers;
 
-        enum { cbStates = cbBlock };
+        enum { cbWriteCounts = cbBlock };
 
         CCachedBlockWriteCounts();
 
@@ -67,13 +67,17 @@ class CCachedBlockWriteCounts : CBlockCacheHeaderHelpers  // cbwcs
 
     private:
 
+        using CWriteCountsPool = TPool<BYTE[ cbWriteCounts ], fFalse>;
+
+    private:
+
         LittleEndian<ULONG>                 m_le_ulChecksum;    //  offset 0:  checksum
         BYTE                                m_rgbZero[ 4 ];     //  unused because it is not protected by the ECC
         LittleEndian<ClusterNumber>         m_le_clno;          //  location of these states
         LittleEndian<CachedBlockWriteCount> m_le_cbwc;          //  write set write count
         LittleEndian<DWORD>                 m_le_dwUniqueId;    //  write set unique id
 
-        static const size_t                 s_cbCachedBlockWriteCounts  =   cbStates
+        static const size_t                 s_cbCachedBlockWriteCounts  =   cbWriteCounts
                                                                             - sizeof( m_le_ulChecksum )
                                                                             - sizeof( m_rgbZero )
                                                                             - sizeof( m_le_clno )
@@ -95,7 +99,7 @@ struct CBlockCacheHeaderTraits<CCachedBlockWriteCounts>
 INLINE CCachedBlockWriteCounts::CCachedBlockWriteCounts()
 {
     C_ASSERT( 0 == offsetof( CCachedBlockWriteCounts, m_le_ulChecksum ) );
-    C_ASSERT( cbStates == sizeof( CCachedBlockWriteCounts ) );
+    C_ASSERT( cbWriteCounts == sizeof( CCachedBlockWriteCounts ) );
     C_ASSERT( 1019 == _countof( m_rgcbwc ) );
 }
 
@@ -205,7 +209,8 @@ INLINE ERR CCachedBlockWriteCounts::ErrFinalize(    _In_ const QWORD            
 
 INLINE void CCachedBlockWriteCounts::operator delete( _In_opt_ void* const pv )
 {
-    OSMemoryPageFree( pv );
+    void* pvT = pv;
+    CWriteCountsPool::Free( &pvT );
 }
 
 INLINE ERR CCachedBlockWriteCounts::ErrDump( _In_ CPRINTF* const pcprintf )
@@ -225,11 +230,7 @@ INLINE ERR CCachedBlockWriteCounts::ErrDump( _In_ CPRINTF* const pcprintf )
 
 INLINE void* CCachedBlockWriteCounts::operator new( _In_ const size_t cb )
 {
-#ifdef MEM_CHECK
-    return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else  //  !MEM_CHECK
-    return PvOSMemoryPageAlloc( cb, NULL );
-#endif  //  MEM_CHECK
+    return CWriteCountsPool::PvAllocate();
 }
 
 INLINE void* CCachedBlockWriteCounts::operator new( _In_ const size_t cb, _In_ const void* const pv )

@@ -66,6 +66,10 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
 
     private:
 
+        using CCachedFileHeaderPool = TPool<BYTE[ cbCachedFileHeader ], fFalse>;
+
+    private:
+
         LittleEndian<ULONG>             m_le_ulChecksum;                //  offset 0:  checksum
         BYTE                            m_rgbHeaderType[ cbGuid ];      //  header type
         LittleEndian<VolumeId>          m_le_volumeid;                  //  volume id when last attached to the caching file
@@ -311,11 +315,7 @@ HandleError:
 
 INLINE void* CCachedFileHeader::operator new( _In_ const size_t cb )
 {
-#ifdef MEM_CHECK
-    return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else  //  !MEM_CHECK
-    return PvOSMemoryPageAlloc( cb, NULL );
-#endif  //  MEM_CHECK
+    return CCachedFileHeaderPool::PvAllocate();
 }
 
 INLINE void* CCachedFileHeader::operator new( _In_ const size_t cb, _In_ const void* const pv )
@@ -325,7 +325,8 @@ INLINE void* CCachedFileHeader::operator new( _In_ const size_t cb, _In_ const v
 
 INLINE void CCachedFileHeader::operator delete( _In_opt_ void* const pv )
 {
-    OSMemoryPageFree( pv );
+    void* pvT = pv;
+    CCachedFileHeaderPool::Free( &pvT );
 }
 
 INLINE ERR CCachedFileHeader::ErrValidate(  _In_        const ERR                          errInvalidType,
