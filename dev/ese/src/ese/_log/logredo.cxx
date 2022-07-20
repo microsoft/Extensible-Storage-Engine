@@ -3156,7 +3156,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             err = ErrNDValidateSetExternalHeader( csr.Cpage(), &data );
             if ( err < JET_errSuccess )
             {
-                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRecoveryRedoLogCorruption, L"630fa9f1-afcd-4998-bb82-db992a6eb22f" );
+                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"630fa9f1-afcd-4998-bb82-db992a6eb22f" );
                 Call( err );
             }
 
