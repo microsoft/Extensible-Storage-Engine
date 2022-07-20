@@ -1199,8 +1199,8 @@ INLINE ERR TCachedBlockSlab<I>::ErrInvalidateSlots( _In_ const ICachedBlockSlab:
                                             CCachedBlock(   slotstCurrent.Cbid(),
                                                             slotstCurrent.Clno(),
                                                             slotstCurrent.DwECC(),
-                                                            tonoInvalid,
-                                                            tonoInvalid,
+                                                            slotstCurrent.Tono0(),
+                                                            slotstCurrent.Tono1(),
                                                             fFalse,
                                                             fFalse,
                                                             fFalse,
@@ -1356,8 +1356,8 @@ INLINE ERR TCachedBlockSlab<I>::ErrEvictSlots(  _In_ const ICachedBlockSlab::Pfn
                                             CCachedBlock(   slotstCurrent.Cbid(),
                                                             slotstCurrent.Clno(),
                                                             slotstCurrent.DwECC(),
-                                                            tonoInvalid,
-                                                            tonoInvalid,
+                                                            slotstCurrent.Tono0(),
+                                                            slotstCurrent.Tono1(),
                                                             fFalse,
                                                             fFalse,
                                                             fFalse,
@@ -1911,6 +1911,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotForNewImage(  _In_                    
     BOOL                    fFoundEmpty     = fFalse;
     size_t                  icbcEmpty       = m_ccbc;
     size_t                  icblEmpty       = CCachedBlockChunk::Ccbl();
+    TouchNumber             tono0Empty      = tonoInvalid;
     CCachedBlockSlotState   slotstCurrent;
     DWORD                   dwECC           = 0;
     TouchNumber             tonoNew         = tonoInvalid;
@@ -1955,24 +1956,27 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotForNewImage(  _In_                    
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
-    //  try to find an empty slot to hold the new image
+    //  try to find an empty slot to hold the new image, prefering least recently used slots to ensure we don't leave
+    //  slots with very old updnos that could cause problems due to wrap around
 
-    for ( size_t icbc = 0; icbc < m_ccbc && !fFoundEmpty; icbc++ )
+    for ( size_t icbc = 0; icbc < m_ccbc; icbc++ )
     {
         CCachedBlockChunk* const    pcbc    = Pcbc( icbc );
         const size_t                ccbl    = CCachedBlockChunk::Ccbl();
 
-        for ( size_t icbl = 0; icbl < ccbl && !fFoundEmpty; icbl++ )
+        for ( size_t icbl = 0; icbl < ccbl; icbl++ )
         {
             CCachedBlock* const pcbl = pcbc->Pcbl( icbl );
 
-            //  the slot is empty if it is invalid
-
-            if ( !pcbl->FValid() )
+            if (    !pcbl->FValid() &&
+                    (   !fFoundEmpty ||
+                        ( tono0Empty != tonoInvalid && pcbl->Tono0() == tonoInvalid ) ||
+                        ( tono0Empty != tonoInvalid && tono0Empty > pcbl->Tono0() ) ) )
             {
                 fFoundEmpty = fTrue;
                 icbcEmpty = icbc;
                 icblEmpty = icbl;
+                tono0Empty = pcbl->Tono0();
             }
         }
     }
@@ -2038,6 +2042,37 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotForNewImage(  _In_                    
     err = ErrVerifySlotUpdate( slotstCurrent, *pslot );
     CallS( err );
     Call( err );
+
+    //  if we are setting an update number then we must guarantee that the set of all updnos for this cached block are
+    //  valid and cannot overflow the wrap around aware comparison or we will malfunction
+
+    if ( pslot->Updno() != updnoInvalid )
+    {
+        CCachedBlockSlotState slotst;
+
+        for ( size_t icbc = 0; icbc < m_ccbc; icbc++ )
+        {
+            for ( size_t icbl = 0; icbl < CCachedBlockChunk::Ccbl(); icbl++ )
+            {
+                GetSlotState( icbc, icbl, &slotst );
+
+                if (    slotst.Cbid().Volumeid() == pslot->Cbid().Volumeid() &&
+                        slotst.Cbid().Fileid() == pslot->Cbid().Fileid() &&
+                        slotst.Cbid().Fileserial() == pslot->Cbid().Fileserial() &&
+                        slotst.Cbid().Cbno() == pslot->Cbid().Cbno() )
+                {
+                    const size_t dupdnoMax = m_ccbc * CCachedBlockChunk::Ccbl();
+
+                    if ( pslot->Updno() > slotst.Updno() + dupdnoMax || slotst.Updno() > pslot->Updno() + dupdnoMax )
+                    {
+                        //  make this an assert until existing prod caches are cleaned up (7/18/2022)
+                        AssertSz( fFalse, "HashedLRUKCacheSlotUpdateIllegalUpdnoSpan" );
+                        ////Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotUpdateIllegalUpdnoSpan" ) );
+                    }
+                }
+            }
+        }
+    }
 
 HandleError:
     if ( err < JET_errSuccess )
@@ -2234,12 +2269,8 @@ INLINE ERR TCachedBlockSlab<I>::ErrVerifySlot( _In_ const CCachedBlockSlot& slot
         Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotInvalidTono" ) );
     }
 
-    //  the slot must have a valid touch number iff valid
+    //  the slot must have a valid touch number if valid
 
-    if ( !slot.FValid() && ( slot.Tono0() != tonoInvalid || slot.Tono1() != tonoInvalid ) )
-    {
-        Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotIllegalTono" ) );
-    }
     if ( slot.FValid() && ( slot.Tono0() == tonoInvalid && slot.Tono1() == tonoInvalid ) )
     {
         Error( ErrBlockCacheInternalError( "HashedLRUKCacheSlotMissingTono" ) );
@@ -2918,9 +2949,14 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ co
     //
     //  The replacement order is:  !FValid, FSuperceded, touched once by touch number ascending, and then touched twice
     //  by previous touch number ascending.
+    //
+    //  If both slots are !FValid or FSuperceded then we will prefer the least recently used slot to ensure we don't
+    //  leave slots with very old updnos that could cause problems due to wrap around
 
     const BOOL                  fValidA = pcblA->FValid();
     const BOOL                  fValidB = pcblB->FValid();
+    const TouchNumber           tono0A  = pcblA->Tono0();
+    const TouchNumber           tono0B  = pcblB->Tono0();
 
     if ( !fValidA & fValidB )
     {
@@ -2932,6 +2968,27 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ co
     }
     if ( !fValidA & !fValidB )
     {
+        if ( tono0A == tonoInvalid && tono0B != tonoInvalid )
+        {
+            return -1;
+        }
+        if ( tono0A != tonoInvalid && tono0B == tonoInvalid )
+        {
+            return 1;
+        }
+
+        if ( tono0A != tonoInvalid && tono0B != tonoInvalid )
+        {
+            if ( tono0A < tono0B )
+            {
+                return -1;
+            }
+            if ( tono0A > tono0B )
+            {
+                return 1;
+            }
+        }
+
         if ( islotA < islotB )
         {
             return -1;
@@ -2940,6 +2997,7 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ co
         {
             return 1;
         }
+
         return 0;
     }
 
@@ -2956,6 +3014,27 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ co
     }
     if ( fSupercededA & fSupercededB )
     {
+        if ( tono0A == tonoInvalid && tono0B != tonoInvalid )
+        {
+            return -1;
+        }
+        if ( tono0A != tonoInvalid && tono0B == tonoInvalid )
+        {
+            return 1;
+        }
+
+        if ( tono0A != tonoInvalid && tono0B != tonoInvalid )
+        {
+            if ( tono0A < tono0B )
+            {
+                return -1;
+            }
+            if ( tono0A > tono0B )
+            {
+                return 1;
+            }
+        }
+
         if ( islotA < islotB )
         {
             return -1;
@@ -2964,12 +3043,11 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ co
         {
             return 1;
         }
+
         return 0;
     }
 
-    const TouchNumber   tono0A  = pcblA->Tono0();
     const TouchNumber   tono1A  = pcblA->Tono1();
-    const TouchNumber   tono0B  = pcblB->Tono0();
     const TouchNumber   tono1B  = pcblB->Tono1();
 
     if ( ( tono0A == tono1A ) & ( tono0B != tono1B ) )
@@ -2998,6 +3076,7 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ co
     {
         return 1;
     }
+
     return 0;
 }
 
