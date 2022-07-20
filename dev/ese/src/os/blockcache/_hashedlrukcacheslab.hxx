@@ -694,6 +694,10 @@ class TCachedBlockSlab  //  cbs
 
     private:
 
+        using CSlabPool = TPool<CCachedBlockChunk[], fFalse>;
+
+    private:
+
         IFileFilter* const                              m_pff;
         const QWORD                                     m_ibSlab;
         const QWORD                                     m_cbSlab;
@@ -733,7 +737,7 @@ INLINE TCachedBlockSlab<I>::~TCachedBlockSlab()
     delete[] m_rgcUpdate;
     delete[] m_rgfDirty;
     delete[] m_rgerrChunk;
-    OSMemoryPageFree( m_rgcbc );
+    CSlabPool::Free( (size_t)m_cbSlab, (void**)&m_rgcbc );
 }
 
 template< class I  >
@@ -1636,7 +1640,7 @@ INLINE ERR TCachedBlockSlab<I>::ErrInit()
 
     //  read in all the cached block chunks in the slab
 
-    Alloc( m_rgcbc = (CCachedBlockChunk*)PvOSMemoryPageAlloc( (size_t)m_cbSlab, NULL ) );
+    Alloc( m_rgcbc = (CCachedBlockChunk*)CSlabPool::PvAllocate( (size_t)m_cbSlab, fFalse ) );
     Alloc( m_rgerrChunk = new ERR[ m_ccbc ] );
     errRead = m_pff->ErrIORead( *tcScope, m_ibSlab, (DWORD)m_cbSlab, (BYTE*)m_rgcbc, qosIONormal );
     Call( ErrIgnoreVerificationErrors( errRead ) );

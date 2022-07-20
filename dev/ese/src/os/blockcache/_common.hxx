@@ -5,6 +5,7 @@
 
 //  Block Cache Lock Ranks
 
+const INT rankPool = 0;
 const INT rankPresenceFilterSlabs = 0;
 const INT rankPresenceFilter = 0;
 const INT rankDestagingFiles = 0;
@@ -17,7 +18,7 @@ const INT rankClusterReferenceHash = 0;
 const INT rankClusterWrites = 0;
 const INT rankSlabWrites = 0;
 const INT rankSlabWriteBackHash = 0;
-const INT rankSlabHash = 0;
+const INT rankSlabHash = 1;
 const INT rankCachedBlockWriteCounts = 0;
 const INT rankCacheRepository = 0;
 const INT rankRegisterIFilePerfAPI = 0;
@@ -334,3 +335,192 @@ INLINE const char* OSFormatFileId( _In_ ICache* const pc )
 
     return OSFormat( volumeid, fileid );
 }
+
+
+//  Pool of objects with a minimum lifetime
+
+template< class T, BOOL fHeap = fTrue, TICK dtickMin = 10 * 1000 >
+class TPool
+{
+    public:
+
+        static void* PvAllocate( _In_ const BOOL fZero = !fHeap )
+        {
+            return PvAllocate( sizeof( T ), fZero );
+        }
+
+        static void* PvAllocate( _In_ const size_t cb, _In_ const BOOL fZero = !fHeap )
+        {
+            void* pv = NULL;
+
+            if ( s_state.m_il.PrevMost() )
+            {
+                s_state.m_crit.Enter();
+
+                CHeader* pheader = s_state.m_il.PrevMost();
+
+                pheader = pheader && pheader->Cb() >= cb ? pheader : NULL;
+
+                if ( pheader )
+                {
+                    s_state.m_il.Remove( pheader );
+                }
+
+                s_state.m_crit.Leave();
+
+                if ( pheader )
+                {
+                    pheader->~CHeader();
+
+                    pv = pheader;
+
+                    if ( fZero )
+                    {
+                        memset( pv, 0, cb );
+                    }
+                }
+            }
+
+            if ( !pv )
+            {
+                pv = PvAllocate_( cb );
+            }
+
+            return pv;
+        }
+
+        static void Free( _Inout_ void** const ppv )
+        {
+            Free( sizeof( T ), ppv );
+        }
+
+        static void Free( _In_ const size_t cb, _Inout_ void** const ppv )
+        {
+            CInvasiveList<CHeader, CHeader::OffsetOfILE>    il;
+            void*                                           pv      = ppv ? *ppv : NULL;
+            CHeader*                                        pheader =   NULL;
+
+            if ( ppv )
+            {
+                *ppv = NULL;
+            }
+
+            if ( pv && cb >= sizeof( CHeader ) )
+            {
+                pheader = new( pv ) CHeader( cb );
+                pv = NULL;
+            }
+
+            s_state.m_crit.Enter();
+
+            if ( pheader )
+            {
+                s_state.m_il.InsertAsPrevMost( pheader );
+                pheader = NULL;
+            }
+
+            while ( s_state.m_il.NextMost() && s_state.m_il.NextMost()->FRelease() )
+            {
+                pheader = s_state.m_il.NextMost();
+                s_state.m_il.Remove( pheader );
+                il.InsertAsNextMost( pheader );
+                pheader = NULL;
+            }
+
+            s_state.m_crit.Leave();
+
+            s_state.Release( il );
+
+            Free_( pv );
+        }
+
+    private:
+
+        static void* PvAllocate_( _In_ const size_t cb )
+        {
+            return fHeap ?
+                PvOSMemoryHeapAlloc( cb ) :
+                PvOSMemoryPageAlloc( roundup( cb, OSMemoryPageCommitGranularity() ), NULL );
+        }
+
+        static void Free_( _In_ void* const pv )
+        {
+            fHeap ? OSMemoryHeapFree( pv ) : OSMemoryPageFree( pv );
+        }
+
+        static TICK TickNow_()
+        {
+            return TickOSTimeCurrent();
+        }
+
+        static TICK DtickElapsed_( _In_ const TICK tickStart )
+        {
+            return DtickDelta( tickStart, TickNow_() );
+        }
+
+    private:
+
+        class CHeader
+        {
+            public:
+
+                CHeader( _In_ const size_t cb )
+                    :   m_cb( cb ),
+                        m_tickRelease( TickNow_() )
+                {
+                }
+
+                size_t Cb() const { return m_cb; }
+
+                BOOL FRelease() const
+                {
+                    return DtickElapsed_( m_tickRelease ) >= dtickMin;
+                }
+
+                static SIZE_T OffsetOfILE() { return OffsetOf( CHeader, m_ile ); }
+
+            private:
+
+                typename CInvasiveList<CHeader, CHeader::OffsetOfILE>::CElement m_ile;
+                const size_t                                                    m_cb;
+                const TICK                                                      m_tickRelease;
+        };
+
+    private:
+
+        class CState
+        {
+            public:
+
+                CState()
+                    :   m_crit( CLockBasicInfo( CSyncBasicInfo( "TPool<T, fHeap, dtickMin>::CState::m_crit" ), rankPool, 0 ) )
+                {
+                }
+
+                ~CState()
+                {
+                    Release( m_il );
+                }
+
+                static void Release( CInvasiveList<CHeader, CHeader::OffsetOfILE>& il )
+                {
+                    while ( CHeader* const pheader = il.PrevMost() )
+                    {
+                        il.Remove( pheader );
+                        pheader->~CHeader();
+
+                        Free_( pheader );
+                    }
+                }
+
+                CCriticalSection                                                m_crit;
+                typename CCountedInvasiveList<CHeader, CHeader::OffsetOfILE>    m_il;
+        };
+
+    private:
+
+        static CState   s_state;
+};
+
+template< class T, BOOL fHeap, TICK dtickMin >
+typename TPool<T, fHeap, dtickMin>::CState TPool<T, fHeap, dtickMin>::s_state;

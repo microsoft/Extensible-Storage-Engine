@@ -72,6 +72,10 @@ class CJournalSegmentHeader : CBlockCacheHeaderHelpers  // jsh
 
     private:
 
+        using CJournalSegmentPool = TPool<BYTE[ cbJournalSegment ], fFalse>;
+
+    private:
+
         LittleEndian<ULONG>             m_le_ulChecksum;        //  offset 0:  checksum
         BYTE                            m_rgbZero[ 4 ];         //  unused because it is not protected by the ECC
         LittleEndian<ClusterNumber>     m_le_clno;              //  location of this segment
@@ -198,7 +202,8 @@ INLINE ERR CJournalSegmentHeader::ErrFinalize()
 
 INLINE void CJournalSegmentHeader::operator delete( _In_opt_ void* const pv )
 {
-    OSMemoryPageFree( pv );
+    void* pvT = pv;
+    CJournalSegmentPool::Free( &pvT );
 }
 
 INLINE ERR CJournalSegmentHeader::ErrDump( _In_ CPRINTF* const pcprintf )
@@ -220,11 +225,7 @@ INLINE ERR CJournalSegmentHeader::ErrDump( _In_ CPRINTF* const pcprintf )
 
 INLINE void* CJournalSegmentHeader::operator new( _In_ const size_t cb )
 {
-#ifdef MEM_CHECK
-    return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else  //  !MEM_CHECK
-    return PvOSMemoryPageAlloc( cb, NULL );
-#endif  //  MEM_CHECK
+    return CJournalSegmentPool::PvAllocate();
 }
 
 INLINE void* CJournalSegmentHeader::operator new( _In_ const size_t cb, _In_ const void* const pv )

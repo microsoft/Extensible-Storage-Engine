@@ -84,6 +84,10 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
 
     private:
 
+        using CCacheHeaderPool = TPool<BYTE[ cbCacheHeader ], fFalse>;
+
+    private:
+
         LittleEndian<ULONG> m_le_ulChecksum;            //  offset 0:  checksum
         BYTE                m_rgbHeaderType[ cbGuid ];  //  header type
         LittleEndian<QWORD> m_le_ibJournal;             //  CJournalSegmentHeader array offset
@@ -246,7 +250,8 @@ HandleError:
 
 INLINE void CHashedLRUKCacheHeader::operator delete( _In_opt_ void* const pv )
 {
-    OSMemoryPageFree( pv );
+    void* pvT = pv;
+    CCacheHeaderPool::Free( &pvT );
 }
 
 INLINE ERR CHashedLRUKCacheHeader::ErrDump( _In_ CPRINTF* const pcprintf )
@@ -291,11 +296,7 @@ INLINE ERR CHashedLRUKCacheHeader::ErrDump( _In_ CPRINTF* const pcprintf )
 
 INLINE void* CHashedLRUKCacheHeader::operator new( _In_ const size_t cb )
 {
-#ifdef MEM_CHECK
-    return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else  //  !MEM_CHECK
-    return PvOSMemoryPageAlloc( cb, NULL );
-#endif  //  MEM_CHECK
+    return CCacheHeaderPool::PvAllocate();
 }
 
 INLINE void* CHashedLRUKCacheHeader::operator new( _In_ const size_t cb, _In_ const void* const pv )
