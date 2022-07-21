@@ -5970,7 +5970,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define errBFIPageTouchTooRecent            -264  /*  the page could not be flushed because a recent page touch would offend the waypoint */
 #define errBFICheckpointWorkRemaining       -266  /*  checkpoint depth maintenance is not finished due to page flushes or dependency flushes remaining */
 #define errBFIPageRemapNotReVerified        -267  /*  page is remapped after a write, which means it needs to be reverified */
-#define errBFIReqSyncFlushMapWriteFailed    -268  /*  required synchronous write to the flush map failed  */
+#define errBFIReqSyncFlushMapWriteFailed    -268  /*  UNUSED: required synchronous write to the flush map failed  */
 #define errBFIPageFlushPendingHungIO        -269  /*  page is currently being written and the write I/O is hung */
 #define errBFIPageFaultPendingHungIO        -270  /*  page is currently being read and the read I/O is hung */
 #define errBFIPageFlushPendingSlowIO        -271  /*  page is currently being written and the write I/O is slow */
