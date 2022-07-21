@@ -21769,6 +21769,7 @@ ERR ErrBFIPrepareFlushPage(
         {
             pgftPageCurrent = cpage.Pgft();
 
+            Assert( !fIsPagePatching || fIsDirty );
             if ( pbf->bfdf > bfdfClean )
             {
                 //  There is a subtlety in picking the flush map to use as the basis for the next 
@@ -21791,7 +21792,9 @@ ERR ErrBFIPrepareFlushPage(
 
                 if ( fIsPagePatching )
                 {
-                    pgftPageNext = CPAGE::pgftUnknown;
+                    //  Stamp the page with the expected flush state from the map, so we don't lose the ability
+                    //  to detect lost flushes if the patching write doesn't make it.
+                    pgftPageNext = ( pgftMapCurrent != CPAGE::pgftUnknown ) ? pgftMapCurrent : CPAGE::PgftGetNextFlushType( CPAGE::pgftUnknown );
                 }
                 else if ( ( pgftMapCurrent == CPAGE::pgftUnknown ) && ( pgftPageCurrent == CPAGE::pgftUnknown ) )
                 {
@@ -21826,6 +21829,7 @@ ERR ErrBFIPrepareFlushPage(
         }
         else
         {
+            Assert( !fIsPagePatching );
             pgftPageCurrent = CPAGE::pgftUnknown;
             pgftPageNext = CPAGE::pgftUnknown;
         }
@@ -21840,17 +21844,9 @@ ERR ErrBFIPrepareFlushPage(
 
         // Make sure the relevant lgpos's are consistent with the required range stamped in the DB header.
         OnDebug( BFIAssertReqRangeConsistentWithLgpos( pfmp, pbf->lgposOldestBegin0, pbf->lgposModify, "PrepareFlushPage" ) );
-
-        //  Force a sync write of the affected flush map page if required.
-
-        if ( fIsPagePatching && fIsFmRecoverable )
-        {
-            if ( pfm->ErrSetPgnoFlushTypeAndWait( pbf->pgno, CPAGE::pgftUnknown, dbtimeNil ) < JET_errSuccess )
-            {
-                Error( ErrERRCheck( errBFIReqSyncFlushMapWriteFailed ) );
-            }
-        }
     }
+
+    Call( ErrFaultInjection( 117932 ) );
 
     //  prepare to issue I/O against this IFMP for this thread.  if we cannot
     //  do this then release our range lock and fail with the error
@@ -21886,8 +21882,7 @@ HandleError:
             err != errBFIPageFlushPendingSlowIO &&
             err != errBFIPageFlushPendingHungIO &&
             err != errBFLatchConflict &&
-            err != errBFIPageFlushDisallowedOnIOThread &&
-            err != errBFIReqSyncFlushMapWriteFailed )
+            err != errBFIPageFlushDisallowedOnIOThread )
     {
         //  set this BF to the appropriate error state
 
@@ -24669,12 +24664,11 @@ void BFISyncWriteComplete(  const ERR           err,
     {
         if ( err >= JET_errSuccess )
         {
-            CPAGE::PageFlushType pgft = CPAGE::pgftUnknown;
+            CPAGE::PageFlushType pgftPage = CPAGE::pgftUnknown;
             DBTIME dbtime = dbtimeNil;
             const LONG cbBuffer = g_rgcbPageSize[ pbf->icbBuffer ];
             CFlushMap* const pfm = g_rgfmp[ pbf->ifmp ].PFlushMap();
             const BOOL fIsPagePatching = ( tc.etc.iorReason.Iorp() == IOREASONPRIMARY( iorpPatchFix ) );
-            const BOOL fIsFmRecoverable = pfm->FRecoverable();
 
             CPAGE cpage;
             const LONG cbPage = g_rgcbPageSize[ pbf->icbPage ];
@@ -24683,19 +24677,32 @@ void BFISyncWriteComplete(  const ERR           err,
             dbtime = cpage.Dbtime();
             if ( !FUtilZeroed( (BYTE*)pbf->pv, cbBuffer ) && ( dbtime != dbtimeShrunk ) && !cpage.FRevertedNewPage() )
             {
-                pgft = cpage.Pgft();
+                pgftPage = cpage.Pgft();
             }
             cpage.UnloadPage();
 
-            if ( fIsPagePatching && fIsFmRecoverable )
+            if ( fIsPagePatching )
             {
-                //  OK to ignore errors because the sync write of a patched page can only be initiated once we
-                //  have already synchronously set its flush type to pgftUnknown.
-                (void)pfm->ErrSetPgnoFlushTypeAndWait( pbf->pgno, pgft, dbtime );
+                const CPAGE::PageFlushType pgftMap = pfm->PgftGetPgnoFlushType( pbf->pgno );
+                Assert( pgftPage != CPAGE::pgftUnknown );
+
+                if ( pgftMap == CPAGE::pgftUnknown )
+                {
+                    //  OK to ignore errors in this case because the original map state is pgftUnknown, so
+                    //  we'll just lose the ability to detect a lost flush.
+                    (void)pfm->ErrSetPgnoFlushTypeAndWait( pbf->pgno, pgftPage, dbtime );
+                }
+                else
+                {
+                    //  This is the common case where the previous state of the map is not pgftUnknown, so
+                    //  the new page image will contain that same state, which will be stamped when we
+                    //  prepare the page for the sycn write.
+                    Assert( pgftPage == pgftMap );
+                }
             }
             else
             {
-                pfm->SetPgnoFlushType( pbf->pgno, pgft, dbtime );
+                pfm->SetPgnoFlushType( pbf->pgno, pgftPage, dbtime );
             }
         }
     }
