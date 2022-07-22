@@ -16279,7 +16279,7 @@ ERR ErrCATDeleteMSDeferredPopulateKeys(
     fDatabaseOpen = fTrue;
 
     Assert( !fInTransaction );
-    Call( ErrDIRBeginTransaction( ppib, 33607, NO_GRBIT ) );
+    Call( ErrDIRBeginTransaction( ppib, 70316, NO_GRBIT ) );
     fInTransaction = fTrue;
 
     //  Now delete the actual table.
