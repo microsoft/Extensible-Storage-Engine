@@ -24696,7 +24696,7 @@ void BFISyncWriteComplete(  const ERR           err,
                 {
                     //  This is the common case where the previous state of the map is not pgftUnknown, so
                     //  the new page image will contain that same state, which will be stamped when we
-                    //  prepare the page for the sycn write.
+                    //  prepare the page for the sync write.
                     Assert( pgftPage == pgftMap );
                 }
             }
