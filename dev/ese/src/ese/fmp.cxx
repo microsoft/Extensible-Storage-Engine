@@ -1665,7 +1665,7 @@ ERR FMP::ErrInitializeOneFmp(
     pfmp->ResetLeakReclaimerIsRunning();
     pfmp->ResetPgnoMaxTracking();
     pfmp->ResetCpgAvail();
-    pfmp->SetOjidLeakEstimation( objidFDPOverMax );
+    pfmp->InitLeakEstimation();
 
     pfmp->SetDbtimeBeginRBS( 0 );
     pfmp->ResetRBSOn();
@@ -3103,23 +3103,28 @@ ERR FMP::ErrStartRootSpaceLeakEstimation()
         return ErrERRCheck( JET_errRootSpaceLeakEstimationAlreadyRunning );
     }
 
+    m_cpgLeakEstimationCorrection = 0;
+
     return JET_errSuccess;
 }
 
 //  ================================================================
-OBJID FMP::OjidLeakEstimation()
+OBJID FMP::OjidLeakEstimation() const
 //  ================================================================
 {
-    return (OBJID)AtomicRead( (LONG*)&m_objidLeakEstimation );
+    return m_objidLeakEstimation;
 }
 
 //  ================================================================
 VOID FMP::SetOjidLeakEstimation( const OBJID objid )
 //  ================================================================
 {
+    Assert( objid > objidNil );
+    Assert( objid <= objidFDPMax );
+
     const OBJID objidOld = (OBJID)AtomicExchange( (LONG*)&m_objidLeakEstimation, (LONG)objid );
-    Assert( objidOld <= objidFDPOverMax );
-    Assert( objid >= objidOld );
+    Assert( objidOld < objidFDPOverMax );
+    Assert( ( objid > objidOld ) || ( ( objid == objidOld ) && ( objid == objidFDPMax ) ) );
 }
 
 //  ================================================================
@@ -3127,7 +3132,35 @@ VOID FMP::StopRootSpaceLeakEstimation()
 //  ================================================================
 {
     Expected( m_objidLeakEstimation < objidFDPOverMax );
-    SetOjidLeakEstimation( objidFDPOverMax );
+    InitLeakEstimation();
+}
+
+//  ================================================================
+VOID FMP::InitLeakEstimation()
+//  ================================================================
+{
+    m_cpgLeakEstimationCorrection = 0;
+    m_objidLeakEstimation = objidFDPOverMax;
+}
+
+//  ================================================================
+CPG FMP::CpgLeakEstimationCorrection() const
+//  ================================================================
+{
+    return m_cpgLeakEstimationCorrection;
+}
+
+//  ================================================================
+VOID FMP::AccumulateCorrectionForLeakEstimation( const OBJID objid, const CPG cpg )
+//  ================================================================
+{
+    Assert( objid > objidNil );
+    Assert( objid <= objidFDPMax );
+
+    if ( ( m_objidLeakEstimation != objidFDPOverMax ) && ( objid <= m_objidLeakEstimation ) )
+    {
+        (VOID)AtomicExchangeAdd( (LONG*)&m_cpgLeakEstimationCorrection, (LONG)cpg );
+    }
 }
 
 //  ================================================================

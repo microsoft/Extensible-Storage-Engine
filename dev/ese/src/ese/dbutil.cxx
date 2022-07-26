@@ -5146,6 +5146,7 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
     const CPG cpgOwnedBelowEof,
     const CPG cpgOwnedBeyondEof,
     const CPG cpgOwnedPrimary,
+    const CPG cpgOwnedPrimaryCorrection,
     const CPG cpgUsedRoot,
     const CPG cpgUsedOe,
     const CPG cpgUsedAe,
@@ -5167,6 +5168,8 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
     Assert( ( cpgLeaked >= 0 ) || ( !pfmp->FReadOnlyAttach() && !pfmp->FExclusiveOpen() ) );
     cpgLeaked = LFunctionalMax( cpgLeaked, 0 );
 
+    const CPG cpgOwnedPrimaryOriginal = cpgOwnedPrimary - cpgOwnedPrimaryCorrection;
+
     OSTraceSuspendGC();
     const WCHAR* rgwsz[] =
     {
@@ -5185,7 +5188,8 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
         OSFormatW( L"%u", cCachedPrimary ),
         OSFormatW( L"%u", cUncachedPrimary ),
         OSFormatW( L"%u", jts.cPageRead ), OSFormatW( L"%u", jts.cPagePreread ), OSFormatW( L"%u", jts.cPageReferenced ), OSFormatW( L"%u", jts.cPageDirtied ), OSFormatW( L"%u", jts.cPageRedirtied ),
-        OSFormatW( L"%u", ulMinElapsed ), OSFormatW( L"%.3f", dblSecElapsed )
+        OSFormatW( L"%u", ulMinElapsed ), OSFormatW( L"%.3f", dblSecElapsed ),
+        OSFormatW( L"%d", cpgOwnedPrimaryCorrection ), OSFormatW( L"%I64d", pfmp->CbOfCpgSigned( cpgOwnedPrimaryCorrection ) ), ( ( cpgOwnedPrimaryOriginal != 0 ) ? OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedPrimaryCorrection ) / (double)cpgOwnedPrimaryOriginal ) : L"-" )
     };
     UtilReportEvent(
         eventInformation,
@@ -5241,7 +5245,7 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
     BOOL fRunning = fFalse;
     JET_THREADSTATS jtsStart = { 0 }, jtsEnd = { 0 };
     OBJID objidLast = objidNil;
-    CPG cpgOwnedPrimary = 0;
+    CPG cpgOwnedPrimary = 0, cpgOwnedPrimaryCorrection = 0;
     ULONG cCachedPrimary = 0, cUncachedPrimary = 0;
     CPG cpgUsedRoot = 0, cpgUsedOe = 0, cpgUsedAe = 0;
     CPG rgcpgRootSpaceInfo[ 4 ] = { 0 };
@@ -5281,10 +5285,6 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
         Assert( objidLast != objidSystemRoot );  // Root object is not supposed to be returned here.
         Assert( objidLast > objidPrev );
         objidPrev = objidLast;
-
-        // Test injection.
-        while ( objidLast >= (OBJID)UlConfigOverrideInjection( 35366, objidFDPOverMax ) );
-        Call( ErrFaultInjection( 55190 ) );
 #endif // DEBUG
 
         CPG cpgPrimaryObject = cpgNil;
@@ -5338,11 +5338,19 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
 
             Assert( pfucbTable == pfucbNil );
         }
+        pfmp->SetOjidLeakEstimation( objidLast );
+
+#ifdef DEBUG
+        // Test injection.
+        while ( objidLast >= (OBJID)UlConfigOverrideInjection( 35366, objidFDPOverMax ) );
+        Call( ErrFaultInjection( 55190 ) );
+#endif // DEBUG
     }
     Call( err );
     CallS( ErrCATClose( ppib, pfucbCatalog ) );
     pfucbCatalog = pfucbNil;
     objidLast = objidSystemRoot;
+    pfmp->SetOjidLeakEstimation( objidFDPMax );
 
     // Root space
     //
@@ -5419,6 +5427,10 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
         fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers | fSPShelvedExtent,
         gci::Allow ) );
 
+    // Apply correction.
+    cpgOwnedPrimaryCorrection = pfmp->CpgLeakEstimationCorrection();
+    cpgOwnedPrimary += cpgOwnedPrimaryCorrection;
+
     // Close root.
     pfucb->pcsrRoot = pcsrNil;
     BTClose( pfucb );
@@ -5487,6 +5499,7 @@ HandleError:
             rgcpgRootSpaceInfo[ 0 ],    // cpgOwnedBelowEof
             rgcpgRootSpaceInfo[ 3 ],    // cpgOwnedBeyondEof (shelved)
             cpgOwnedPrimary,
+            cpgOwnedPrimaryCorrection,
             cpgUsedRoot,
             cpgUsedOe,
             cpgUsedAe,

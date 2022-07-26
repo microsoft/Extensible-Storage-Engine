@@ -176,6 +176,7 @@ class FMP
 #ifdef ENABLE_JET_UNIT_TEST
         friend class TestFMPRangeStructAssignment;
         friend class TestFMPRangeStructComparisons;
+        friend class TestFMPNewAndWriteLatch;
 #endif  // ENABLE_JET_UNIT_TEST
 
         struct RANGE
@@ -578,7 +579,11 @@ class FMP
 
         // Stores the OBJID that is currently being processed by the leak estimation code.
         // A value of objidFDPOverMax means it is not running.
-        OBJID               m_objidLeakEstimation;
+        volatile OBJID      m_objidLeakEstimation;
+
+        // missed page changes for the table that has already been processed. 
+        //
+        volatile CPG        m_cpgLeakEstimationCorrection;
 
     // =====================================================================
     // Member retrieval.
@@ -791,9 +796,12 @@ public:
 
         // Space leak estimation.
         ERR ErrStartRootSpaceLeakEstimation();
-        OBJID OjidLeakEstimation();
+        OBJID OjidLeakEstimation() const;
         VOID SetOjidLeakEstimation( const OBJID objid );
         VOID StopRootSpaceLeakEstimation();
+        VOID InitLeakEstimation();
+        VOID AccumulateCorrectionForLeakEstimation( const OBJID objid, const CPG cpg );
+        CPG CpgLeakEstimationCorrection() const;
 
     // =====================================================================
     // Member manipulation.
@@ -980,8 +988,9 @@ public:
     // Physical File I/O Conversions
     public:
 
-       CPG CpgOfCb( const QWORD cb ) const        { return (CPG) ( cb / CbPage() ); }
-       QWORD CbOfCpg( const CPG cpg ) const       { return ( QWORD( cpg ) * CbPage() ); }
+        CPG CpgOfCb( const QWORD cb ) const          { return (CPG) ( cb / CbPage() ); }
+        QWORD CbOfCpg( const CPG cpg ) const         { return ( QWORD( cpg ) * CbPage() ); }
+        __int64 CbOfCpgSigned( const CPG cpg ) const { return ( __int64( cpg ) * CbPage() ); }
 
     // =====================================================================
     // Initialize/terminate FMP array

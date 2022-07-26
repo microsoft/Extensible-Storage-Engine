@@ -497,6 +497,25 @@ INLINE VOID AssertSPIWrappedLatches( FUCB *pfucb, CSR *pcsr = pcsrNil )
 #endif
 }
 
+
+LOCAL VOID SPIAccumulateCorrectionForLeakEstimation( const FCB* const pfcb, const CPG cpg )
+{
+    // Some table/index creation paths early on may not have the object type set.
+    // Missing those is not a problem  because OBJIDs are never reused, so, except for
+    // a tiny window, if a new table (i.e., a new OBJID) is in the process of being created,
+    // then it means it's yet to be processed by the leak report (if it is currently running).
+    // That, in turn, means that it'll not need to participate in the correction by definition,
+    // since its OBJID is not past the one currently being processed.
+    // Assert( !pfcb->FTypeNull() );
+
+    if ( !pfcb->FTypeTable() || ( cpg == 0 ) )
+    {
+        return;
+    }
+
+    g_rgfmp[ pfcb->Ifmp() ].AccumulateCorrectionForLeakEstimation( pfcb->ObjidFDP(), cpg );
+}
+
 //
 // Wrappers around updates on space trees to force you to think about the
 // ExtentPageCountCache.
@@ -514,6 +533,8 @@ SPIWrappedNDInsert(
     PIB  *ppib = pfucb->ppib;
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    SPIAccumulateCorrectionForLeakEstimation( pfucb->u.pfcb, cpgDeltaOE );
 
     AssertSPIWrappedLatches( pfucb, pcsr );
 
@@ -534,7 +555,7 @@ SPIWrappedNDInsert(
         // but at the very least we'll trigger all sorts of downstream Asserts() if
         // we don't have one.
 
-        err =  ErrDIRBeginTransaction( ppib, 35734, NO_GRBIT );
+        err = ErrDIRBeginTransaction( ppib, 35734, NO_GRBIT );
         if ( JET_errSuccess > err )
         {
             OSTraceSuspendGC();
@@ -544,7 +565,7 @@ SPIWrappedNDInsert(
                 OSFormatW( L"%d", PgnoFDP( pfucb ) ),
                 OSFormatW( L"%d", err )
             };
-            
+
             UtilReportEvent(
                 eventError,
                 SPACE_MANAGER_CATEGORY,
@@ -554,7 +575,7 @@ SPIWrappedNDInsert(
                 0,
                 PinstFromPfucb( pfucb ) );
             OSTraceResumeGC();
-            
+
             // We can't trust any further calls to the cache here, since we don't have that transaction.
             fUpdateCache = fFalse;
         }
@@ -642,6 +663,8 @@ ErrSPIWrappedNDSetExternalHeader(
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
+    SPIAccumulateCorrectionForLeakEstimation( pfucb->u.pfcb, cpgDeltaOE );
+
     AssertSPIWrappedLatches( pfucb, pcsr );
 
     if ( fUpdateCache )
@@ -712,6 +735,8 @@ ErrSPIWrappedBTFlagDelete(
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
+    SPIAccumulateCorrectionForLeakEstimation( pfucb->u.pfcb, cpgDeltaOE );
+
     AssertSPIWrappedLatches( pfucb );
 
     Assert( fDIRNoVersion & fDIRFlag );
@@ -781,6 +806,8 @@ ErrSPIWrappedBTReplace(
     PIB  *ppib = pfucb->ppib;
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    SPIAccumulateCorrectionForLeakEstimation( pfucb->u.pfcb, cpgDeltaOE );
 
     AssertSPIWrappedLatches( pfucb );
 
@@ -853,6 +880,8 @@ ErrSPIWrappedBTInsert(
     PIB  *ppib = pfucb->ppib;
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    SPIAccumulateCorrectionForLeakEstimation( pfucb->u.pfcb, cpgDeltaOE );
 
     AssertSPIWrappedLatches( pfucb );
 
@@ -10474,10 +10503,11 @@ INLINE VOID OWNEXT_LIST::AddExtentInfoEntry(
 }
 
 INLINE ERR ErrSPIFreeOwnedExtentsInList(
-    FUCB        *pfucbParent,
-    EXTENTINFO  *rgextinfo,
-    const ULONG cExtents,
-    const BOOL  fFDPRevertable )
+    FUCB*               pfucbParent,
+    const FCB* const    pfcb,
+    EXTENTINFO*         rgextinfo,
+    const ULONG         cExtents,
+    const BOOL          fFDPRevertable )
 {
     ERR         err;
 
@@ -10488,7 +10518,10 @@ INLINE ERR ErrSPIFreeOwnedExtentsInList(
         const CPG   cpgSize = rgextinfo[i].CpgExtent();
         const PGNO  pgnoFirst = rgextinfo[i].PgnoLast() - cpgSize + 1;
 
+        SPIAccumulateCorrectionForLeakEstimation( pfcb, -cpgSize );
+
         Assert( !FFUCBSpace( pfucbParent ) );
+        
         CallR( ErrSPCaptureSnapshot( pfucbParent, pgnoFirst, cpgSize, !fFDPRevertable ) );
         CallR( ErrSPFreeExt( pfucbParent, pgnoFirst, cpgSize, "FreeFdpLarge" ) );
     }
@@ -10639,6 +10672,7 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB* pfucbParent, FCB* pfcb, const BOOL fP
 
     Call( ErrSPIFreeOwnedExtentsInList(
             pfucbParent,
+            pfcb,
             extinfo,
             min( cOEListEntries, cOEListEntriesInit ),
             fRevertableFDP ) );
@@ -10650,6 +10684,7 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB* pfucbParent, FCB* pfcb, const BOOL fP
         Assert( cOEListEntries > cOEListEntriesInit );
         Call( ErrSPIFreeOwnedExtentsInList(
                 pfucbParent,
+                pfcb,
                 pOEListCurr->RgExtentInfo(),
                 pOEListCurr->CEntries(),
                 fRevertableFDP ) );
@@ -10911,8 +10946,10 @@ ERR ErrSPFreeFDP(
             Assert( sizeof( SPACE_HEADER ) == pfucb->kdfCurr.data.Cb() );
             const SPACE_HEADER * const psph = reinterpret_cast <SPACE_HEADER *> ( pfucb->kdfCurr.data.Pv() );
 
-            ULONG cpgPrimary = psph->CpgPrimary();
+            const CPG cpgPrimary = psph->CpgPrimary();
             Assert( psph->CpgPrimary() != 0 );
+
+            SPIAccumulateCorrectionForLeakEstimation( pfucb->u.pfcb, -cpgPrimary );
 
             //  Close the cursor to make sure it latches no buffer whose page
             //  is going to be freed.
