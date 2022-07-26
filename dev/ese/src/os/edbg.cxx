@@ -18236,6 +18236,7 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_POINTER( FMP, this, m_pLogRedoMapDbtimeRevertIgnore, dwOffset ) );
 
     (*pcprintf)( FORMAT_UINT( FMP, this, m_objidLeakEstimation, dwOffset ) );
+    (*pcprintf)( FORMAT_INT( FMP, this, m_cpgLeakEstimationCorrection, dwOffset ) );
 }
 
 INLINE ERR CHECKPOINT::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
