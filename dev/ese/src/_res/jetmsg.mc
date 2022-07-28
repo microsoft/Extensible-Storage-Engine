@@ -1689,6 +1689,11 @@ Language=English
 %1 (%2) %3Db scan encountered root page %4 with objid %5 which was unexpectedly marked for delete by revert operation.
 .
 
+MessageId=570
+SymbolicName=DB_PAGE_FDP_DELETE_DIVERGENCE_ID
+Language=English
+%1 (%2) %3Database %4: Page %5 in a B-Tree (ObjectId: %6) failed verfication due to page FDP delete flag mismatch at log position %7.  The remote page FDP delete flag persisted to the log record was %8 but the actual page FDP delete flag was %9. This problem is likely due to revert of the database gone wrong. Please investigate the database revert operations performed on the database.%n
+.
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 
@@ -3200,6 +3205,12 @@ MessageId=5010
 SymbolicName=RBS_NON_REVERTABLE_DELETE_FAILED_ID
 Language=English
 %1 (%2) %3The non-revertable table delete operation for %4 with root page at %5 and objid %6 failed due to error %7.
+.
+
+MessageId=5011
+SymbolicName=RBSREVERT_ROOTPAGES_MOVED_COUNT_ID
+Language=English
+%1 (%2) %3The revert operation using RBS generation %4 performed %5 root page create move and %6 root page shrink move operations.
 .
 
 ;////////////////////////////////////////////////////////////////////////

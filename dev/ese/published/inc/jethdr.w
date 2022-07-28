@@ -677,6 +677,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvKVPStoreV2                                   9520    //  Allows upgrade of KVP stores to version 1.0.2
 #define JET_efvIndexDeferredPopulate                        9540    //  Adds support for deferred population of indices.
 #define JET_efvReservedTags                                 9560    //  Allows adding additional reserved tags to cpage.
+#define JET_efvRBSTooSoonDeletes                            9580    //  Allows to decide if we can now perform non-revertable delete even if root page of table was moved recently by shrink or created recently.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -4008,8 +4009,9 @@ typedef enum
 
 #if ( JET_VERSION >= 0x0A01 )
 #define JET_paramFlight_RBSDbScanRaiseCorruptionRevertedFDP     74  // Dbscan normally should redelete reverted FDPs which have the delete flag set. But, we don't expect that unless we delete logs and mount that copy and for automated testing, we don't delete logs. So for the automated testing cases, we will raise a corruption instead, which should avoid any real corruption due to bugs.
+#define JET_paramFlight_RBSAllowTooSoonNonRevertableDelete      75  //  If set, we will do a non-revertable table even if PgnoFDPLastSetTime is null or within the last 7days. Note: Both JET_bitRevertableTableDeleteIfTooSoon and JET_paramFlight_RBSRevertableDeleteIfTooSoonTimeNull will be ignored if this variant is set.
 #define JET_paramFlight_RBSForceRollIntervalSec                 80  // Time after which we should force roll into new revert snapshot by raising failure item and letting HA remount. This is temporary till we have live roll.
-
+#define JET_paramFlight_EnableScanCheckFDPDeleteFlags           83  //  Whether we want to enable logging FDPDelete flags in ScanCheck2 log record.
 #define JET_paramFlight_NewQueueOptions                         84  //  Controls options for new Meted IO Queue
 #define JET_paramFlight_ConcurrentMetedOps                      85  //  Controls how many IOs we leave out at once for the new Meted IO Queue.
 #define JET_paramFlight_LowMetedOpsThreshold                    86  //  Controls the transition from 1 meted op to JET_paramFlight_ConcurrentMetedOps (which is the max).
@@ -5495,11 +5497,13 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #if ( JET_VERSION >= 0x0A01 )
 
     /* RBS revert states */
-#define JET_revertstateNone                 0   // Revert has not yet started/default state.
-#define JET_revertstateInProgress           1   // Revert snapshots are currently being applied to the databases.
-#define JET_revertstateCopingLogs           2   // The required logs to bring databases to a clean state are being copied to the log directory after revert.
-#define JET_revertstateBackupSnapshot       3   // Backs up revert snapshots for investigation purposes.
-#define JET_revertstateRemoveSnapshot       4   // Removes the snapshot which have been applied to the databases and backed up.
+#define JET_revertstateNone                     0   // Revert has not yet started/default state.
+#define JET_revertstateInProgress               1   // Revert snapshots are currently being applied to the databases.
+#define JET_revertstateCopingLogs               2   // The required logs to bring databases to a clean state are being copied to the log directory after revert.
+#define JET_revertstateBackupSnapshot           3   // Backs up revert snapshots for investigation purposes.
+#define JET_revertstateRemoveSnapshot           4   // Removes the snapshot which have been applied to the databases and backed up.
+#define JET_revertstateCaptureRootPageRecords   5   // Indicates that we need to capture the root pages records' FDPDeleteFlag state into a temporary file for crash consistency.
+#define JET_revertstateApplyRootPageRecords     6   // Indicates that we need to apply the root page records and update the FDPDeleteFlag state.
 
     /* RBS revert grbits */
 #define JET_bitDeleteAllExistingLogs        0x00000001  /* Delete all the existing log files at the end of revert. */
@@ -6657,6 +6661,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define errRBSDeleteTableTooSoonTimeNull     -1945  /* The time the table was created or the time since the root page of table was last moved is not set and hence a non-revertable delete cannot be attempted right now. */
 #define errRBSCorruptUninitializedRBSRemoved -1946  /* The RBS being loaded is either missing or corrupt and uninitialized, so it has been removed. */
 #define JET_errRBSRedeleteFDPUnexpected     -1947  /* Indicates that the reverted table marked with delete flag is unexpected. */
+#define JET_errRBSRCPageFDPDeleteFileCorrupt -1948  /* The database cannot be reverted to the expected time as we are in apply root page records state but the corresponding file to init the page state is corrupt */
 // begin_PubEsent
 
 #define JET_wrnDefragAlreadyRunning          2000 /* Online defrag already running on specified database */

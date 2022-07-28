@@ -8555,8 +8555,12 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
     BOOL    fRevertableTableDelete                  = !( grbit & JET_bitNonRevertableTableDelete ) || ( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSNonRevertableTableDeletes ) < JET_errSuccess );
     BOOL    fRevertableTableDeleteIfTooSoon         = !!( grbit & JET_bitRevertableTableDeleteIfTooSoon );
     BOOL    fRBSRevertableDeleteIfTooSoonTimeNull   = BoolParam( PinstFromPpib( ppib ), JET_paramFlight_RBSRevertableDeleteIfTooSoonTimeNull );
+    BOOL    fRBSAllowTooSoonNonRevertableDelete     =
+        BoolParam( PinstFromPpib( ppib ), JET_paramFlight_RBSAllowTooSoonNonRevertableDelete ) &&
+        ( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSTooSoonDeletes ) >= JET_errSuccess );
 
     VERDELETETABLEDATA  verdeletetabledata;
+    verdeletetabledata.pgnoFDPLV = pgnoNull;
 
     CheckPIB( ppib );
     CheckDBID( ppib, ifmp );
@@ -8597,7 +8601,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
     {
         grbitOpen |= JET_bitTableAllowSensitiveOperation;
     }
-    if ( !fRevertableTableDelete && !fRevertableTableDeleteIfTooSoon && !fRBSRevertableDeleteIfTooSoonTimeNull )
+    if ( !fRevertableTableDelete && !fRevertableTableDeleteIfTooSoon && !fRBSRevertableDeleteIfTooSoonTimeNull && !fRBSAllowTooSoonNonRevertableDelete )
     {
         grbitOpen |= JET_bitAllowPgnoFDPLastSetTime;
     }
@@ -8610,7 +8614,10 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
     fInUseBySystemOrig = ( JET_wrnTableInUseBySystem == err );
     }
 
-    if ( !fRevertableTableDelete )
+    // We should now have exclusive use of the table.
+    pfcb = pfucb->u.pfcb;
+
+    if ( !fRevertableTableDelete && !fRBSAllowTooSoonNonRevertableDelete )
     {
         // We need root pgno of LV tree (if exists) before it gets removed from the catalog so that RBS can capture preimage of the LV root page.
         err = ErrRBSNonRevertableDeleteTooSoon( ppib, ifmp, pfucb, &verdeletetabledata.pgnoFDPLV, fRevertableTableDeleteIfTooSoon || fRBSRevertableDeleteIfTooSoonTimeNull );
@@ -8618,8 +8625,6 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
         // If non-revertable delete is failing due to JET_errRBSDeleteTableTooSoon and we are allowed to switch to revertable delete in such a case, do so.
         if ( err == JET_errRBSDeleteTableTooSoon || err == errRBSDeleteTableTooSoonTimeNull )
         {
-            FCB* pfcbTable = pfucb->u.pfcb;
-
             if ( fRevertableTableDeleteIfTooSoon )
             {
                 fRevertableTableDelete = fTrue;
@@ -8630,23 +8635,23 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
                 fRevertableTableDelete = fTrue;
                 err = JET_errSuccess;
             }
-            else if ( pfcbTable != NULL && pfcbTable->FTypeTable() )
+            else if ( pfcb != NULL && pfcb->FTypeTable() )
             {
                 OSTraceSuspendGC();
 
                 // Log an event indicating that we are failing delete operation for this table due to JET_errRBSDeleteTableTooSoon error.
                 WCHAR wszTableName[JET_cbNameMost+1] = L"";
 
-                if ( pfcbTable->Ptdb() != NULL && pfcbTable->Ptdb()->SzTableName() != NULL )
+                if ( pfcb->Ptdb() != NULL && pfcb->Ptdb()->SzTableName() != NULL )
                 {
-                    OSStrCbFormatW( wszTableName, sizeof(wszTableName), L"%hs", pfcbTable->Ptdb()->SzTableName() );
+                    OSStrCbFormatW( wszTableName, sizeof(wszTableName), L"%hs", pfcb->Ptdb()->SzTableName() );
                 }
 
                 const WCHAR* rgcwsz[] =
                 {
                     wszTableName,
-                    OSFormatW( L"%I32u", pfcbTable->PgnoFDP() ),
-                    OSFormatW( L"%I32u", pfcbTable->ObjidFDP() ),
+                    OSFormatW( L"%I32u", pfcb->PgnoFDP() ),
+                    OSFormatW( L"%I32u", pfcb->ObjidFDP() ),
                     OSFormatW( L"%d", err )
                 };
 
@@ -8671,9 +8676,19 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
 
         Call( err );
     }
+    else if ( !fRevertableTableDelete )
+    {
+        // For non-revertable deletes, we need to capture the root page of LV tree and we need pgnoFDP of LV tree for that.
+        if ( pfcb->Ptdb() == NULL || pfcb->Ptdb()->PfcbLV() == NULL || pfcb->Ptdb()->PfcbLV()->ObjidFDP() == objidNil )
+        {
+            Call( ErrCATAccessTableLV( ppib, ifmp, pfcb->ObjidFDP(), &verdeletetabledata.pgnoFDPLV, NULL, NULL, fTrue ) );
+        }
+        else
+        {
+            verdeletetabledata.pgnoFDPLV = pfcb->Ptdb()->PfcbLV()->PgnoFDP();
+        }
+    }
 
-    // We should now have exclusive use of the table.
-    pfcb = pfucb->u.pfcb;
     verdeletetabledata.pgnoFDP                  = pfcb->PgnoFDP();
     verdeletetabledata.fRevertableTableDelete   = fRevertableTableDelete;
 

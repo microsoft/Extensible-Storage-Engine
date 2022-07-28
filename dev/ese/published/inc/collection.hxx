@@ -4416,6 +4416,7 @@ class CArray
         {
             errSuccess,
             errOutOfMemory,
+            errInvalidData,
         };
 
         //  Special constants.
@@ -4451,6 +4452,8 @@ class CArray
 
         ERR ErrSetEntry( const size_t ientry, const CEntry& entry );
         void SetEntry( const CEntry* const pentry, const CEntry& entry );
+
+        ERR ErrLoadEntries( const BYTE* const rgbData, const size_t cbData );
 
         size_t Size() const;
         size_t Capacity() const;
@@ -4695,6 +4698,30 @@ SetEntry( const CEntry* const pentry, const CEntry& entry )
     COLLAssert( pentry >= PEntry( 0 ) );
     COLLAssert( pentry < ( PEntry( 0 ) + m_centry ) );
     *const_cast< CEntry* >( pentry ) = entry;
+}
+
+// loads CEntries from given bytearray at the end of the existing array
+
+template< class CEntry >
+inline typename CArray< CEntry >::ERR CArray< CEntry >::
+ErrLoadEntries( const BYTE* const rgbData, const size_t cbData )
+{
+    if ( cbData % sizeof( CEntry ) != 0 )
+    {
+        return ERR::errInvalidData;
+    }
+
+    ERR     err     = ERR::errSuccess;
+    size_t centries = cbData / sizeof( CEntry );
+
+    if ( ( err = ErrSetCapacity( centries + m_centry ) ) != ERR::errSuccess )
+    {
+        return err;
+    }
+
+    UtilMemCpy( (BYTE*)( m_rgentry + m_centry ), rgbData, cbData );
+
+    return err;
 }
 
 //  returns the current size of the array

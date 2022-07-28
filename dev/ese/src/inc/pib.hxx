@@ -155,7 +155,7 @@ private:
             VOID        *PvLogrec()     const           { return m_rgbLogrec; }
             size_t      CbSizeLogrec()  const           { return m_ibLogrecAvail; }
 
-            CArray< CFMPPage > *PrgfmppgnoFreed() const        { return m_rgfmppgnoFreed; }
+            CArray< CFMPPage > *PrgfmppgnoFreed() const { return m_rgfmppgnoFreed; }
             ERR                 ErrInsertPgnoFreed( IFMP ifmp, const PGNO pgnoFreed );
     };
 

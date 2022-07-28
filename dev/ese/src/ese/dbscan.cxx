@@ -4171,7 +4171,7 @@ HandleError:
         {
             UtilReportEvent(
                 eventError,
-                GENERAL_CATEGORY,
+                DATABASE_CORRUPTION_CATEGORY,
                 DBSCAN_REDELETE_REVERTED_TABLE_UNEXPECTED,
                 2,
                 rgcwsz,
@@ -5638,6 +5638,7 @@ ERR ErrDBMEmitDivergenceCheck(
 
     const DBTIME dbtimePage = pcpage->Dbtime();
     const BOOL fEmptyPage   = pcpage->FEmptyPage();
+    const BOOL fPageFDPDelete = pcpage->FPageFDPDelete();
     Assert( ( dbtimePage == 0 && pcpage->ObjidFDP() == 0 ) || /* zero'd page */
             ( pcpage->PgnoThis() == pgno ) /* or the pgno should match */ );
     Assert( ( dbtimePage != dbtimeShrunk ) || ( pcpage->ObjidFDP() == 0 ) );
@@ -5652,6 +5653,7 @@ ERR ErrDBMEmitDivergenceCheck(
                         ulChecksum,
                         objidState == ObjidState::Invalid,
                         fEmptyPage,
+                        fPageFDPDelete,
                         &lgposLogRec );
 
     // Check if the persisted dbtime is ahead of the running dbtime.
@@ -5711,6 +5713,7 @@ ERR ErrDBMEmitEndScan( const IFMP ifmp )
             0, // dbtimeCurrent
             0, // ulChecksum
             fFalse,     // objidInvalid
+            fFalse,
             fFalse );   // EmptyPage
 
 }

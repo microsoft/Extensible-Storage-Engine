@@ -578,6 +578,7 @@
 	INTERNAL_ERR( -1945,	State,		errRBSDeleteTableTooSoonTimeNull	 )
 	INTERNAL_ERR( -1946,	State,		errRBSCorruptUninitializedRBSRemoved	 )
 	EXTERNAL_ERR( -1947,	Corruption,	JET_errRBSRedeleteFDPUnexpected	 )
+	EXTERNAL_ERR( -1948,	Corruption,	JET_errRBSRCPageFDPDeleteFileCorrupt	 )
 	EXTERNAL_WRN( 2000,	State,		JET_wrnDefragAlreadyRunning	 )
 	EXTERNAL_WRN( 2001,	State,		JET_wrnDefragNotRunning	 )
 	EXTERNAL_WRN( 2002,	State,		JET_wrnDatabaseScanAlreadyRunning	 )

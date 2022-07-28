@@ -151,7 +151,9 @@ MSINTERNAL enum class MJET_PARAM
     RecoveryCurrentLogfile = 79, // which generation is currently being replayed (read only)
     OSSnapshotTimeout = 82, // timeout for the freeze period in msec
     Flight_RBSDbScanRaiseCorruptionRevertedFDP = 74, // Dbscan normally should redelete reverted FDPs which have the delete flag set. But, we don't expect that unless we delete logs and mount that copy and for automated testing, we don't delete logs. So for the automated testing cases, we will raise a corruption instead, which should avoid any real corruption due to bugs.
+    Flight_RBSAllowTooSoonNonRevertableDelete = 75, // If set, we will do a non-revertable table even if PgnoFDPLastSetTime is null or within the last 7days. Note: Both JET_bitRevertableTableDeleteIfTooSoon and JET_paramFlight_RBSRevertableDeleteIfTooSoonTimeNull will be ignored if this variant is set.
     Flight_RBSForceRollIntervalSec = 80, // Time after which we should force roll into new revert snapshot by raising failure item and letting HA remount. This is temporary till we have live roll.
+    Flight_EnableScanCheckFDPDeleteFlags = 83, // Whether we want to enable logging FDPDelete flags in ScanCheck2 log record.
     Flight_NewQueueOptions = 84, // Controls options for new Meted IO Queue
     Flight_ConcurrentMetedOps = 85, // Controls how many IOs we leave out at once for the new Meted IO Queue.
     Flight_LowMetedOpsThreshold = 86, // Controls the transition from 1 meted op to JET_paramFlight_ConcurrentMetedOps (which is the max).

@@ -150,19 +150,21 @@ ERR LOCAL ErrDUMPRBSHeaderFormat( INST *pinst, _In_ const DB_HEADER_READER* cons
     return JET_errSuccess;
 }
 
-const char * const szNOP                = "NOP";
+const char * const szNOP                = "NOP      ";
 
-const char * const szDbHdr              = "DbHdr";
+const char * const szDbHdr              = "DbHdr    ";
 
-const char * const szDbAttach           = "DbAttach";
+const char * const szDbAttach           = "DbAttach ";
 
-const char * const szDbPage             = "DbPage";
+const char * const szDbPage             = "DbPage   ";
 
-const char * const szNewPage            = "NewPage";
+const char * const szNewPage            = "NewPage  ";
 
-const char* const szEmptyPages          = "EmptyPages";
+const char* const szEmptyPages          = "EmptyPg  ";
 
-const char* const szEmptyPages2         = "EmptyPages2";
+const char* const szEmptyPages2         = "EmptyPg2 ";
+
+const char* const szRootPageMove        = "PageMoveR";
 
 const char * szRBSRecUnknown            = "*UNKNOWN*";
 
@@ -179,6 +181,7 @@ const char * SzRBSRec( BYTE bRBSRecType )
         case rbsrectypeDbNewPage:       return szNewPage;
         case rbsrectypeDbEmptyPages:    return szEmptyPages;
         case rbsrectypeDbEmptyPages2:   return szEmptyPages2;
+        case rbsrectypeRootPageMove:    return szRootPageMove;
         default:                        return szRBSRecUnknown;
     }
 }
@@ -274,14 +277,24 @@ VOID RBSRecToSz( const RBSRecord *prbsrec, __out_bcount(cbRBSRec) PSTR szRBSRec,
         case rbsrectypeDbEmptyPages:
         case rbsrectypeDbEmptyPages2:
         {
-            RBSDbEmptyPagesRecord* prbsdbpgrec = ( RBSDbEmptyPagesRecord* ) prbsrec;
+            RBSDbEmptyPagesRecord* prbsemptypgrec = ( RBSDbEmptyPagesRecord* ) prbsrec;
             ULONG fFlags                       = bRecType == rbsrectypeDbEmptyPages2 ? ( ( RBSDbEmptyPages2Record* ) prbsrec )->m_fFlags : 0;
 
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu:%lu],[%s]",
-                (DBID)  prbsdbpgrec->m_dbid,
-                (ULONG) prbsdbpgrec->m_pgnoFirst,
-                (CPG)   prbsdbpgrec->m_cpg,
+                (DBID)  prbsemptypgrec->m_dbid,
+                (ULONG) prbsemptypgrec->m_pgnoFirst,
+                (CPG)   prbsemptypgrec->m_cpg,
                 ( fFlags & fRBSFDPNonRevertableDelete ) ? "D" : "" );
+            OSStrCbAppendA( szRBSRec, cbRBSRec, rgchBuf );
+            break;
+        }
+        case rbsrectypeRootPageMove:
+        {
+            RBSRootPageMoveRecord* prbsrootpgmoverec = (RBSRootPageMoveRecord*)prbsrec;
+            OSStrCbFormatA( rgchBuf, sizeof( rgchBuf ), " [%u:%lu:%lu]",
+                (DBID)  prbsrootpgmoverec->m_dbid,
+                (ULONG) prbsrootpgmoverec->m_pgnoSrc,
+                (ULONG) prbsrootpgmoverec->m_pgnoDest );
             OSStrCbAppendA( szRBSRec, cbRBSRec, rgchBuf );
             break;
         }

@@ -19,6 +19,7 @@ const WCHAR wszNewChkExt[]              = L".jcp";          //  checkpoint file 
 const WCHAR wszSecLogExt[]              = L".jsl";          //  shadow|secondary log file extension
 const WCHAR wszShrinkArchiveExt[]       = L".jsa";          //  shrink archive file extension
 const WCHAR wszRBSExt[]                 = L".rbs";          //  revert snapshot file extension
+const WCHAR wszRBSFDPDeleteStateExt[]   = L".jdf";          //  file contain extension for file containing PageFDPDelete state.
 const WCHAR wszRBSDirRoot[]             = L"Snapshot";      //  revert snapshot static root directory name
 const WCHAR wszRBSBackupDir[]           = L"Backup";        //  revert snapshot static backup directory name where snapshots are backed up, once applied, for future investigations if needed.
 const WCHAR wszRBSDirBase[]             = L"RBS";           //  revert snapshot directory static base name
