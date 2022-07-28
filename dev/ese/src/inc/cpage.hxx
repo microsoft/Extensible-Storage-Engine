@@ -385,10 +385,13 @@ class CPAGE
 
         BOOL    FPageFDPDelete( ) const;
         BOOL    FPageFDPRootDelete( ) const;
+        BOOL    FPageFDPDeleteDbtimeRevertRoot() const;
 
         BOOL        FShrunkPage         ( ) const;
         BOOL        FRevertedNewPage    ( ) const;
         static BOOL FRevertedNewPage    ( const DBTIME dbtime ) { return dbtimeRevert == dbtime; }
+
+        BOOL        FDbtimeRevertRoot   ( ) const;
 
     enum PageFlushType : ULONG;
         PageFlushType Pgft      ( ) const;
@@ -418,6 +421,7 @@ class CPAGE
         VOID    SetFEmpty    ( );
         VOID    SetFNewRecordFormat ( );
         VOID    SetPageFDPDelete( const BOOL fValue );
+        VOID    SetPageFDPDeleteDbtimeRevertRoot( const BOOL fValue );
 
         //  bulk line flag manipulation
         VOID    ResetAllFlags( INT fFlags );
@@ -1282,6 +1286,13 @@ INLINE BOOL CPAGE::FPageFDPRootDelete( ) const
 //  ================================================================
 {
     return FRootPage() && FPageFDPDelete();
+}
+
+//  ================================================================
+INLINE BOOL CPAGE::FPageFDPDeleteDbtimeRevertRoot() const
+//  ================================================================
+{
+    return FPageFDPDelete() && FDbtimeRevertRoot();
 }
 
 //  ================================================================

@@ -2234,6 +2234,14 @@ ERR ErrSHKRootPageMove(
         csrCatLock[iCat].ReleasePage();
     }
 
+    // Log the root page move to the RBS, if enabled.
+    // Note: It is important that we capture this into the snapshot after we capture the preimage of the pages being moved.
+    //       This is because we will apply this root page move record only if we have preimages of both the source and destination.
+    if ( g_rgfmp[ ifmp ].FRBSOn() )
+    {
+        Call( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( g_rgfmp[ ifmp ].Dbid(), rm.pgnoFDP, rm.pgnoNewFDP ) );
+    }
+
     // Re-open cursors and verify that the move looks consistent.
     // It's OK to fail from this point on, but it might lead to leaked space.
     //
@@ -2352,6 +2360,14 @@ VOID SHKPerformRootMove(
     _In_ const IFMP ifmp,
     _In_ const BOOL fRecoveryRedo )
 {
+    BOOL fPageFDPDelete = fFalse;
+
+    // If we are in redo, get the PageFDPDelete flag so that we could set it on the new page.
+    if ( prm->csrFDP.FLatched() && fRecoveringRedo )
+    {
+        fPageFDPDelete = prm->csrFDP.Cpage().FPageFDPRootDelete();
+    }
+
     // Copy root to destination.
     if ( FBTIUpdatablePage( prm->csrNewFDP ) )
     {
@@ -2361,6 +2377,12 @@ VOID SHKPerformRootMove(
             prm->pgnoNewFDP,
             prm->dbtimeAfter,
             fRecoveryRedo );
+
+        if ( fPageFDPDelete )
+        {
+            Assert( fRecoveringRedo );
+            prm->csrNewFDP.Cpage().SetPageFDPDelete( fTrue );
+        }
 
          prm->csrNewFDP.FinalizePreInitPage();
 

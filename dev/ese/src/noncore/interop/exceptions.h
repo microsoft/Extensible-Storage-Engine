@@ -8664,6 +8664,30 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamRBSRCPageFDPDeleteFileCorruptException : public IsamCorruptionException
+    {
+    public:
+        IsamRBSRCPageFDPDeleteFileCorruptException() : IsamCorruptionException( "The database cannot be reverted to the expected time as we are in apply root page records state but the corresponding file to init the page state is corrupt", JET_errRBSRCPageFDPDeleteFileCorrupt)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamRBSRCPageFDPDeleteFileCorruptException( String ^ description, Exception^ innerException ) :
+            IsamCorruptionException( description, innerException )
+        {
+        }
+
+        IsamRBSRCPageFDPDeleteFileCorruptException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamCorruptionException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamDatabaseAlreadyRunningMaintenanceException : public IsamUsageException
     {
     public:
@@ -9809,6 +9833,8 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamRBSRevertableDeleteNotPossibleException;
         case JET_errRBSRedeleteFDPUnexpected:
             return gcnew IsamRBSRedeleteFDPUnexpectedException;
+        case JET_errRBSRCPageFDPDeleteFileCorrupt:
+            return gcnew IsamRBSRCPageFDPDeleteFileCorruptException;
         case JET_errDatabaseAlreadyRunningMaintenance:
             return gcnew IsamDatabaseAlreadyRunningMaintenanceException;
         case JET_errRootSpaceLeakEstimationAlreadyRunning:

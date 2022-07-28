@@ -7793,7 +7793,7 @@ BOOL FIOMgrHandleIOResult(
             fReIssue = fTrue;
         }
         else if ( FIOMethodTooComplex(  pioreqHead->p_osf->iomethodMost, iomethod, errIO ) &&
-                    //  I don't thinkt his can happen on semi-sync, but and just in case (which would then turns exclusive IO ops 
+                    //  I don't think this can happen on semi-sync, but and just in case (which would then turns exclusive IO ops 
                     //  into generic invalid parameter errors! :-P ) ...
                     !FExclusiveIoreq( pioreqHead ) )
         {

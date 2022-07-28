@@ -518,14 +518,16 @@ class LRSCANCHECK final  // Prevent this class from being inherited. Please use 
 };
 
 
-PERSISTED const BYTE fLRScanObjidInvalid = 0x80;
-PERSISTED const BYTE fLRScanEmptyPage = 0x40;
-const BYTE maskLRScanFlags = 0xC0;
-const BYTE maskLRScanUnused = 0x3C;
+PERSISTED const BYTE fLRScanObjidInvalid    = 0x80;
+PERSISTED const BYTE fLRScanEmptyPage       = 0x40;
+PERSISTED const BYTE fLRScanPageFDPDelete   = 0x20;
+const BYTE maskLRScanFlags = 0xE0;
+const BYTE maskLRScanUnused = 0x1C;
 const BYTE maskLRScanSources = 0x03;
 
 static_assert( !( fLRScanObjidInvalid & ~maskLRScanFlags ), "Bit represented by fLRScanObjidInvalid should be on in maskLRScanFlags." );
 static_assert( !( fLRScanEmptyPage & ~maskLRScanFlags ), "Bit represented by fLRScanEmptyPage should be on in maskLRScanFlags." );
+static_assert( !( fLRScanPageFDPDelete & ~maskLRScanFlags ), "Bit represented by fLRScanFDPDelete should be on in maskLRScanFlags." );
 static_assert( !( maskLRScanFlags & maskLRScanUnused & maskLRScanSources ), "maskLRScanFlags, maskLRScanUnused and maskLRScanSources should be mutually exclusive." );
 static_assert( ( scsMax - 1 ) <= maskLRScanSources, "The highest value of ScanCheckSource should not be greater than maskLRScanSources" );
 
@@ -558,6 +560,7 @@ class LRSCANCHECK2
                 scsDbScan,
                 fFalse,
                 fFalse,
+                fFalse,
                 plrscancheck->DbtimeBefore(),
                 plrscancheck->DbtimeAfter(),
                 plrscancheck->UsChecksum() );
@@ -571,6 +574,7 @@ class LRSCANCHECK2
                 const BYTE bSource,
                 const BOOL fObjidInvalid,
                 const BOOL fEmptyPage,
+                const BOOL fPageFDPDelete,
                 const DBTIME dbtimePage,
                 const DBTIME dbtimeCurrent,
                 const ULONG ulCompLogicalPageChecksum )
@@ -590,6 +594,11 @@ class LRSCANCHECK2
             if ( fEmptyPage )
             {
                 le_bFlagsAndScs |= fLRScanEmptyPage;
+            }
+
+            if ( fPageFDPDelete )
+            {
+                le_bFlagsAndScs |= fLRScanPageFDPDelete;
             }
 
             Assert( !( le_bFlagsAndScs & maskLRScanUnused ) );
@@ -620,6 +629,7 @@ class LRSCANCHECK2
         ULONG UlChecksum() const            { return le_ulChksum; }
         BOOL FObjidInvalid( void ) const    { return !!( le_bFlagsAndScs & fLRScanObjidInvalid ); }
         BOOL FEmptyPage( void ) const       { return !!( le_bFlagsAndScs & fLRScanEmptyPage ); }
+        BOOL FPageFDPDelete( void ) const   { return !!( le_bFlagsAndScs & fLRScanPageFDPDelete ); }
 };
 
 
@@ -2751,6 +2761,7 @@ ERR ErrLGScanCheck(
     _In_    const ULONG     ulChecksum,
     _In_    const BOOL      fObjidInvalid,
     _In_    const BOOL      fEmptyPage,
+    _In_    const BOOL      fPageFDPDelete,
     _In_    LGPOS* const    plgposLogRec = NULL );
 
 ERR ErrLGPageMove(

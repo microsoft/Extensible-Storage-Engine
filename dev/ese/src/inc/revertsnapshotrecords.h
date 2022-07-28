@@ -7,6 +7,7 @@
 // Addition of any new record type should have a corresponding update in -
 //      -   SzRBSRec    ( to return corresponding RBS record tag )
 //      -   RBSRecToSz  ( to return string representation of the record )
+//      -   CbRBSRecFixed ( to return the corresponding size of the record )
 //
 //
 #define     rbsrectypeNOP               0
@@ -18,7 +19,8 @@
 #define     rbsrectypeDbNewPage         6
 #define     rbsrectypeDbEmptyPages      7
 #define     rbsrectypeDbEmptyPages2     8
-#define     rbsrectypeMax               9
+#define     rbsrectypeRootPageMove      9
+#define     rbsrectypeMax               10
 
 PERSISTED
 struct RBSRecord
@@ -73,6 +75,14 @@ struct RBSDbEmptyPagesRecord : public RBSRecord
 };
 
 PERSISTED
+struct RBSRootPageMoveRecord : public RBSRecord
+{
+    UnalignedLittleEndian<DBID>     m_dbid;
+    UnalignedLittleEndian<PGNO>     m_pgnoSrc;
+    UnalignedLittleEndian<PGNO>     m_pgnoDest;
+};
+
+PERSISTED
 struct RBSDbEmptyPages2Record : public RBSDbEmptyPagesRecord
 {
     UnalignedLittleEndian<ULONG>    m_fFlags;
@@ -117,6 +127,8 @@ CbRBSRecFixed( BYTE bRecType )
             return sizeof( RBSDbEmptyPagesRecord );
         case rbsrectypeDbEmptyPages2:
             return sizeof( RBSDbEmptyPages2Record );
+        case rbsrectypeRootPageMove:
+            return sizeof( RBSRootPageMoveRecord );
         default:
            Assert( fFalse );
         case rbsrectypeNOP:

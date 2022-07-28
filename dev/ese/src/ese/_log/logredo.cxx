@@ -7328,6 +7328,15 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         CallR( ErrLGRIRedoSpaceRootPage( ppib, plrcreatemefdp, fTrue ) );
 
         CallR( ErrLGRIRedoSpaceRootPage( ppib, plrcreatemefdp, fFalse ) );
+
+        // We will log the root page move to the RBS even if ErrLGIRedoFDPPage is skipped for the page as it is possible page was patched and it was skipped.
+        // Note: It is important that we capture this into the snapshot after we capture the preimage (newpage) of the page being used as root for FDP.
+        //       This is because we will apply this root page move record only if we have preimage of the root.
+        if ( g_rgfmp[ ifmp ].FRBSOn() )
+        {
+            CallR( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( dbid, 0, plrcreatemefdp->le_pgno ) );
+        }
+
         break;
     }
 
@@ -7369,6 +7378,15 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         //
         LGRITraceRedo( plrcreatesefdp );
         CallR( ErrLGIRedoFDPPage( m_pctablehash, ppib, plrcreatesefdp ) );
+
+        // We will log the root page move to the RBS even if ErrLGIRedoFDPPage is skipped for the page as it is possible page was patched and it's was skipped.
+        // Note: It is important that we capture this into the snapshot after we capture the preimage (newpage) of the page being used as root for FDP.
+        //       This is because we will apply this root page move record only if we have preimage of the root.
+        if ( g_rgfmp[ ifmp ].FRBSOn() )
+        {
+            CallR( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( dbid, 0, pgnoFDP ) );
+        }
+
         break;
     }
 
@@ -9649,6 +9667,19 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                                            ( dbtimePage <= dbtimeCurrentInLogRec ) &&
                                            ( dbtimePage != dbtimePageInLogRec );
 
+            const BOOL fFDPDeleteScanCheckEnabled = ( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSTooSoonDeletes ) == JET_errSuccess );
+
+            // If it is a logpos redo is beyond lgposCommitBeforeRevert and it is a valid objid, not an empty page and logging page FDP delete flag is enabled, 
+            // we should make sure both the active and passive have the same value for the Page FDP delete flag.
+            const BOOL fDivergentFDPDeleteFlags = fMayCheckDbtimeConsistency &&
+                                                  BoolParam( pinst, JET_paramFlight_EnableScanCheckFDPDeleteFlags ) &&
+                                                  ( CmpLgpos( g_rgfmp[ ifmp ].Pdbfilehdr()->le_lgposCommitBeforeRevert, m_lgposRedo ) < 0 ) &&
+                                                  fFDPDeleteScanCheckEnabled &&
+                                                  !plrscancheck->FObjidInvalid() &&
+                                                  !plrscancheck->FEmptyPage() &&
+                                                  plrscancheck->FPageFDPDelete() != fPageFDPDelete;
+ 
+
             if ( fDbtimePageTooAdvanced || fDbtimeInitMismatch || fDivergentDbtimes )
             {
                 MessageId msgid = INTERNAL_TRACE_ID;
@@ -9913,6 +9944,46 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     err = ErrERRCheck( JET_errDatabaseCorrupted );
                     *pfBadPage = fTrue;
                 }
+            }
+            else if ( fDivergentFDPDeleteFlags )
+            {
+                {
+                OSTraceSuspendGC();
+
+                // If page's FDP delete flags are diverged, it is most likely a corruption on the passive due to RBS reverting the database wrongly.
+                const WCHAR* rgwsz[] =
+                {
+                    g_rgfmp[ ifmp ].WszDatabaseName(),
+                    OSFormatW( L"%I32u (0x%I32x)", plrscancheck->Pgno(), plrscancheck->Pgno() ),
+                    OSFormatW( L"%u", objidPage ),
+                    OSFormatW( L"(%08X,%04X,%04X)", m_lgposRedo.lGeneration, m_lgposRedo.isec, m_lgposRedo.ib ),
+                    OSFormatW( L"%d", (INT)plrscancheck->FPageFDPDelete() ),
+                    OSFormatW( L"%d", (INT)fPageFDPDelete ),
+                };
+
+                // Raise corruption event
+                UtilReportEvent(
+                    eventError,
+                    DATABASE_CORRUPTION_CATEGORY,
+                    DB_PAGE_FDP_DELETE_DIVERGENCE_ID,
+                    _countof( rgwsz ),
+                    rgwsz,
+                    0,
+                    NULL,
+                    g_rgfmp[ ifmp ].Pinst() );
+
+                OSUHAPublishEvent(
+                    HaDbFailureTagCorruption, g_rgfmp[ ifmp ].Pinst(), HA_DATABASE_CORRUPTION_CATEGORY,
+                    HaDbIoErrorNone, g_rgfmp[ ifmp ].WszDatabaseName(), 0, 0,
+                    HA_DB_PAGE_FDP_DELETE_DIVERGENCE_ID, _countof( rgwsz ), rgwsz );
+
+                OSTraceResumeGC();
+                }
+
+                AssertSz( FNegTest( fCorruptingPageLogically ), "Database Divergence Check FAILED!  Active and Passive are divergent." );
+
+                err = ErrERRCheck( JET_errDatabaseCorrupted );
+                *pfBadPage = fTrue;
             }
             else if ( !( *pfBadPage ) )
             {
@@ -10887,6 +10958,14 @@ ERR LOG::ErrLGRIRedoRootPageMove( PIB* const ppib, const DBTIME dbtime )
     Assert( FCB::PfcbFCBGet( ifmp, rm.pgnoFDP, &fUnused ) == pfcbNil );
     Assert( FCB::PfcbFCBGet( ifmp, pgnoFDPMSO, &fUnused ) == pfcbNil );
     Assert( FCB::PfcbFCBGet( ifmp, pgnoFDPMSOShadow, &fUnused ) == pfcbNil );
+
+    // We will log the root page move to the RBS even if PerformRootMove is skipped for the page as it is possible page was patched and it's was skipped.
+    // Note: It is important that we capture this into the snapshot after we capture the preimage of the pages being moved.
+    //       This is because we will apply this root page move record only if we have preimages of both the source and destination.
+    if ( g_rgfmp[ ifmp ].FRBSOn() )
+    {
+        Call( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( g_rgfmp[ ifmp ].Dbid(), rm.pgnoFDP, rm.pgnoNewFDP ) );
+    }
 
 HandleError:
     rm.ReleaseResources();

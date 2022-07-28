@@ -12,6 +12,7 @@
 #define cbRBSSegmentsInBuffer           (cbRBSBufferSize/cbRBSSegmentSize)
 #define csecSpaceUsagePeriodicLog       3600
 #define cbMaxRBSSizeAllowed             100LL*1024*1024*1024
+#define cbRBSIOSize                     512*1024
 
 C_ASSERT( cbRBSSegmentSizeMask == cbRBSSegmentSize - 1 );
 
@@ -199,7 +200,7 @@ INLINE ULONG IbRBSSegmentOffsetFromFullOffset( DWORD ib )   { return ib & cbRBSS
 #include "revertsnapshotrecords.h"
 
 const ULONG ulRBSVersionMajor         = 1;
-const ULONG ulRBSVersionMinor         = 4;
+const ULONG ulRBSVersionMinor         = 5;
 
 class CRevertSnapshot;
 
@@ -709,6 +710,11 @@ class CRevertSnapshot
             PGNO pgno,
             RBS_POS *prbsposRecord );
 
+    ERR ErrCaptureRootPageMove(
+        const DBID dbid,
+        const PGNO pgnoSrc,
+        const PGNO pgnoDest );
+
     ERR ErrCaptureEmptyPages(
             DBID dbid,
             PGNO pgnoFirst,
@@ -1009,6 +1015,73 @@ const IRBSDBRC irbsdbrcInvalid = -1;
 class CRBSDatabaseRevertContext : public CZeroInit
 {
 private:
+    class CRootPageRecord
+    {
+        private:
+            BOOL m_fDeleteOperation;    // We only have two types of root pages records
+                                        // 1. Root page delete operation where the root page in context needs to have PageFDPDelete flag set.
+                                        // 2. Root page move operations where we need to look at the existing destination page and move the PageFDPDelete flag if needed.
+            PGNO m_pgnoSrc;
+            PGNO m_pgnoDest;
+
+        public:
+
+            CRootPageRecord( BOOL fDeleteOperation, PGNO pgnoSrc, PGNO pgnoDest ) :
+                m_fDeleteOperation( fDeleteOperation ),
+                m_pgnoSrc( pgnoSrc ),
+                m_pgnoDest( pgnoDest ) {}
+
+            CRootPageRecord() : CRootPageRecord( fFalse, 0, 0 ) {}
+
+            ~CRootPageRecord() {}
+
+            CRootPageRecord& operator=( const CRootPageRecord& rootpagerec )
+            {
+                m_fDeleteOperation  = rootpagerec.m_fDeleteOperation;
+                m_pgnoSrc           = rootpagerec.m_pgnoSrc;
+                m_pgnoDest          = rootpagerec.m_pgnoDest;
+                return *this;
+            }
+
+            PGNO PgnoSrc()  const           { return m_pgnoSrc; }
+            PGNO PgnoDest() const           { return m_pgnoDest; }
+            BOOL FDeleteOperation() const   { return m_fDeleteOperation; }
+    };
+
+    class CPageFDPDeleteState
+    {
+        private:
+            PGNO m_pgno;
+            BOOL m_fPageFDPDelete;
+
+        public:
+            CPageFDPDeleteState( PGNO pgno, BOOL fPageFDPDelete ) :
+                m_pgno( pgno ),
+                m_fPageFDPDelete( fPageFDPDelete ) {}
+
+            CPageFDPDeleteState() : CPageFDPDeleteState( 0, fFalse ) {}
+
+            ~CPageFDPDeleteState() {}
+
+            CPageFDPDeleteState& operator=( const CPageFDPDeleteState& pagefdpdeletestate )
+            {
+                m_pgno              = pagefdpdeletestate.m_pgno;
+                m_fPageFDPDelete    = pagefdpdeletestate.m_fPageFDPDelete;
+                return *this;
+            }
+
+            PGNO Pgno()  const          { return m_pgno; }
+            BOOL FPageFDPDelete() const { return m_fPageFDPDelete; }
+    };
+
+    PERSISTED struct PagesFDPDeleteState
+    {
+        LittleEndian<ULONG> le_cPagesCaptured;
+        LittleEndian<ULONG> le_ulChecksum;
+        BYTE                m_rgbPageFDPDeleteState[ 0 ];
+    };
+
+
     INST*                       m_pinst;
     DBID                        m_dbidCurrent;
     WCHAR*                      m_wszDatabaseName;
@@ -1041,9 +1114,11 @@ private:
 
     BYTE *                      m_pbDiskPageRead;                   // For table root page, we might have to read the disk image to see if has been marked for delete. We will allocate temp buffer and keep reusing that.
 
+    CArray< CRootPageRecord >*  m_rgrootpagerec;                    // An array of root page records.
+
 private:
     ERR ErrFlushDBPage( void* pvPage, PGNO pgno, USHORT cbDbPageSize, const OSFILEQOS qos );
-    ERR ErrDBDiskPageFDPRootDelete( void* pvPage, PGNO pgno, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPgnoFDPRootDelete );    
+    ERR ErrDBDiskPageFDPRootDelete( void* pvPage, PGNO pgno, BOOL fCheckDiskPageFDPRootDelete, BOOL fOverrideDiskPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPgnoFDPRootDelete );
     static INT __cdecl ICRBSDatabaseRevertContextCmpPgRec( const CPagePointer* pppg1, const CPagePointer* pppg2 );
     static INT __cdecl ICRBSDatabaseRevertContextPgEquals( const CPagePointer* pppg1, const CPagePointer* pppg2 );
     static void OsWriteIoComplete(
@@ -1063,10 +1138,18 @@ public:
     ERR ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTIME logtimeRevertTo, SIGNATURE* psignRBSHdrFlushMaxGen );
     ERR ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrFlush );
     ERR ErrRBSCaptureDbHdrFromRBS( RBSDbHdrRecord* prbsdbhdrrec, BOOL* pfGivenDbfilehdrCaptured );
-    ERR ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplaceCached, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPageAddedToCache );
+    ERR ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplaceCached, BOOL fCheckDiskPageFDPRootDelete, BOOL fOverrideExistingPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPageAddedToCache );
+    ERR ErrAddRootPageRecord( BOOL fDeleteOperation, PGNO pgnoSrc, PGNO pgnoDest );
+    ERR ErrApplyRootPageRecords();
+    ERR ErrCapturePageFDPDeleteState( const LONG lRBSGen, const USHORT cbDbPageSize, _In_ PCWSTR wszDirPath, _In_ PCWSTR wszRBSBaseName );
+    ERR ErrRBSInitRootPageDeleteState( const LONG lRBSGen, const USHORT cbDbPageSize, _In_ PCWSTR wszDirPath, _In_ PCWSTR wszRBSBaseName, _Out_ CPG* pcpgCached );
+    ERR ErrRBSApplyRootPageRecords( const USHORT cbDbPageSize, _In_ CPG cpgCacheMax, _Out_ CPG* pcpgCached, _Out_ QWORD* pcpgReverted, _Out_ CPG* pcpgRootPageCreateMoves, _Out_ CPG* pcpgRootPageShrinkMoves );
+    ERR ErrRBSPageFDPDeleteState( const PGNO pgno, const USHORT cbDbPageSize, BOOL* pfPgnoFDPRootDelete );
+    VOID ResetRootPageRecords();
     ERR ErrResetSbmPages( IBitmapAPI** ppsbm );
     ERR ErrFlushDBPages( USHORT cbDbPageSize, BOOL fFlushDbHdr, CPG* pcpgReverted );
     BOOL FPageAlreadyCaptured( PGNO pgno );
+    VOID SetPageCaptured( PGNO pgno );
     ERR ErrBeginTracingToIRS();
 
     // =====================================================================
@@ -1105,7 +1188,7 @@ private:
     USHORT                  m_cbDbPageSize;                     //  db page size
 
     IRBSDBRC                m_mpdbidirbsdbrc[ dbidMax ];
-    CRBSDatabaseRevertContext*               m_rgprbsdbrcAttached[ dbidMax ];
+    CRBSDatabaseRevertContext*  m_rgprbsdbrcAttached[ dbidMax ];
     IRBSDBRC                m_irbsdbrcMaxInUse; 
 
     RBSREVERTCHECKPOINT*    m_prbsrchk;                         // Pointer to the rbs revert checkpoint
@@ -1134,10 +1217,11 @@ private:
 
     ERR ErrRBSDBRCInitFromAttachInfo( const BYTE* pbRBSAttachInfo, SIGNATURE* psignRBSHdrFlush );
     ERR ErrComputeRBSRangeToApply( PCWSTR wszRBSAbsRootDirPath, LOGTIME ltRevertExpected, LOGTIME* pltRevertActual );
-    ERR ErrRBSGenApply( LONG lRBSGen, RBSFILEHDR* prbsfilehdr, BOOL fDbHeaderOnly, BOOL fUseBackupDir );
-    ERR ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDBHdrFromRBS, BOOL fDbHeaderOnly, BOOL* pfGivenDbfilehdrCaptured );
+    ERR ErrRBSGenApply( LONG lRBSGen, RBSFILEHDR* prbsfilehdr, BOOL fDbHeaderOnly, BOOL fUseBackupDir, BOOL fRevertStateRootPageRecords );
+    ERR ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDBHdrFromRBS, BOOL fDbHeaderOnly, BOOL fRevertStateRootPageRecords, BOOL* pfGivenDbfilehdrCaptured );
     ERR ErrCheckApplyRBSContinuation();
     ERR ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew, const BOOL fPageFDPNonRevertableDelete );
+    ERR ErrAddRootPageRecord( DBID dbid, BOOL fDeleteOperation, PGNO pgnoSrc, PGNO pgnoDest );
 
     ERR ErrRevertCheckpointInit();
     ERR ErrRevertCheckpointCleanup();
@@ -1151,9 +1235,10 @@ private:
     ERR ErrUpdateDbStatesAfterRevert( SIGNATURE* psignRbsHdrFlush );
     ERR ErrSetLogExt( PCWSTR wszRBSLogDirPath );
 
-    ERR ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno, BOOL fReplaceCached, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize );
+    ERR ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno, BOOL fReplaceCached, BOOL fCheckDiskPageFDPRootDelete, BOOL fOverrideExistingPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize );
     ERR ErrFlushPages( BOOL fFlushDbHdr );
     BOOL FPageAlreadyCaptured( DBID dbid, PGNO pgno );
+    VOID SetPageCaptured( DBID dbid, PGNO pgno );
 
     ERR ErrBeginRevertTracing( bool fDeleteOldTraceFile );
 

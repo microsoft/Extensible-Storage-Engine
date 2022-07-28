@@ -46,7 +46,8 @@ const QWORD qwLogFileID             = 0x4000000000000000;   // top DWORD is m_iI
 const QWORD qwBackupDbID            = 0x6000000000000000;   // low DWORD is ifmp.
 const QWORD qwBackupLogID           = 0x7000000000000000;   // top DWORD is m_iInstance (except top nibble)
 const QWORD qwRBSFileID             = 0x8000000000000000;   // top DWORD is m_iInstance (except top nibble)
-const QWORD qwRBSRevertChkFileID    = 0x9000000000000000;   // top DWORD is m_iInstance (except top nibble)
+const QWORD qwRBSRevertChkFileID    = 0x8000000100000000;   // top DWORD is m_iInstance (except top nibble)
+const QWORD qwRBSRevertFDPDeleteFileID = 0x8000000200000000; // top DWORD is m_iInstance (except top nibble)
 
 const LONG lGenSignalCurrentID  = 0x80000001;           // signal to indicate current lgen where we can't know the lgen apriori
 const LONG lGenSignalTempID     = 0x80000002;           // signal to indicate current lgen where we can't know the lgen apriori

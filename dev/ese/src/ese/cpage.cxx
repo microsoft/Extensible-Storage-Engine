@@ -2942,6 +2942,20 @@ VOID CPAGE::SetPageFDPDelete( const BOOL fValue )
 }
 
 //  ================================================================
+VOID CPAGE::SetPageFDPDeleteDbtimeRevertRoot( const BOOL fValue )
+//  ================================================================
+{
+#ifdef DEBUG_PAGE
+    ASSERT_VALID( this );
+#endif
+    // We don't want to set this time on page that is already a root page.
+    Assert( !FRootPage() );
+
+    SetPageFDPDelete( fValue );
+    ( (PGHDR*)m_bfl.pv )->dbtimeDirtied = dbtimeRevertRoot;
+}
+
+//  ================================================================
 VOID CPAGE::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
 //  ================================================================
 {
@@ -3708,6 +3722,13 @@ BOOL CPAGE::FRevertedNewPage ( ) const
 //  ================================================================
 {
     return CPAGE::FRevertedNewPage( Dbtime() );
+}
+
+//  ================================================================
+BOOL CPAGE::FDbtimeRevertRoot() const
+//  ================================================================
+{
+    return dbtimeRevertRoot == Dbtime();
 }
 
 //  ================================================================

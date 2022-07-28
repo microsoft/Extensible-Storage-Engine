@@ -3463,6 +3463,14 @@ ERR ErrSPCreate(
         *pcpgAEFDP = cpgPrimary - cpgSingleExtentMin;
     }
 
+    // If RBS is enabled, capture the fact that table was just created,
+    // so that if the table is non-revertable deleted in near future
+    // and if the database is reverted, delete flag can be cleared accordingly.
+    if ( g_rgfmp[ pfucb->ifmp ].FRBSOn() )
+    {
+        Call( g_rgfmp[ pfucb->ifmp ].PRBS()->ErrCaptureRootPageMove( g_rgfmp[ pfucb->ifmp ].Dbid(), 0, pgnoFDP ) );
+    }
+
     Assert( !FFUCBSpace( pfucb ) );
     Assert( !FFUCBVersioned( pfucb ) );
 

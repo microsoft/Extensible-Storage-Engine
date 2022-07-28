@@ -955,6 +955,7 @@ ERR ErrLGScanCheck(
     _In_    const ULONG     ulChecksum,
     _In_    const BOOL      fObjidInvalid,
     _In_    const BOOL      fEmptyPage,
+    _In_    const BOOL      fPageFDPDelete,
     _In_    LGPOS* const    plgposLogRec )
 {
     INST * const pinst = PinstFromIfmp( ifmp );
@@ -1004,6 +1005,7 @@ ERR ErrLGScanCheck(
 
     const BOOL fScanCheck2Supported         = g_rgfmp[ifmp].FEfvSupported( JET_efvScanCheck2 );
     const BOOL fScanCheck2FlagsSupported    = g_rgfmp[ ifmp ].FEfvSupported( JET_efvScanCheck2Flags ) && BoolParam( pinst, JET_paramFlight_EnableScanCheck2Flags );
+    const BOOL fScanEnableFDPDelete         = g_rgfmp[ ifmp ].FEfvSupported( JET_efvRBSTooSoonDeletes ) && BoolParam( pinst, JET_paramFlight_EnableScanCheckFDPDeleteFlags );
 
     DATA data;
     LRSCANCHECK2 lrscancheck2;
@@ -1017,6 +1019,7 @@ ERR ErrLGScanCheck(
             bSource,
             fScanCheck2FlagsSupported ? fObjidInvalid : fFalse,
             fScanCheck2FlagsSupported ? fEmptyPage : fFalse,
+            fScanEnableFDPDelete      ? fPageFDPDelete : fFalse,
             dbtimePage,
             dbtimeCurrent,
             ulChecksum );
