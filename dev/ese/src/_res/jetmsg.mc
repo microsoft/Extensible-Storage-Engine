@@ -1469,7 +1469,7 @@ Additional information:%n
 MessageId=540
 SymbolicName=DB_DIVERGENCE_ID
 Language=English
-%1 (%2) %3Database %4: Page %5 in a B-Tree (ObjectId: %11) logical data checksum %6 failed to match logged scan check %7 checksum (seed %8) at log position %9.%n
+%1 (%2) %3Database %4: Page %5 in a B-Tree (ObjectId: %11) logical data checksum %6 failed to match logged scan check %7 checksum (seed %8) at log position %9 / dbtime %14.%n
 Additional information:%n
 %tSource: %10%n
 %tSourceObjidInvalid: %12%n

@@ -26,7 +26,7 @@ BOOL                g_fRetryException   = fFalse;
 
 //  these should only accessed while g_csError is held
 #ifdef DEBUG
-WCHAR               g_wszAssertText[1024];
+WCHAR               g_wszAssertTextFull[1024];
 #endif
 DWORD               g_fSkipAssert = fFalse;
 
@@ -484,7 +484,11 @@ void HandleNestedAssert( WCHAR const *szMessageFormat, char const *szFilename, L
     KernelDebugBreakPoint();
 }
 
-void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, LONG lLine, ... )
+// ============================================================================================================
+//         CHK / DEBUG Assert
+// ============================================================================================================
+
+void __stdcall AssertFail( PCSTR szMessageFormat, PCSTR szFilename, LONG lLine, ... )
 {
     va_list args;
     va_start( args, lLine );
@@ -498,7 +502,8 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
         return;
     }
 
-    CHAR                szAssertText[1024];
+    CHAR                szAssertText[500];
+    CHAR                szAssertAddlInfo[500];
 
     /*      get last error before another system call
     /**/
@@ -531,19 +536,22 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
 
     g_tidAssertFired = DwUtilThreadId();
 
-    INT             id;
+
+    /******************************************************
+    /*  Collect and format information strings
+    /**/
 
     g_szFilenameAssert = szFilename;
     g_lLineAssert = lLine;
 
     /*      select file name from file path
     /**/
-    szFilename = ( NULL == strrchr( szFilename, chPathDelimiter ) ) ? szFilename : strrchr( szFilename, chPathDelimiter ) + sizeof( CHAR );
+    szFilename = SzSourceFileName( szFilename );
 
     /*      assemble monolithic assert string
     /**/
 
-    /*  start by putting in the assert message
+    /*  start by creating the assert message
     /**/
     OSStrCbFormatA(
         szAssertText + offset,
@@ -556,71 +564,72 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
         sizeof( szAssertText ) - offset,
         szMessageFormat,
         args );
-    offset = strlen( szAssertText );
+    // Code below wants this without "Assertion Failure:" prepended
+    const CHAR * const szAssertMessage = szAssertText + offset;
 
-    OSStrCbAppendA(
-        szAssertText + offset,
-        sizeof( szAssertText ) - offset,
-        "\r\n" );
-    offset = strlen( szAssertText );
-
-    /*  Add the version, file, line and PID/TID info
+    /*  collect issue source - file:line, product version, OS version, and last error info
     /**/
+
+    // FUTURE: nit, wish we had not embedded last error info into the issue source string, but
+    // splitting it out - means making sure we don't break datacenter optics which parses this.
+    WCHAR wszIssueSource[ g_cchIssueSourceMax ] = L"FORMAT STRING FAIL";
+    C_ASSERT( _countof( wszIssueSource ) < 260 );   //  make sure we stay reasonably small
+    if ( FOSDllUp() )
+    {
+        ERRFormatIssueSource( wszIssueSource, sizeof( wszIssueSource ), dwSavedGLE, szFilename, lLine );
+    }
+
+    /*  gather additional info for developer
+    /**/
+
+    /*  Add the runtime PID/TID info
+    /**/
+    offset = 0;
     OSStrCbFormatA(
-        szAssertText + offset,
-        sizeof( szAssertText ) - offset,
-        "Rel.%d.%d, File %hs, Line %d, PID: %d (0x%x), TID: 0x%x \r\n\r\n",
-        DwUtilImageBuildNumberMajor(),
-        DwUtilImageBuildNumberMinor(),
-        szFilename,
-        lLine,
+        szAssertAddlInfo + offset,
+        sizeof( szAssertAddlInfo ) - offset,
+        "PID: %d (0x%x), TID: 0x%x \r\n\r\n",
         DwUtilProcessId(),
         DwUtilProcessId(),
         DwUtilThreadId() );
     offset = strlen( szAssertText );
 
-    /*  Can't get TLS error state until OS preinit is done */
-    if ( FOSLayerUp() )
-    {
-        /*  Add the last error info
-        /**/
-        OSStrCbFormatA(
-            szAssertText + offset,
-            sizeof( szAssertText ) - offset,
-            "Last * Info (may or may not be relevant to your debug):\r\n"
-            "\tESE Err: %d (%hs:%d)\r\n"
-            "\tWin32 Error: %d\r\n",
-            PefLastThrow() ? PefLastThrow()->Err() : 0,
-            PefLastThrow() ? SzSourceFileName( PefLastThrow()->SzFile() ) : "",
-            PefLastThrow() ? PefLastThrow()->UlLine() : 0,
-            dwSavedGLE );
-        offset = strlen( szAssertText );
-    }
-
     /*  Add the assert.txt file
     /**/
     OSStrCbFormatA(
-        szAssertText + offset,
-        sizeof( szAssertText ) - offset,
+        szAssertAddlInfo + offset,
+        sizeof( szAssertAddlInfo ) - offset,
         "\r\nComplete information can be found in:  %ws\r\n",
         wszAssertFile );
     offset = strlen( szAssertText );
 
-    OSTrace( JET_tracetagAsserts, szAssertText );
+    /*  Eventing and CPRINTFFILE want it in single unicode string
+    /**/
+
+    OSStrCbFormatW( g_wszAssertTextFull, sizeof( g_wszAssertTextFull ),
+        L"%hs\r\n%ws\r\n%hs",
+        szAssertText,
+        wszIssueSource,
+        szAssertAddlInfo );
+
 
     /******************************************************
+    /*  Send it to various government agencies (just kidding!).  But it we do file this in quintuplicate!
     /**/
-    /*      if event log environment variable set then write
-    /*      assertion to event log.
-    /**/
+
+    // Send to debug tracing / OSTrace() ...
+    //
+
+    OSTrace( JET_tracetagAsserts, OSFormat( "%hs\r\n%ws\r\n%hs", szAssertText, wszIssueSource, szAssertAddlInfo ) );
+
+    // Event Log
+    //     if event log suppression unset (used by Enforce) then write assertion to event log.
+
     if ( !g_fNoWriteAssertEvent && FOSDllUp() )
     {
-        const WCHAR *   rgszT[] = { g_wszAssertText };
+        const WCHAR *   rgszT[] = { g_wszAssertTextFull };
 
-        (void)ErrOSSTRAsciiToUnicode( szAssertText,
-                                      g_wszAssertText,
-                                      _countof( g_wszAssertText ) );
-
+        // Note we log event ID = 0 in debug, but 901 for assert tracks in retail.  Seems duplicative.
         UtilReportEvent(
                 eventError,
                 GENERAL_CATEGORY,
@@ -631,19 +640,29 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
 
     // Log to OS Diagnostics
     //
-    WCHAR wszIssueSource[ g_cchIssueSourceMax ] = L"FORMAT STRING FAIL";
-    C_ASSERT( _countof( wszIssueSource ) < 260 );   //  make sure we stay reasonably small
-    if ( FOSDllUp() )
+
+    OSDiagTrackAssertFail( szAssertMessage, wszIssueSource );
+
+    // Push to persisted file, so it is not lost
+    //
+
     {
-        ERRFormatIssueSource( wszIssueSource, sizeof( wszIssueSource ), dwSavedGLE, szFilename, lLine );
-    }
-    OSDiagTrackAssertFail( szMessageFormat, wszIssueSource );
-
-{
     CPRINTFFILE cprintffileAssertTxt( wszAssertFile );
-    cprintffileAssertTxt( "%ws", g_wszAssertText );
-}
+    cprintffileAssertTxt( "%ws", g_wszAssertTextFull );
+    }
 
+    // And finally print out to the debugger (if attached)
+    //
+
+    OSDebugPrint( g_wszAssertTextFull );
+
+
+    /******************************************************
+    /*  Take action (maybe)
+    /**/
+
+    /*      Adjust to developer preferences
+    /**/
     UINT wAssertAction = g_wAssertAction;
     BOOL fDevMachine = fFalse;
 #ifndef MINIMAL_FUNCTIONALITY
@@ -679,10 +698,6 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
     }
 #endif
 
-    /*      Print out the assert if a debugger is attached
-    /**/
-    OSDebugPrint( g_wszAssertText );
-
     /*      Perform the Assert Action
     /**/
     if ( wAssertAction == JET_AssertExit )
@@ -691,7 +706,7 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
     }
     else if ( wAssertAction == JET_AssertBreak )
     {
-        OSDebugPrint( L"\nTo continue, press 'g'.\n" );
+        OSDebugPrint( L"\nTo continue, press 'g'.\n\n" );
         SetLastError(dwSavedGLE);
         KernelDebugBreakPoint();
     }
@@ -726,21 +741,22 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
     else if (   wAssertAction == JET_AssertMsgBox ||
                 wAssertAction == JET_AssertSkippableMsgBox )
     {
+        INT     id;
         ULONG   cchOffset;
 
         //  append the debugger message
 
-        cchOffset = LOSStrLengthW( g_wszAssertText );
+        cchOffset = LOSStrLengthW( g_wszAssertTextFull );
 
-        OSStrCbFormatW( g_wszAssertText+cchOffset, _countof(g_wszAssertText) - cchOffset,
+        OSStrCbFormatW( g_wszAssertTextFull+cchOffset, _countof(g_wszAssertTextFull) - cchOffset,
                 L"%hs%hs" L"%ws",
                 szNewLine, szNewLine,
                 IsDebuggerAttachable() || IsDebuggerAttached() ? wszAssertPrompt : wszAssertPrompt2
                  );
 
-        cchOffset += LOSStrLengthW( g_wszAssertText + cchOffset );
+        cchOffset += LOSStrLengthW( g_wszAssertTextFull + cchOffset );
 
-        id = UtilMessageBoxW(   g_wszAssertText,
+        id = UtilMessageBoxW(   g_wszAssertTextFull,
                                 wszAssertCaption,
                                 MB_SERVICE_NOTIFICATION | MB_SYSTEMMODAL | MB_ICONSTOP |
                                 ( IsDebuggerAttachable() || IsDebuggerAttached() ? MB_OKCANCEL : MB_OK ) );
@@ -792,11 +808,35 @@ void AssertErr( const ERR err, PCSTR szFileName, const LONG lLine )
 // Needed by FUtilSystemBetaFeatureEnabled
 extern ULONG_PTR UlParam( const INST* const pinst, const ULONG paramid );
 
-void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
+// ============================================================================================================
+//         FRE / RETAIL Assert
+// ============================================================================================================
+
+void __stdcall AssertFail( PCSTR szMessageFormat, PCSTR szFilename, LONG lLine, ... )
 {
     /*      get last error before another system call
     /**/
     DWORD dwSavedGLE = GetLastError();
+
+
+    /******************************************************
+    /*  Collect and format information strings
+    /**/
+
+    /*      Format the assert message
+    /**/
+    CHAR szAssertText[ 500 /* g_cchIssueMsgMax / 2 to save stack space */ ] = "VA FORMAT STRING FAIL";
+
+    va_list args;
+    va_start( args, lLine );
+
+    if ( szMessageFormat )
+    {
+        // FUTURE: I am not sure of the down stream affect of passing a wchar szAssertText to OSDiagTrackAssertFail() and
+        // if the later optics can handle that change invisibly.  But this would be simplified and remove 1/3rd the stack
+        // usage of the function if we could unify to a WCHAR here.
+        OSStrCbVFormatA( szAssertText, sizeof( szAssertText ), szMessageFormat, args );
+    }
 
     /*      format the source of the issue, including product ver,
     /*      system ver, files ptrs and last errors
@@ -810,13 +850,17 @@ void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
         ERRFormatIssueSource( wszIssueSource, sizeof( wszIssueSource ), dwSavedGLE, szFilename, lLine );
     }
 
-    /*      if event log environment variable set then write
-    /*      assertion to event log.
+    /******************************************************
+    /*  Send it to the three-letter government agencies (just kidding! again!).
     /**/
+
+    // Event Log
+    //     if event log suppression unset (used by Enforce) then write assertion to event log.
+
     if ( !g_fNoWriteAssertEvent && FOSDllUp() )
     {
-        WCHAR wszMessage[ g_cchIssueMsgMax ] = L"FORMAT STRING FAIL";
-        OSStrCbFormatW( wszMessage, sizeof( wszMessage ), L"%hs", szMessage ? szMessage : "" );
+        WCHAR wszMessage[ _countof( szAssertText ) ] = L"FORMAT STRING FAIL";
+        OSStrCbFormatW( wszMessage, sizeof( wszMessage ), L"%hs", szAssertText );
 
         const WCHAR * rgszT[] = { wszIssueSource, WszUtilImageBuildClass(), wszMessage };
 
@@ -828,8 +872,14 @@ void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
                 rgszT );
     }
 
-    // NULL is not expected here, but will check just in case.
-    OSDiagTrackAssertFail( szMessage ? szMessage : "", wszIssueSource );
+    // Log to OS Diagnostics
+    //
+
+    OSDiagTrackAssertFail( szAssertText, wszIssueSource );
+
+    /******************************************************
+    /*  Take action (maybe)
+    /**/
 
 #ifdef DEBUG
     #error "We would not want to use staging in debug builds, we would always just want to break, but just to check this is ONLY regular retail AssertFail, so no debug code path ends here."
@@ -879,6 +929,10 @@ void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
         g_tidAssertFired = 0x0;
         LeaveCriticalSection( &g_csError );
     }
+
+    /* End the var args ... not sure it should be before SetLastError(), but playing it safe.
+    /**/
+    va_end( args );
 
     /* Restore the last error, to avoid affecting other code paths if we ignored the assert(), and to make debuggability better */
     SetLastError(dwSavedGLE);

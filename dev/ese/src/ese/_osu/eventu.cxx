@@ -23,6 +23,19 @@ WCHAR WchReportInstState( const INST * const pinst )
     return '-'; //  actually unknown!?
 }
 
+CBasicProcessInfo::CBasicProcessInfo( const INST * const pinst )
+    {
+#ifdef ESENT
+    //  I (SOMEONE) believe that DwUtilImageVersionMajor() and DwUtilImageBuildNumberMajor() reports false numbers for various
+    //  poorly thought out / invalid (*IMNHO*) reasons, would rather not report anything at all than bad / false numbers.
+    OSStrCbFormatW( m_wszStateInfoEx, sizeof(m_wszStateInfoEx), L"%I32u,%wc,%I32u", DwUtilProcessId(), WchReportInstState( pinst ), OpTraceContext() );
+#else
+    //  Format of Bu.il.dNum.ber copied from FOSSysinfoPreinit() for Exchange.
+    OSStrCbFormatW( m_wszStateInfoEx, sizeof(m_wszStateInfoEx), L"%I32u,%wc,%I32u,%02I32u.%02I32u.%04I32u.%03I32u", DwUtilProcessId(), WchReportInstState( pinst ), OpTraceContext(),
+        DwUtilImageVersionMajor(), DwUtilImageVersionMinor(), DwUtilImageBuildNumberMajor(), DwUtilImageBuildNumberMinor() );
+#endif
+}
+
 void UtilReportEvent(
     const EEventType    type,
     const CategoryId    catid,
@@ -62,17 +75,8 @@ void UtilReportEvent(
         rgpsz[ 0 ] = WszUtilProcessFriendlyName();
     }
 
-    WCHAR wszStateInfoEx[16 + 2 + 4 + 20];  //  PID + Recovery/Undo/Do-time/Term mode + ApiOpCode + Bu.il.dNum.ber
-#ifdef ESENT
-    //  I (SOMEONE) believe that DwUtilImageVersionMajor() and DwUtilImageBuildNumberMajor() reports false numbers for various
-    //  poorly thought out / invalid (*IMNHO*) reasons, would rather not report anything at all than bad / false numbers.
-    OSStrCbFormatW( wszStateInfoEx, sizeof(wszStateInfoEx), L"%I32u,%wc,%I32u", DwUtilProcessId(), WchReportInstState( pinst ), OpTraceContext() );
-#else
-    //  Format of Bu.il.dNum.ber copied from FOSSysinfoPreinit() for Exchange.
-    OSStrCbFormatW( wszStateInfoEx, sizeof(wszStateInfoEx), L"%I32u,%wc,%I32u,%02I32u.%02I32u.%04I32u.%03I32u", DwUtilProcessId(), WchReportInstState( pinst ), OpTraceContext(),
-        DwUtilImageVersionMajor(), DwUtilImageVersionMinor(), DwUtilImageBuildNumberMajor(), DwUtilImageBuildNumberMinor() );
-#endif
-    rgpsz[1] = wszStateInfoEx;
+    CBasicProcessInfo procinfo( pinst );
+    rgpsz[1] = procinfo.Wsz();
 
     WCHAR wszDisplayName[JET_cbFullNameMost + 3]; // 3 = sizof(": ") + 1
     /*

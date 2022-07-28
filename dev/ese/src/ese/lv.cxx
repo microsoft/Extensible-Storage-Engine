@@ -7282,6 +7282,13 @@ ERR ErrAccumulateLvPageData(
     return JET_errSuccess;
 }
 
+//  ErrAccumulatePageStats() is called once for each page with pkdf == NULL, and then called on each node 
+//  on the page (both regular nodes and reserved nodes - except the external header) with the pkdf and 
+//  itag and node flags set appropriately.
+//
+//  Some other comments from above ErrAccumulatePageStats() also apply here, but this operates on LV context
+//  data from dbspacedump.cxx / eseutil.
+
 ERR ErrAccumulateLvNodeData(
     const CPAGE::PGHDR * const  ppghdr,
     INT                         itag,

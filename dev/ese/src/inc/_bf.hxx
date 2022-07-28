@@ -1408,7 +1408,7 @@ void BFIPatchRequestIORange( PBF pbf, const CPageEvents cpe, const TraceContext&
 void BFIValidatePagePgno_( const PBF pbf, PCSTR szFunction );
 void BFIValidatePageUsed( const PBF pbf );
 
-ERR ErrBFIVerifyPage( const PBF pbf, const CPageEvents cpe, const BOOL fFixErrors );
+ERR ErrBFIVerifyPage( const PBF pbf, const PAGEValidationReason pgvr, const CPageEvents cpe, const BOOL fFixErrors );
 
 bool FBFICurrentPage( _In_ const PBF pbf, _In_ const IFMP ifmp, _In_ const PGNO pgno );
 bool FBFIUpdatablePage( _In_ const PBF pbf );

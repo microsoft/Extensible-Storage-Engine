@@ -17,6 +17,8 @@ public:
     TestCPageValidationAction() { Reset(); }
     ~TestCPageValidationAction() {}
 
+    PAGEValidationReason Pgvr() const { return pgvr::UnitTest; }
+
     void Reset()
     {
         m_pgno = pgnoNull;
@@ -111,7 +113,7 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheck )
     const bool fPreviouslySet = FNegTestSet( fCorruptingWithLostFlush );
 #endif
 
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
 
     CPAGE cpage;
     cpage.LoadNewTestPage( 4096 );
@@ -170,7 +172,7 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckInconsistentFlushMapDbTime )
     const bool fPreviouslySet = FNegTestSet( fCorruptingWithLostFlush );
 #endif
 
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
 
     CPAGE cpage;
     cpage.LoadNewTestPage( 4096 );
@@ -221,7 +223,7 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeDetection )
     SIGGetSignature( &signFlushMapHdrFlushFromDb );
     CHECK( JET_errSuccess == ErrOSFSCreate( &pfsapi ) );
 
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
 
     CPAGE cpage;
     cpage.LoadNewTestPage( 4096 );
@@ -300,7 +302,7 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeOnly )
     SIGGetSignature( &signFlushMapHdrFlushFromDb );
     CHECK( JET_errSuccess == ErrOSFSCreate( &pfsapi ) );
 
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
 
     CPAGE cpage;
     cpage.LoadNewTestPage( 4096 );
@@ -847,8 +849,8 @@ JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBuffer
 
     CHECK( cpageSmall.CbPageFree() > 1004 /* should be able to fit another node now */ );
 
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
     //  We've now created gaps, insert enough data to trigger page re-organization.
 
@@ -874,12 +876,12 @@ JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBuffer
     cpageLarge.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
 
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
 
     CHECK( JET_errSuccess == cpageSmall.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpageLarge.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
 }
 
@@ -962,7 +964,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
 #ifdef DEBUG
     CHECK( cpage.CbBuffer() == 12 * 1024 );
 #endif
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( !cpage.FIsNormalSized() );
 // not public
@@ -1015,7 +1017,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
 #ifdef DEBUG
     CHECK( cpage.CbBuffer() == cbPage );
 #endif
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk2 == cpage.LoggedDataChecksum() );
 
     //  Try deletes, not necessary.
@@ -1033,7 +1035,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
 
     CHECK( cpage.CbPageFree() > 25 * 1024 );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
     cpage.GetPtr( 3, &line );
     CHECK( sizeof(rgbData) == line.cb );
@@ -1053,7 +1055,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     CHECK( cpage.CbBuffer() == 8 * 1024 );
 #endif
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk3 == cpage.LoggedDataChecksum() );
 
     const PAGECHECKSUM pgchk4 = cpage.LoggedDataChecksum();
@@ -1090,10 +1092,10 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
 
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
 }
 
@@ -1131,7 +1133,7 @@ JETUNITTESTEX( CPAGE, EmptyPageDehydration16KB, JetSimpleUnitTest::dwBufferManag
 #ifdef DEBUG
     CHECK( cpage.CbBuffer() == OSMemoryPageCommitGranularity() );
 #endif
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( !cpage.FIsNormalSized() );
 // not public
@@ -1143,7 +1145,7 @@ JETUNITTESTEX( CPAGE, EmptyPageDehydration16KB, JetSimpleUnitTest::dwBufferManag
 
     cpage.RehydratePage();
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( cpage.FIsNormalSized() );
     CHECK( pgchk == cpage.LoggedDataChecksum() );
@@ -1211,7 +1213,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
     const void * pv1; size_t cb1; const void * pv2; size_t cb2;
     cpage.ReorganizePage( &pv1, &cb1, &pv2, &cb2 );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( cbNextSize <= 4 * 1024 );
@@ -1227,7 +1229,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
     CHECK( cpage.CbBuffer() == 4 * 1024 );
 #endif
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk == cpage.LoggedDataChecksum() );
 
     //  Check that basic read functions work while the page is dehydrated.
@@ -1261,7 +1263,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
     CHECK( cpage.CbBuffer() == cbPage );
 #endif
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk == cpage.LoggedDataChecksum() );
 
     cpage.GetPtr( 1, &line );
@@ -1347,16 +1349,16 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic4KB, JetSimpleUnitTest::dwBufferManager 
     cpage.DehydratePage( cbBuffer, fFalse );
     FNegTestUnset( fInvalidUsage );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
     //cpage.RehydratePage();
 
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
 }
 
@@ -1408,7 +1410,7 @@ JETUNITTESTEX( CPAGE, DirtyPageDehydration, JetSimpleUnitTest::dwBufferManager )
 #ifdef DEBUG
     CHECK( cpage.CbBuffer() == 12 * 1024 );
 #endif
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( !cpage.FIsNormalSized() );
 
@@ -1427,7 +1429,7 @@ JETUNITTESTEX( CPAGE, DirtyPageDehydration, JetSimpleUnitTest::dwBufferManager )
     const void * pv1; size_t cb1; const void * pv2; size_t cb2;
     cpage.ReorganizePage( &pv1, &cb1, &pv2, &cb2 );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance() ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest ) );
 
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( cbNextSize <= 8 * 1024 );
@@ -1439,7 +1441,7 @@ JETUNITTESTEX( CPAGE, DirtyPageDehydration, JetSimpleUnitTest::dwBufferManager )
     CHECK( cpage.CbBuffer() == 8 * 1024 );
 #endif
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance() ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest ) );
 
     cpage.RehydratePage();
     CHECK( cpage.CbPageFree() > 25 * 1024 );
@@ -1457,10 +1459,10 @@ JETUNITTESTEX( CPAGE, DirtyPageDehydration, JetSimpleUnitTest::dwBufferManager )
 
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance() ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest ) );
 */
 }
 
@@ -1519,7 +1521,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
     cpage.DehydratePage( cbBuffer, fTrue );
 
     OnDebug( CHECK( cpage.CbBuffer() == 12 * 1024 ) );
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( !cpage.FIsNormalSized() );
 // not public
@@ -1570,7 +1572,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
 //  CHECK( cpage.CbPageFree() > 20 * 1024 );
 //  OnDebug( CHECK( cpage.CbBuffer() == cbPage ) );
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk2 == cpage.LoggedDataChecksum() );
 
     //  Try deletes, not necessary.
@@ -1599,7 +1601,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     CHECK( cpage.CbPageFree() > 25 * 1024 );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
     cpage.GetPtr( 3, &line );
     CHECK( sizeof(rgbData) == line.cb );
@@ -1616,7 +1618,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     OnDebug( CHECK( cpage.CbBuffer() == 12 * 1024 ) );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk25 == cpage.LoggedDataChecksum() );
 
 
@@ -1644,7 +1646,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     OnDebug( CHECK( cpage.CbBuffer() == 8 * 1024 ) );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk3 == cpage.LoggedDataChecksum() );
 
     const PAGECHECKSUM pgchk4 = cpage.LoggedDataChecksum();
@@ -1680,10 +1682,10 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::UnitTest );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
-    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
 }
 
@@ -1772,7 +1774,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
                 const PAGECHECKSUM pgchk = cpage.LoggedDataChecksum();
                 cpage.DehydratePage( cbBuffer, fFalse );
                 CHECK( !cpage.FIsNormalSized() );
-                CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+                CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
                 CHECK( pgchk == cpage.LoggedDataChecksum() );
                 fDehydratedWithoutReorg = fTrue;
             }
@@ -1822,7 +1824,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
                 cpage.DehydratePage( cbBuffer, fFalse );
 
                 CHECK( !cpage.FIsNormalSized() );
-                CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+                CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
                 CHECK( pgchk == cpage.LoggedDataChecksum() );
 
                 //  ensure no re-org happened ...
@@ -1846,7 +1848,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
 
                 CHECK( !cpage.FIsNormalSized() );
                 OnDebug( CHECK( cbBuffer == cpage.CbBuffer() ) );
-                CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
+                CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
                 CHECK( pgchk == cpage.LoggedDataChecksum() );
 
                 // not only should it be equal to CbBuffer, we should be at smallest size possible
@@ -1938,7 +1940,7 @@ JETUNITTESTEX ( CPAGE, ErrCheckPagesPerf, JetSimpleUnitTest::dwDontRunByDefault 
         for ( INT i = 0; i < cIterations; i++ )
         {
 
-            CHECK( cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) == JET_errSuccess );
+            CHECK( cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) == JET_errSuccess );
         }
         DWORD dwEnd = TickOSTimeCurrent();
         printf( "CheckBasics: cRecords = %d, iterations = %d, per-iteration time (us) = %f \n",
@@ -1953,7 +1955,7 @@ JETUNITTESTEX ( CPAGE, ErrCheckPagesPerf, JetSimpleUnitTest::dwDontRunByDefault 
         for ( INT i = 0; i < cIterations; i++ )
         {
 
-            CHECK( cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) == JET_errSuccess );
+            CHECK( cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) == JET_errSuccess );
         }
         DWORD dwEnd = TickOSTimeCurrent();
         printf( "CheckTagsNonOverlapping: cRecords = %d, iterations = %d, per-iteration time (us) = %f \n",
@@ -1968,7 +1970,7 @@ JETUNITTESTEX ( CPAGE, ErrCheckPagesPerf, JetSimpleUnitTest::dwDontRunByDefault 
         for ( INT i = 0; i < cIterations; i++ )
         {
 
-            CHECK( cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) == JET_errSuccess );
+            CHECK( cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) == JET_errSuccess );
         }
         DWORD dwEnd = TickOSTimeCurrent();
         printf( "CheckLineBoundedByTag: cRecords = %d, iterations = %d, per-iteration time (us) = %f \n",
@@ -1983,7 +1985,7 @@ JETUNITTESTEX ( CPAGE, ErrCheckPagesPerf, JetSimpleUnitTest::dwDontRunByDefault 
         for ( INT i = 0; i < cIterations; i++ )
         {
 
-            CHECK( cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckPageExtensiveness( CPAGE::CheckTagsNonOverlapping | CPAGE::CheckLineBoundedByTag ) ) == JET_errSuccess );
+            CHECK( cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckPageExtensiveness( CPAGE::CheckTagsNonOverlapping | CPAGE::CheckLineBoundedByTag ) ) == JET_errSuccess );
         }
         DWORD dwEnd = TickOSTimeCurrent();
         printf( "NonOverlapping+BoundedByTag: cRecords = %d, iterations = %d, per-iteration time (us) = %f \n",

@@ -6179,7 +6179,7 @@ ErrIsamPatchDatabasePages(
         //
         for ( PGNO pgnoT = pgnoStart; pgnoT < pgnoStart + cpg; pgnoT++ )
         {
-            CPageValidationNullAction nullaction;
+            CPageValidationNullAction nullaction( pgvr::PassivePagePatch );
             
             AssertTrack( pgnoT != 0, "IllegalAttemptPatchingDbShadowHdr" );
 
@@ -6760,6 +6760,29 @@ void IOReadDbPagesCompleted(
 {
     Assert( !( grbitQOS & qosIOCompleteWriteGameOn ) ); // since QOS is immediate, this should be impossible
 
+    PAGEValidationReason pgvr = pgvr::Invalid;
+    if ( tc.etc.iorReason.Iorp() == iorpBackup )
+    {
+        pgvr = pgvr::Backup;
+    }
+    else if ( tc.etc.iorReason.Iorp() == iorpDbScan || tc.etc.iorReason.Iort() == iortDbScan /* 2nd one jic */ )
+    {
+        pgvr = pgvr::DbScanReadPageIo;
+    }
+    else if ( tc.etc.iorReason.Iorp() == iorpDatabaseShrink )
+    {
+        pgvr = pgvr::DbShrink;
+    }
+    else if ( tc.etc.iorReason.Iorp() == iorpPatchFix )
+    {
+        pgvr = pgvr::PassivePagePatch;
+    }
+    else
+    {
+        pgvr = pgvr::ReadDbPagesUnknown;
+        AssertSz( fFalse, "Unknown IOR for backup read: %d.%d.%d.%d\n", tc.etc.iorReason.Ioru(), tc.etc.iorReason.Iorp(), tc.etc.iorReason.Iors(), tc.etc.iorReason.Iort() );
+    }
+
     /*  verify the chunk's pages
     /**/
     for ( DWORD ib = 0; ib < cbData; ib += g_cbPage )
@@ -6797,6 +6820,7 @@ void IOReadDbPagesCompleted(
                 ( fFailOnRuntimeLostFlushOnly ? pgvfFailOnRuntimeLostFlushOnly : pgvfDefault ) |
                 ( fReplayingRequiredRange ? pgvfDoNotCheckForLostFlush : pgvfDefault );
             CPageValidationLogEvent validationaction(
+                pgvr,
                 preaddata->ifmp,
                 logflags,
                 LOGGING_RECOVERY_CATEGORY );

@@ -45,12 +45,51 @@ enum CPAGEREORG
     reorgMax
 };
 
+typedef enum class PAGEValidationReason
+{
+    Invalid = 0,
+
+    UserReadPageIo = 1,              //  Regular Read IOs from BF Latch path - Typically from user, but could be verstore cleanup or OLD2 tasks as well.
+    UserReadPageIoNonExcl = 2,       //  Regular Read IOs also, but validation is done under shared latch.  We separate this for good reasons[1].
+    WritePageIo = 3,                 //  Before Writing a Page / Write IO
+    ReclaimCleanFromOsAvail = 3,     //  Guaranteed a soft fault
+    ReclaimUntidyFromOsAvail = 4,    //  Guaranteed a soft fault
+    ReclaimCleanUntidyFromOs = 5,    //  This is _probably_ a hard fault.  Except under latch conflict.  Maybe another case.
+    ReclaimDirtyFromOs = 6,          //  Not possible to say if this is a hard or soft fault.  Page is dirty, have to force it in.
+    RemapPageWriteIoComplete = 7,    //  In view mapping, we re-map the page from MM after we write a dirty page.
+    Backup = 8,                      //  Streaming backup specifically.
+    DbScanReadPageIo = 9,            //  Useful to separate DbScan read IO from regular read IO an Backup.
+    ReadDbPagesUnknown = 10,         //  catch all for any IOR we do not recognize in this path.
+    Repair = 11,                     //  Repair checks pages in a couple separate paths
+    ActivePagePatch = 12,            //  Active page patching
+    PassivePagePatch = 13,           //  Passive page patching and IRSv2 as well (note on the patch, AND on the active/read side/JetGetDatabasePages())
+    RaidCopySelfPatch = 14,          //  The page we read from other plexes.
+    RevertSnapshot = 15,             //  I presume pre-image we write to disk in RBS
+    DbutilPageDump = 16,             //  e.g. eseutil /m db.edb /p2423
+    DbShrink = 17,                   //  Shrink Archive of pages read.
+
+    // [1] We separate this because the page can change while we're analyzing it.  And this has led to buggy false checksum 
+    // failures in the past (TWO times!) when people didn't understand this.  In theory page check and the way the page can
+    // change should not be at conflict.  But if such a specific check were failing only for this case, it would be a clue
+    // to contrast what can happen under the WAR latch with that check.
+
+    //  leave this at the end - we don't care if these don't have stable IDs
+    UnitTest,
+#ifdef DEBUG
+    DebugCheck,                       //  Various debug checks in MM Remapping, cache dehydration/rehydration, etc
+    DebugCorruptFaultInj,             //  Fault injection to corrupt page elements
+#endif
+    Max
+} pgvr;
 
 //  ================================================================
 class IPageValidationAction
 //  ================================================================
 {
 public:
+
+    virtual PAGEValidationReason Pgvr() const = 0;
+
     virtual void BadChecksum(
         const PGNO pgno,
         const ERR err,
@@ -78,9 +117,13 @@ class CPageValidationNullAction : public IPageValidationAction
 //  ================================================================
 {
 public:
-    CPageValidationNullAction() {}
+    CPageValidationNullAction( const PAGEValidationReason pgvr ) :
+        m_pgvr( pgvr )
+        {}
     ~CPageValidationNullAction() {}
     
+    PAGEValidationReason Pgvr() const { return m_pgvr; }
+
     void BadChecksum(
         const PGNO pgno,
         const ERR err,
@@ -98,6 +141,9 @@ public:
         const ERR err,
         const BOOL fRuntime,
         const BOOL fFailOnRuntimeOnly ) { }
+
+private:
+    const PAGEValidationReason m_pgvr;
 };
 
 
@@ -119,7 +165,7 @@ class CPageValidationLogEvent : public IPageValidationAction
 //  ================================================================
 {
 public:
-    CPageValidationLogEvent( const IFMP ifmp, const INT logflags, const CategoryId category );
+    CPageValidationLogEvent( const PAGEValidationReason pgvs, const IFMP ifmp, const INT logflags, const CategoryId category );
     ~CPageValidationLogEvent();
 
     enum {  LOG_NONE            = 0x00 };
@@ -131,6 +177,8 @@ public:
     enum {  LOG_LOST_FLUSH      = 0x20 };
     enum {  LOG_EXTENSIVE_CHECKS= 0x40 };
     enum {  LOG_ALL             = LOG_BAD_CHECKSUM | LOG_UNINIT_PAGE | LOG_BAD_PGNO | LOG_CORRECTION | LOG_CHECKFAIL | LOG_LOST_FLUSH };
+
+    PAGEValidationReason Pgvr() const;
 
     void BadChecksum( const PGNO pgno, const ERR err, const PAGECHECKSUM checksumExpected, const PAGECHECKSUM checksumActual );
     void UninitPage( const PGNO pgno, const ERR err );
@@ -168,6 +216,7 @@ private:
     const IFMP m_ifmp;
     const INT m_logflags;
     const CategoryId m_category;
+    const PAGEValidationReason m_pgvr;
 };
 
 class ILatchManager;
@@ -533,6 +582,7 @@ class CPAGE
         };
 
         ERR     ErrCheckPage        ( CPRINTF * const     pcprintf,
+                                      const PAGEValidationReason  pgvr,
                                       const CheckPageMode mode = OnErrorReturnError,
                                       const CheckPageExtensiveness grbitExtensiveCheck = CheckDefault ) const;
 

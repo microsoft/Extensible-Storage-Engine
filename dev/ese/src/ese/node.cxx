@@ -175,8 +175,6 @@ LOCAL VOID NDILineToKeydataflags( const CPAGE& cpage, const LINE * pline, KEYDAT
     //  an in-memory corruption, or ESE bug.  Either way we're hosed if we continue.
 
 
-    PageAssertTrack( cpage, pline->cb > (ULONG)cbKeyCountTotal || FNegTest( fCorruptingPageLogically ), "LineNotLongEnoughForKeyCounts" );
-#ifdef DEBUG
     if ( pline->cb <= (ULONG)cbKeyCountTotal )
     {
         if ( perrNoEnforce == NULL )
@@ -189,7 +187,6 @@ LOCAL VOID NDILineToKeydataflags( const CPAGE& cpage, const LINE * pline, KEYDAT
             *perrNoEnforce = ErrERRCheck( JET_errNodeCorrupted );
         }
     }
-#endif
 
     if constexpr( pgnbc == pgnbcChecked ) 
     {
@@ -3278,7 +3275,7 @@ BOOL FNDCorruptRandomNodeElement( CPAGE * const pcpage )
             AssertSz( fFalse, "Bad code" );
         }
         //  Check this to ensure code that depends upon this, see the expected error it expects.
-        Assert( JET_errDatabaseCorrupted == pcpage->ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+        Assert( JET_errDatabaseCorrupted == pcpage->ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::DebugCorruptFaultInj, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
         return fTrue;
     }
 

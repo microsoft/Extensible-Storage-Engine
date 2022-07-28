@@ -5503,7 +5503,7 @@ LOCAL ERR ErrREPAIRIFixLeafPage(
     ERR err = JET_errSuccess;
     KEYDATAFLAGS    rgkdf[2];
 
-    Call( csr.Cpage().ErrCheckPage( popts->pcprintfError ) );
+    Call( csr.Cpage().ErrCheckPage( popts->pcprintfError, pgvr::Repair ) );
 
 Restart:
 
@@ -7088,7 +7088,7 @@ LOCAL ERR ErrREPAIRICheck(
         popts->crit.Leave();
     }
 
-    Call( csr.Cpage().ErrCheckPage( popts->pcprintfError, CPAGE::OnErrorReturnError, CPAGE::CheckAll ) );
+    Call( csr.Cpage().ErrCheckPage( popts->pcprintfError, pgvr::Repair, CPAGE::OnErrorReturnError, CPAGE::CheckAll ) );
 
     if ( csr.Cpage().ObjidFDP() != objidFDP )
     {

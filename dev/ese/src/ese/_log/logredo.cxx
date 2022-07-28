@@ -3546,6 +3546,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 //              Assert( cb < sizeof( rgbRecNew ) );
                 if ( cb >= (SIZE_T)g_cbPage )
                 {
+                    OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"dba4c055-bbbf-4fd1-a56d-e786519803eb" );
                     Error( ErrERRCheck( JET_errLogCorrupted ) );
                 }
 
@@ -3560,6 +3561,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             Assert( (ULONG)data.Cb() == cbNewData );
             if ( (ULONG)data.Cb() != cbNewData )
             {
+                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"a3cb57b9-8ba1-496d-a6fc-4fc2f0140fc4" );
                 Error( ErrERRCheck( JET_errLogCorrupted ) );
             }
 
@@ -9913,6 +9915,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                         OSFormatW( L"%u", objidPage ),
                         OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() ),
                         OSFormatW( L"%d", (INT)plrscancheck->FEmptyPage() ),
+                        OSFormatW( L"%I64d", dbtimePageInLogRec ),
                     };
 
                     UtilReportEvent(
