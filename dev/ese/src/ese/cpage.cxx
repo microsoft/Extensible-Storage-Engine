@@ -788,11 +788,12 @@ CPAGE::PfnCmpTAG CPAGE::PfnCmpPtagIb() const
 //
 
 //  ================================================================
-CPageValidationLogEvent::CPageValidationLogEvent( const IFMP ifmp, const INT logflags, const CategoryId category ) :
+CPageValidationLogEvent::CPageValidationLogEvent( const PAGEValidationReason pgvr, const IFMP ifmp, const INT logflags, const CategoryId category ) :
 //  ================================================================
     m_ifmp( ifmp ),
     m_logflags( logflags ),
-    m_category( category )
+    m_category( category ),
+    m_pgvr ( pgvr )
 {
 }
 
@@ -800,6 +801,19 @@ CPageValidationLogEvent::CPageValidationLogEvent( const IFMP ifmp, const INT log
 CPageValidationLogEvent::~CPageValidationLogEvent()
 //  ================================================================
 {
+}
+
+#ifdef DEBUG
+//  We want these at the end, we don't care if they move.
+C_ASSERT( (INT)pgvr::UnitTest + 3 == (INT)pgvr::Max );
+C_ASSERT( (INT)pgvr::DebugCheck + 2 == (INT)pgvr::Max );
+#endif
+
+//  ================================================================
+PAGEValidationReason CPageValidationLogEvent::Pgvr() const
+//  ================================================================
+{
+    return m_pgvr;
 }
 
 //  ================================================================
@@ -4308,7 +4322,7 @@ ERR CPAGE::ErrValidatePage(
 
         Call( err );
         
-        err = ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), OnErrorReturnError, CheckAll );
+        err = ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pvalidationaction->Pgvr(), OnErrorReturnError, CheckAll );
 
         //  the page is fine
 
@@ -4390,6 +4404,7 @@ ERR CPAGE::ErrValidatePage(
             cpe = CPAGE::CheckDefault;
         }
         Call( ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(),
+                            pvalidationaction->Pgvr(),
                             OnErrorFireWall,
                             cpe ) );
     }
@@ -4425,7 +4440,7 @@ NOINLINE ERR CPAGE::ErrCaptureCorruptedPageInfo_( const CheckPageMode mode, cons
 }
 
 //  ================================================================
-NOINLINE ERR CPAGE::ErrCaptureCorruptedPageInfo_( const CheckPageMode mode, const PCWSTR szCorruptionType, const PCWSTR szCorruptionDetails, const CHAR * const szFile, const LONG lLine, const BOOL fLogEvent ) const
+NOINLINE ERR CPAGE::ErrCaptureCorruptedPageInfo_( const CheckPageMode mode, const PCWSTR wszCorruptionType, const PCWSTR wszCorruptionDetails, const CHAR * const szFile, const LONG lLine, const BOOL fLogEvent ) const
 //  ================================================================
 {
     OnRTM( BOOL fFriendyEvent = fFalse );
@@ -4442,11 +4457,11 @@ NOINLINE ERR CPAGE::ErrCaptureCorruptedPageInfo_( const CheckPageMode mode, cons
             WCHAR szPageNumber[ 32 ];
             OSStrCbFormatW( szPageNumber, sizeof( szPageNumber ), L"%d (0x%X)", PgnoThis(), PgnoThis() );
             rgpsz[1] = szPageNumber;
-            WCHAR szObjid[ 16 ];
-            OSStrCbFormatW( szObjid, sizeof( szObjid ), L"%u", ObjidFDP() );
-            rgpsz[2] = szObjid;
-            rgpsz[3] = szCorruptionType;
-            rgpsz[4] = szCorruptionDetails ? szCorruptionDetails : L"";
+            WCHAR wszObjid[ 16 ];
+            OSStrCbFormatW( wszObjid, sizeof( wszObjid ), L"%u", ObjidFDP() );
+            rgpsz[2] = wszObjid;
+            rgpsz[3] = wszCorruptionType;
+            rgpsz[4] = wszCorruptionDetails ? wszCorruptionDetails : L"";
 
             UtilReportEvent( eventError,
                          DATABASE_CORRUPTION_CATEGORY,
@@ -4480,7 +4495,7 @@ NOINLINE ERR CPAGE::ErrCaptureCorruptedPageInfo_( const CheckPageMode mode, cons
         if ( g_lesCorruptPages.FNeedToLog( ( ( m_ifmp <= 7 ) ? ( m_ifmp << 29 ) : ( m_ifmp << 24 ) ) | PgnoThis() ) )
         {
             // Have not gotten this page yet, capture it for posterity
-            (void)ErrDumpToIrsRaw( szCorruptionType, szCorruptionDetails ? szCorruptionDetails : L"" );
+            (void)ErrDumpToIrsRaw( wszCorruptionType, wszCorruptionDetails ? wszCorruptionDetails : L"" );
         }
     }
 
@@ -4493,7 +4508,7 @@ NOINLINE ERR CPAGE::ErrCaptureCorruptedPageInfo_( const CheckPageMode mode, cons
     }
 
     CHAR szCorr[ 100 ];
-    (void)ErrOSStrCbFormatA( szCorr, sizeof( szCorr ), "LogicalPageCorruption:%ws", szCorruptionType );
+    (void)ErrOSStrCbFormatA( szCorr, sizeof( szCorr ), "LogicalPageCorruption:%ws", wszCorruptionType );
 
 #ifdef RTM
     if ( mode == OnErrorFireWall )
@@ -4521,7 +4536,7 @@ NOINLINE ERR CPAGE::ErrCaptureCorruptedPageInfo_( const CheckPageMode mode, cons
 
     if ( mode == OnErrorFireWall )
     {
-        AssertFail( "Page-level Logical corruption detected when page was read in. Pgno = %d (%#x): %ws - %ws", szFile, lLine, PgnoThis(), PgnoThis(), szCorruptionType, szCorruptionDetails );
+        AssertFail( "Page-level Logical corruption detected when page was read in. Pgno = %d (%#x): %ws - %ws", szFile, lLine, PgnoThis(), PgnoThis(), wszCorruptionType, wszCorruptionDetails );
     }
 
     if ( mode == OnErrorEnforce )
@@ -4532,9 +4547,104 @@ NOINLINE ERR CPAGE::ErrCaptureCorruptedPageInfo_( const CheckPageMode mode, cons
     return ErrERRCheck_( JET_errDatabaseCorrupted, szFile, lLine );
 }
 
+class MapPageValidationReason
+{
+    struct MPQWSZ
+    {
+        QWORD   qwValue;
+        CHAR *  szSymbol;
+    };
+
+    static const MPQWSZ * PmpqwszMatch( const MPQWSZ * const rgqwsz, const ULONG cqwsz, const QWORD eValueMatch, const CHAR * const szNameMatch )
+    {
+        if ( szNameMatch != NULL )
+        {
+            for( ULONG imp = 0; imp < cqwsz; imp++ )
+            {
+                if ( 0 == strcmp( rgqwsz[imp].szSymbol, szNameMatch ) )
+                {
+                    return &rgqwsz[imp];
+                }
+            }
+        }
+        else // or trying to match on eValueMatch
+        {
+            for( ULONG imp = 0; imp < cqwsz; imp++ )
+            {
+                if ( rgqwsz[imp].qwValue == eValueMatch )
+                {
+                    return &rgqwsz[imp];
+                }
+            }
+        }
+        return NULL;
+    }
+
+    static const MPQWSZ * PmpqwszMatch( const QWORD eValueMatch, const CHAR * const szNameMatch )
+    {
+        #define MpEnumStr( e )    { (QWORD)pgvr::##e, #e }
+        static MPQWSZ s_rgsz[] =
+        {
+            MpEnumStr( Invalid ),
+            MpEnumStr( UserReadPageIo ),
+            MpEnumStr( UserReadPageIoNonExcl ),
+            MpEnumStr( WritePageIo ),
+            MpEnumStr( ReclaimCleanFromOsAvail ),
+            MpEnumStr( ReclaimUntidyFromOsAvail ),
+            MpEnumStr( ReclaimCleanUntidyFromOs ),
+            MpEnumStr( ReclaimDirtyFromOs ),
+            MpEnumStr( RemapPageWriteIoComplete ),
+            MpEnumStr( Backup ),
+            MpEnumStr( DbScanReadPageIo ),
+            MpEnumStr( ReadDbPagesUnknown ),
+            MpEnumStr( Repair ),
+            MpEnumStr( ActivePagePatch ),
+            MpEnumStr( PassivePagePatch ),
+            MpEnumStr( RaidCopySelfPatch ),
+            MpEnumStr( RevertSnapshot ),
+            MpEnumStr( DbutilPageDump ),
+            MpEnumStr( DbShrink ),
+
+            MpEnumStr( UnitTest ),
+#ifdef DEBUG
+            MpEnumStr( DebugCheck ),
+            MpEnumStr( DebugCorruptFaultInj ),
+#endif
+            MpEnumStr( Max )
+
+        };
+
+        return PmpqwszMatch( s_rgsz, _countof(s_rgsz), eValueMatch, szNameMatch );
+    }
+
+public:
+
+    static const CHAR * const Sz( const PAGEValidationReason pgvr )
+    {
+        const MPQWSZ * const pmpqszMatch = PmpqwszMatch( (QWORD)pgvr, NULL );
+        if ( pmpqszMatch != NULL )
+        {
+            return pmpqszMatch->szSymbol;
+        }
+
+        return "UnknownPgvr";
+    }
+};
+
+#ifdef ENABLE_JET_UNIT_TEST
+
+JETUNITTEST( CPAGE, MapPageValidationReason )
+{
+    CHECK( 0 == _stricmp( "UserReadPageIo", MapPageValidationReason::Sz( pgvr::UserReadPageIo ) ) );
+    CHECK( 0 == _stricmp( "UnitTest", MapPageValidationReason::Sz( pgvr::UnitTest ) ) );
+}
+
+#endif
+
 //  ================================================================
 ERR CPAGE::ErrCheckPage(
     CPRINTF * const pcprintf,
+    const PAGEValidationReason pgvr,
     const CheckPageMode mode, // = OnErrorReturnError
     const CheckPageExtensiveness grbitExtensiveCheck // = CheckDefault
      ) const
@@ -4544,6 +4654,10 @@ ERR CPAGE::ErrCheckPage(
     const PGHDR * const ppghdr  = (PGHDR*)m_bfl.pv;
     ULONG              *rgdw    = NULL;
     KEY                 keyLast;
+    WCHAR               wszCorruptionDetails[200];
+
+    Assert( pgvr != pgvr::Invalid );
+    Assert( pgvr != pgvr::Max );
 
     //  that this function is called on every read/write IO operation. However, it plays
     //  a substantial percentage of our CPU cost for deletion scenarios and for blocking the scavenging
@@ -4553,40 +4667,53 @@ ERR CPAGE::ErrCheckPage(
     //  The cbCheckSize, is the size of the buffer if we want to validate the page against a smaller
     //  size, or the size of the page if we want to validate against true page format.
 
+    const BOOL fLogEvent = fTrue;
+
+    const CHAR * const szPgvr = MapPageValidationReason::Sz( pgvr );
+
+    OSStrCbCopyW( wszCorruptionDetails, sizeof( wszCorruptionDetails ), L"Unset Details" );
+    // Note: there is not a missing comma, just being overly clever.
+    #define MakeCorruptionDetailsSz( szAppendedDetails, ... ) \
+        OSStrCbFormatW( wszCorruptionDetails, sizeof(wszCorruptionDetails), L"pgvr [%hs], page (%d): " szAppendedDetails, szPgvr, m_pgno, __VA_ARGS__ );
+
     if ( ppghdr->cbFree > CbBufferData() )
     {
-        (*pcprintf)( "page corruption (%d): cbFree too large (%d bytes, expected no more than %d bytes)\r\n",
-                        m_pgno, (USHORT)ppghdr->cbFree, CbBufferData() );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"CbFreeTooLarge" ) );
+        // Consider shortening this to "cbFree (%d) > CbBufferData (%d)", so that localization people yell 
+        // less at us.  Note the details of course aren't meant for anyone but ESE devs.
+        MakeCorruptionDetailsSz( L"cbFree too large (%d bytes, expected no more than %d bytes)", (USHORT)ppghdr->cbFree, CbBufferData() );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"CbFreeTooLarge", wszCorruptionDetails, fLogEvent ) );
     }
 
     if ( (USHORT) ppghdr->cbUncommittedFree > (USHORT) CbPageFree() )
     {
-        (*pcprintf)( "page corruption (%d): cbUncommittedFree too large (%d bytes, CbPageFree() is %d bytes / cbFree is %d bytes)\r\n",
-                        m_pgno, (USHORT)ppghdr->cbUncommittedFree, CbPageFree(), (USHORT)ppghdr->cbFree );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"CbUncommittedFreeTooLarge" ) );
+        MakeCorruptionDetailsSz( L"cbUncommittedFree too large (%d bytes, CbPageFree() is %d bytes / cbFree is %d bytes)",
+                        (USHORT)ppghdr->cbUncommittedFree, CbPageFree(), (USHORT)ppghdr->cbFree );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"CbUncommittedFreeTooLarge", wszCorruptionDetails, fLogEvent ) );
     }
 
     if ( ppghdr->ibMicFree > CbBufferData() )
     {
-        (*pcprintf)( "page corruption (%d): ibMicFree too large (%d bytes, expected no more than %d bytes)\r\n",
-                        m_pgno, (USHORT)ppghdr->ibMicFree, CbBufferData() );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"ibMicFreeTooLarge" ) );
+        MakeCorruptionDetailsSz( L"ibMicFree too large (%d bytes, expected no more than %d bytes)", (USHORT)ppghdr->ibMicFree, CbBufferData() );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"ibMicFreeTooLarge", wszCorruptionDetails, fLogEvent ) );
     }
 
     if ( ITagMicFree_() >= ( CbBufferData() / sizeof( TAG ) ) )
     {
-        (*pcprintf)( "page corruption (%d): itagMicFree too large (%d)\r\n",
-                        m_pgno, ITagMicFree_() );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"itagMicFreeTooLarge" ) );
+        MakeCorruptionDetailsSz( L"itagMicFree too large (%d)", ITagMicFree_() );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"itagMicFreeTooLarge", wszCorruptionDetails, fLogEvent ) );
     }
 
     //  make sure number of lines / itagMicFree variable is consistent
 
     if ( ( ITagMicFree_() == 0 ) && !FEmptyPage() && !FPreInitPage() )
     {
-        (*pcprintf)( "page corruption (%d): Empty page without fPageEmpty or fPagePreInit flags set\r\n", m_pgno );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"EmptyAndPreInitFlagsNotSet" ) );
+        MakeCorruptionDetailsSz( L"Empty page without fPageEmpty or fPagePreInit flags set" );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"EmptyAndPreInitFlagsNotSet", wszCorruptionDetails, fLogEvent ) );
     }
 
     const __int64 ctags = ITagMicFree_();
@@ -4594,11 +4721,9 @@ ERR CPAGE::ErrCheckPage(
     const ULONG_PTR pbPageDataEnd = PbDataEnd_();      // m_bfl.pv + CbBuffer() - tag array size (off itagMicFree)
     if ( pbPageDataEnd <= ( pbPageDataStart + 1 /* generous 1 byte in data section, tighter check next */ ) )
     {
-        (*pcprintf)( "page corruption (%d): itagMicFree / tag array too large, overlapping PGHDR (%p,%p,%I64d / %d).\r\n", m_pgno, pbPageDataEnd, pbPageDataStart, ctags, CbTagArray_() );
-        PageAssertTrack( *this, fFalse, "TagArrayWalkingOntoPghdr" );
-#ifdef DEBUG
-        Error( ErrCaptureCorruptedPageInfo( mode, L"TagArrayWalkingOntoPghdr" ) );
-#endif
+        MakeCorruptionDetailsSz( L"itagMicFree / tag array too large, overlapping PGHDR (%p,%p,%I64d / %d)", pbPageDataEnd, pbPageDataStart, ctags, CbTagArray_() );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagArrayWalkingOntoPghdr", wszCorruptionDetails, fLogEvent ) );
     }
 
     if ( ctags > 0 )
@@ -4608,11 +4733,9 @@ ERR CPAGE::ErrCheckPage(
         // not have proper external headers > cbMinLine, so we subtract one from ctags to remove ext hdr from consideration.
         if ( __int64( __int64( pbPageDataEnd - pbPageDataStart ) - ( ( ctags - 1 ) * cbMinLine ) ) < 0 )
         {
-            (*pcprintf)( "page corruption (%d): itagMicFree / tag array too large for real data left over (%I64d / %d,%p,%p).\r\n", m_pgno, ctags, CbTagArray_(), pbPageDataEnd, pbPageDataStart );
-            PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "TagArrayTooBigToLeaveDataRoom" );
-#ifdef DEBUG
-            Error( ErrCaptureCorruptedPageInfo( mode, L"TagArrayTooBigToLeaveDataRoom" ) );
-#endif
+            MakeCorruptionDetailsSz( L"itagMicFree / tag array too large for real data left over (%I64d / %d,%p,%p)", ctags, CbTagArray_(), pbPageDataEnd, pbPageDataStart );
+            (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+            Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagArrayTooBigToLeaveDataRoom", wszCorruptionDetails, fLogEvent ) );
         }
     }
 
@@ -4620,39 +4743,49 @@ ERR CPAGE::ErrCheckPage(
 
     if ( FEmptyPage() && FPreInitPage() )
     {
-        (*pcprintf)( "page corruption (%d): fPageEmpty and fPagePreInit flags must not be set at the same time\r\n", m_pgno );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"PageEmptyAndPagePreInitFlagsBothSet" ) );
+        MakeCorruptionDetailsSz( L"fPageEmpty and fPagePreInit flags must not be set at the same time" );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"PageEmptyAndPagePreInitFlagsBothSet", wszCorruptionDetails, fLogEvent ) );
     }
 
     if ( FPreInitPage() )
     {
         if ( ( ITagMicFree_() != 0 ) ||
-            !FNewRecordFormat() ||
+             !FNewRecordFormat() ||
              ( ( FFlags() & ~fPagePreInit & ~fPageNewRecordFormat & ~fPageNewChecksumFormat & ~maskFlushType ) != 0 ) ||
              ( PgnoPrev() != pgnoNull ) ||
              ( PgnoNext() != pgnoNull ) )
         {
-            (*pcprintf)( "page corruption (%d): writing a preinit page with non-0 itag, or non-allowed flags. Page should be largely zeros.\r\n", m_pgno );
-            Error( ErrCaptureCorruptedPageInfo( mode, L"PreInitPageFlagSetWithInvalidFlags" ) );
+            MakeCorruptionDetailsSz( L"writing a preinit page with non-0 itag, or non-allowed flags. Page should be largely zeros. Checks(%d,%d,%d,%d,%d)",
+                          ( ITagMicFree_() != 0 ),
+                          !FNewRecordFormat(),
+                          ( ( FFlags() & ~fPagePreInit & ~fPageNewRecordFormat & ~fPageNewChecksumFormat & ~maskFlushType ) != 0 ),
+                          ( PgnoPrev() != pgnoNull ),
+                          ( PgnoNext() != pgnoNull ) );
+            (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+            Error( ErrCaptureCorruptedPageInfoSz( mode, L"PreInitPageFlagSetWithInvalidFlags", wszCorruptionDetails, fLogEvent ) );
         }
     }
 
     if ( FIndexPage() && FPrimaryPage() )
     {
-        (*pcprintf)( "page corruption (%d): corrupt flags (0x%x)\r\n", m_pgno, FFlags() );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"CorruptFlagsMixedIndexPrimary" ) );
+        MakeCorruptionDetailsSz( L"corrupt flags = Pri+Idx (0x%x)", FFlags() );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"CorruptFlagsMixedIndexPrimary", wszCorruptionDetails, fLogEvent ) );
     }
 
     if ( FLongValuePage() && FIndexPage() )
     {
-        (*pcprintf)( "page corruption (%d): corrupt flags (0x%x)\r\n", m_pgno, FFlags() );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"CorruptFlagsMixedIndexLv" ) );
+        MakeCorruptionDetailsSz( L"corrupt flags = LV+Idx (0x%x)", FFlags() );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"CorruptFlagsMixedIndexLv", wszCorruptionDetails, fLogEvent ) );
     }
 
     if ( FRepairedPage() && !g_fRepair )
     {
-        (*pcprintf)( "page corruption (%d): repaired page (0x%x)\r\n", m_pgno, FFlags() );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"RepairedPage" ) );
+        MakeCorruptionDetailsSz( L"repaired page (0x%x)", FFlags() );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"RepairedPage", wszCorruptionDetails, fLogEvent ) );
     }
 
     INT cbTotal = 0;
@@ -4693,8 +4826,9 @@ ERR CPAGE::ErrCheckPage(
             {
                 continue;
             }
-            (*pcprintf)( "page corruption (%d): Non TAG-0 - TAG %d has zero cb(cb = %d, ib = %d)\r\n", m_pgno, itag, cb, ib );
-            Error( ErrCaptureCorruptedPageInfo( mode, L"ZeroLengthIline" ) );
+            MakeCorruptionDetailsSz( L"Non TAG-0 - TAG %d has zero cb(cb = %d, ib = %d)", itag, cb, ib );
+            (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+            Error( ErrCaptureCorruptedPageInfoSz( mode, L"ZeroLengthIline", wszCorruptionDetails, fLogEvent ) );
         }
 
         //  Cb() and Ib() are USHORTs; so only need to look for overflows
@@ -4706,9 +4840,10 @@ ERR CPAGE::ErrCheckPage(
 
         if ( (DWORD)ib + (DWORD)cb > (DWORD)ppghdr->ibMicFree )
         {
-            (*pcprintf)( "page corruption (%d): TAG %d ends in free space (cb = %d, ib = %d, ibMicFree = %d)\r\n",
-                            m_pgno, itag, cb, ib, (USHORT)ppghdr->ibMicFree );
-            Error( ErrCaptureCorruptedPageInfo( mode, L"TagInFreeSpace" ) );
+            MakeCorruptionDetailsSz( L"TAG %d ends in free space (cb = %d, ib = %d, ibMicFree = %d)",
+                            itag, cb, ib, (USHORT)ppghdr->ibMicFree );
+            (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+            Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagInFreeSpace", wszCorruptionDetails, fLogEvent ) );
         }
 
         if ( grbitExtensiveCheck )  //  all hidden under this grbit to avoid cost to CheckBasic ...
@@ -4719,9 +4854,10 @@ ERR CPAGE::ErrCheckPage(
             const DWORD cbPageAvail = CbBuffer();   //  start w/ tighter constraint of CbBuffer() ...
             if ( ib >= cbPageAvail || cb >= cbPageAvail || ibEnd >= cbPageAvail )
             {
-                (*pcprintf)( "page corruption (%d): TAG %d starts, sizes, or ends off end of page (ib = %d, cb = %d, cbPageAvail = %d)\r\n",
-                                m_pgno, itag, ib, cb, cbPageAvail );
-                Error( ErrCaptureCorruptedPageInfo( mode, L"TagBeyondEndOfPage" ) );
+                MakeCorruptionDetailsSz( L"TAG %d starts (ib = %d), sizes (cb = %d), or ends (ibEnd = %d) off end (cbPageAvail = %d) of page / checks (%d,%d,%d)",
+                                itag, ib, cb, ibEnd, cbPageAvail, ( ib >= cbPageAvail ), ( cb >= cbPageAvail ), ( ibEnd >= cbPageAvail ) );
+                (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagBeyondEndOfPage", wszCorruptionDetails, fLogEvent ) );
             }
 
             const INT iline = itag - CTagReserved_();
@@ -4745,11 +4881,9 @@ ERR CPAGE::ErrCheckPage(
             if ( line.pv == NULL )
             {
                 AssertTrack( errGetLine < JET_errSuccess, "GotNullLineWithoutErrValue" ); // ErrGetPtr should not return this case.
-                (*pcprintf)( "page corruption (%d): TAG %d offset / line could not be retrieve from tag array (ib=%d, cb=%d).\r\n", m_pgno, itag, ib, cb );
-                PageAssertTrack( *this, fFalse, "GetLineGotNullPtr" );
-#ifdef DEBUG
-                Error( ErrCaptureCorruptedPageInfo( mode, L"GetLineGotNullPtr" ) );
-#endif
+                MakeCorruptionDetailsSz( L"TAG %d offset / line could not be retrieve from tag array (ib=%d, cb=%d).", itag, ib, cb );
+                (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                Error( ErrCaptureCorruptedPageInfoSz( mode, L"GetLineGotNullPtr", wszCorruptionDetails, fLogEvent ) );
             }
 
             const ULONG_PTR pbLineLastByte = (ULONG_PTR)line.pv + (ULONG_PTR)cb - (ULONG_PTR)1;
@@ -4763,38 +4897,35 @@ ERR CPAGE::ErrCheckPage(
             if ( pbLineLastByte < pbPageDataStart )
             {
                 //  The whole line is starting below the data start, i.e. off the data section, and possibly even off page.
-                (*pcprintf)( "page corruption (%d): TAG %d computed whole line is too low (ib=%d, cb=%d, %p < %p).\r\n", m_pgno, itag, ib, cb, pbLineLastByte, pbPageDataStart );
-                PageAssertTrack( *this, fFalse, "LineEntirelyBelowDataSection" );
-#ifdef DEBUG
-                Error( ErrCaptureCorruptedPageInfo( mode, L"LineEntirelyBelowDataSection" ) );
-#endif
+                MakeCorruptionDetailsSz( L"TAG %d computed whole line is too low (ib=%d, cb=%d, %p < %p)", itag, ib, cb, pbLineLastByte, pbPageDataStart );
+                (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                Error( ErrCaptureCorruptedPageInfoSz( mode, L"LineEntirelyBelowDataSection", wszCorruptionDetails, fLogEvent ) );
             }
             if ( (ULONG_PTR)line.pv < pbPageDataStart )
             {
                 //  The line starts below the data start, i.e. off the data section, but then overlaps into valid data section.
-                (*pcprintf)( "page corruption (%d): TAG %d computed start offset starts too low (ib=%d, cb=%d, %p < %p).\r\n", m_pgno, itag, ib, cb, line.pv, pbPageDataStart );
-                PageAssertTrack( *this, fFalse, "LineStartsBelowDataSection" );
-#ifdef DEBUG
-                Error( ErrCaptureCorruptedPageInfo( mode, L"LineStartsBelowDataSection" ) );
-#endif
+                MakeCorruptionDetailsSz( L"TAG %d computed start offset starts too low (ib=%d, cb=%d, %p < %p)", itag, ib, cb, line.pv, pbPageDataStart );
+                (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                Error( ErrCaptureCorruptedPageInfoSz( mode, L"LineStartsBelowDataSection", wszCorruptionDetails, fLogEvent ) );
             }
             if ( (ULONG_PTR)line.pv > pbPageDataEnd )
             {
                 //  The whole line is starting above the data start, i.e. off the data section, and possibly even off page.
-                (*pcprintf)( "page corruption (%d): TAG %d computed offset starts too high (ib=%d, cb=%d, %p > %p).\r\n", m_pgno, itag, ib, cb, line.pv, pbPageDataEnd );
-
+                MakeCorruptionDetailsSz( L"TAG %d computed offset starts too high (ib=%d, cb=%d, %p > %p)", itag, ib, cb, line.pv, pbPageDataEnd );
+                (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
                 PageAssertTrack( *this, fFalse, "LineEntirelyAboveDataSection" );
 #ifdef DEBUG
-                Error( ErrCaptureCorruptedPageInfo( mode, L"LineEntirelyAboveDataSection" ) );
+                Error( ErrCaptureCorruptedPageInfoSz( mode, L"LineEntirelyAboveDataSection", wszCorruptionDetails, fLogEvent ) );
 #endif
             }
             if ( pbLineLastByte > pbPageDataEnd )
             {
                 //  The line ends above the data start, i.e. off the data section, but does start / overlaping in valid data section.
-                (*pcprintf)( "page corruption (%d): TAG %d computed offset starts too high (ib=%d, cb=%d, %p > %p).\r\n", m_pgno, itag, ib, cb, pbLineLastByte, pbPageDataEnd );
+                MakeCorruptionDetailsSz( L"TAG %d computed offset starts too high (ib=%d, cb=%d, %p > %p)", itag, ib, cb, pbLineLastByte, pbPageDataEnd );
+                (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
                 PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "LineEndsAboveDataSection" );
 #ifdef DEBUG
-                Error( ErrCaptureCorruptedPageInfo( mode, L"LineEndsAboveDataSection" ) );
+                Error( ErrCaptureCorruptedPageInfoSz( mode, L"LineEndsAboveDataSection", wszCorruptionDetails, fLogEvent ) );
 #endif
             }
 
@@ -4803,11 +4934,13 @@ ERR CPAGE::ErrCheckPage(
                 // catch all
                 CHAR szGetLineErr[40];
                 OSStrCbFormatA( szGetLineErr, sizeof( szGetLineErr ), "GetLineFailed:%d\n", errGetLine );
-                (*pcprintf)( "UNCAUGHT: page corruption (%d): TAG %d ErrGetPtr() failed or got line off page (ib=%d, cb=%d, err=%d,f=%d).\r\n", m_pgno, itag, ib, cb, errGetLine, FOnData( line.pv, line.cb ) );
+                MakeCorruptionDetailsSz( L"GetLineFailed:%d\n", errGetLine );
+                MakeCorruptionDetailsSz( L"UNCAUGHT: TAG %d ErrGetPtr() failed or got line off page (ib=%d, cb=%d, err=%d,f=%d).", itag, ib, cb, errGetLine, FOnData( line.pv, line.cb ) );
+                (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
                 //  there should not be too many errors coming from ErrGetLine() that we can't embed the err in the corruption type.
-                PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "GetLineFailed:%d", errGetLine );
+                PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "GetLineFailed:%d\n", errGetLine );
 #ifdef DEBUG
-                Error( ErrCaptureCorruptedPageInfo( mode, szGetLineErr ) );
+                Error( ErrCaptureCorruptedPageInfoSz( mode, szGetLineErr, wszCorruptionDetails, fLogEvent ) );
 #endif
             }
 
@@ -4830,9 +4963,10 @@ ERR CPAGE::ErrCheckPage(
 
                 if ( FNDCompressed( kdf ) && ( kdf.key.prefix.Cb() > cbPrefixMax || kdf.key.prefix.Cb() < 0 ) )
                 {
-                    (*pcprintf)( "page corruption (%d): TAG %d prefix usage is larger than prefix node (prefix.Cb() = %d, cbPrefixMax = %d)\r\n",
-                                    m_pgno, itag, kdf.key.prefix.Cb(), cbPrefixMax );
-                    Error( ErrCaptureCorruptedPageInfo( mode, L"TagcbPrefixTooLarge" ) );
+                    MakeCorruptionDetailsSz( L"TAG %d prefix usage is larger than prefix node (prefix.Cb() = %d, cbPrefixMax = %d)",
+                                    itag, kdf.key.prefix.Cb(), cbPrefixMax );
+                    (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                    Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagcbPrefixTooLarge", wszCorruptionDetails, fLogEvent ) );
                 }
                 //  if the key portion of this node is larger than the node (according to the tag 
                 //  array size), then we have a problem ...
@@ -4841,24 +4975,25 @@ ERR CPAGE::ErrCheckPage(
                 //  Not used anywhere.
                 if ( ErrFaultInjection( 60348 ) )
                 {
-                    ErrCaptureCorruptedPageInfo( CPAGE::OnErrorReturnError, L"TestFakeCheckPageCorruption" );
+                    ErrCaptureCorruptedPageInfoSz( CPAGE::OnErrorReturnError, L"TestFakeCheckPageCorruption", L"DebugFaultInjection60348", fLogEvent );
                     err = JET_errSuccess;   //  carry on like nothing happened ...
                 }
 #endif
                 if ( kdf.key.suffix.Cb() > cb || kdf.key.suffix.Cb() < 0 )
                 {
-                    (*pcprintf)( "page corruption (%d): TAG %d suffix size is larger than the actual tag size (suffix.Cb() = %d, cb = %d)\r\n",
-                                    m_pgno, itag, kdf.key.suffix.Cb(), cb );
-                    Error( ErrCaptureCorruptedPageInfo( mode, L"TagcbSuffixTooLarge" ) );
+                    MakeCorruptionDetailsSz( L"TAG %d suffix size is larger than the actual tag size (suffix.Cb() = %d, cb = %d)",
+                                    itag, kdf.key.suffix.Cb(), cb );
+                    (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                    Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagcbSuffixTooLarge", wszCorruptionDetails, fLogEvent ) );
                 }
 
                 if ( kdf.key.prefix.Cb() == 0 && kdf.key.suffix.Cb() == 0 &&
                      ( FLeafPage() || itag < ITagMicFree( ppghdr ) - 1 ) && // last key in non-leaf pages is empty
                      !g_fRepair )
                 {
-                    (*pcprintf)( "page corruption (%d): TAG %d both prefix/suffix are zero length\r\n",
-                                    m_pgno, itag );
-                    Error( ErrCaptureCorruptedPageInfo( mode, L"TagZeroLengthKey" ) );
+                    MakeCorruptionDetailsSz( L"TAG %d both prefix/suffix are zero length", itag );
+                    (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                    Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagZeroLengthKey", wszCorruptionDetails, fLogEvent ) );
                 }
 
                 //  if the data portion of this node is larger than the node (according to the tag 
@@ -4867,9 +5002,9 @@ ERR CPAGE::ErrCheckPage(
                 //  might not even be possible
                 if ( kdf.data.Cb() > cb || kdf.data.Cb() < 0 )
                 {
-                    (*pcprintf)( "page corruption (%d): TAG %d data size is larger than actual tag size (data.Cb() = %d, cb = %d)\r\n",
-                                    m_pgno, itag, kdf.data.Cb(), cb );
-                    Error( ErrCaptureCorruptedPageInfo( mode, L"TagcbDataTooLarge" ) );
+                    MakeCorruptionDetailsSz( L"TAG %d data size is larger than actual tag size (data.Cb() = %d, cb = %d)", itag, kdf.data.Cb(), cb );
+                    (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                    Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagcbDataTooLarge", wszCorruptionDetails, fLogEvent ) );
                 }
 
                 //  This is trying to pre-cover the node.cxx g_fNodeMiscMemoryTrashedDefenseInDepthTemp PageEnforce() but
@@ -4878,13 +5013,10 @@ ERR CPAGE::ErrCheckPage(
                 //  flags or something.
                 if ( kdf.data.Cb() == 0 )
                 {
-                    (*pcprintf)( "page corruption (%d): TAG %d data size is zero ... we don't have non-data nodes ... yet at least. (data.Cb() = %d, cb = %d)\r\n",
-                                    m_pgno, itag, kdf.data.Cb(), cb );
-
-                    PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "TagCbDataZero" );
-#ifdef DEBUG
-                    Error( ErrCaptureCorruptedPageInfo( mode, L"TagCbDataZero" ) );
-#endif
+                    MakeCorruptionDetailsSz( L"TAG %d data size is zero ... we don't have non-data nodes ... yet at least. (data.Cb() = %d, cb = %d)",
+                                    itag, kdf.data.Cb(), cb );
+                    (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                    Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagCbDataZero", wszCorruptionDetails, fLogEvent ) );
                 }
 
                 //  if the overhead + key(suffix) + data is larger than the node (according to the tag 
@@ -4897,9 +5029,10 @@ ERR CPAGE::ErrCheckPage(
                                                 kdf.data.Cb() );
                 if ( cbInternalNode > cb || cbInternalNode < 0 )
                 {
-                    (*pcprintf)( "page corruption (%d): TAG %d aggregate key suffix/data size is larger than actual tag size (cbInternalNode=( 2 + %d + %d + %d ), cb = %d)\r\n",
-                                    m_pgno, itag, ( FNDCompressed( kdf ) ? 2 : 0 ), kdf.key.suffix.Cb(), kdf.data.Cb(), cb );
-                    Error( ErrCaptureCorruptedPageInfo( mode, L"TagDataTooLarge" ) );
+                    MakeCorruptionDetailsSz( L"TAG %d aggregate key suffix/data size is larger than actual tag size (cbInternalNode=( 2 + %d + %d + %d ), cb = %d)",
+                                    itag, ( FNDCompressed( kdf ) ? 2 : 0 ), kdf.key.suffix.Cb(), kdf.data.Cb(), cb );
+                    (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                    Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagDataTooLarge", wszCorruptionDetails, fLogEvent ) );
                 }
 
                 //  We check the error later because the above checks all things (prefix size, suffix size, etc) that probably
@@ -4910,11 +5043,9 @@ ERR CPAGE::ErrCheckPage(
                     CHAR szGetKdfErr [40];
                     //  there should not be too many errors coming from ErrNDIGetKeydataflags() that we can't embed the err in the corruption type.
                     OSStrCbFormatA( szGetKdfErr, sizeof( szGetKdfErr ), "NdiGetKdfFailed:%d", errGetKdf );
-                    (*pcprintf)( "page corruption (%d): TAG %d failed to load NDIGetKeydataFlags with %d\r\n", errGetKdf );
-                    PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "NdiGetKdfFailed:%d", errGetKdf );
-#ifdef DEBUG
-                    Error( ErrCaptureCorruptedPageInfo_( mode, szGetKdfErr, NULL, szGetKdfSourceFile, ulGetKdfSourceLine, fTrue ) );
-#endif
+                    MakeCorruptionDetailsSz( L"TAG %d failed to load NDIGetKeydataFlags with %d\r\n", errGetKdf );
+                    (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                    Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagDataTooLarge", wszCorruptionDetails, fLogEvent ) );
                 }
 
                 if ( grbitExtensiveCheck & CheckLinesInOrder )
@@ -4923,8 +5054,9 @@ ERR CPAGE::ErrCheckPage(
                          ( FLeafPage() || itag < ITagMicFree_() - 1 ) && // last key in non-leaf pages is empty
                          CmpKey( kdf.key, keyLast ) < 0 )
                     {
-                        (*pcprintf)( "page corruption (%d): TAG %d out of order on the page compared to the previous tag\r\n", m_pgno, itag );
-                        Error( ErrCaptureCorruptedPageInfo( mode, L"LinesOutOfOrder" ) );
+                        MakeCorruptionDetailsSz( L"TAG %d out of order on the page compared to the previous tag", itag );
+                        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+                        Error( ErrCaptureCorruptedPageInfoSz( mode, L"LinesOutOfOrder", wszCorruptionDetails, fLogEvent ) );
                     }
 
                     keyLast = kdf.key;
@@ -4985,9 +5117,9 @@ ERR CPAGE::ErrCheckPage(
 
     if ( dwOverlaps != 0 )
     {
-        (*pcprintf)( "page corruption (%d): TAG overlap \r\n",
-                    m_pgno );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"TagsOverlap" ) );
+        MakeCorruptionDetailsSz( L" TAG overlap" );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagsOverlap", wszCorruptionDetails, fLogEvent ) );
     }
 
     //  all space on the page should be accounted for
@@ -4995,9 +5127,9 @@ ERR CPAGE::ErrCheckPage(
     const INT cbAccountedFor = cbTotal + ppghdr->cbFree + CbTagArray_();
     if ( cbAccountedFor != CbBufferData() )
     {
-        (*pcprintf)( "page corruption (%d): space mismatch (%d bytes accounted for, %d bytes expected)\r\n",
-                        m_pgno, cbAccountedFor, CbBufferData() );
-        Error( ErrCaptureCorruptedPageInfo( mode, L"SpaceSizeMismatch" ) );
+        MakeCorruptionDetailsSz( L"space mismatch (%d bytes accounted for, %d bytes expected)", cbAccountedFor, CbBufferData() );
+        (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
+        Error( ErrCaptureCorruptedPageInfoSz( mode, L"SpaceSizeMismatch", wszCorruptionDetails, fLogEvent ) );
     }
 
     err = JET_errSuccess;
@@ -5035,7 +5167,7 @@ VOID CPAGE::PreparePageForWrite(
     //  the following enforce will prevent us from writing out a page to disk that
     //  doesn't obey basic page invariants; in particular zero'ed and overlapping tags.
 
-    (VOID)ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), OnErrorEnforce );
+    (VOID)ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::WritePageIo, OnErrorEnforce );
 
 }
 
@@ -5664,7 +5796,7 @@ VOID CPAGE::DehydratePageUnadjusted_( _In_ const ULONG cbNewSize )
 
     //  validate page is good before we set the checksum
 
-    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
+    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::DebugCheck, OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
     Assert( pgchk == LoggedDataChecksum() );
 
     //  Set the checksum to maintain the clean page contract
@@ -5677,7 +5809,7 @@ VOID CPAGE::DehydratePageUnadjusted_( _In_ const ULONG cbNewSize )
     //  Validate that the page is valid and in-tact with it's previous data.
     //
 
-    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
+    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::DebugCheck, OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
 
     AssertRTL( pgchk == LoggedDataChecksum() );
 
@@ -5787,7 +5919,7 @@ VOID CPAGE::DehydratePage( _In_ const ULONG cbNewSize, _In_ const BOOL fAllowReo
     //  Validate that the page is valid and in-tact with it's previous data.
     //
 
-    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
+    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::DebugCheck, OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
 
     //  Restore state check setting
     //
@@ -5860,7 +5992,7 @@ VOID CPAGE::RehydratePage()
 
     //  validate page is good before we set the checksum
 
-    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
+    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::DebugCheck, OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
     Assert( pgchk == LoggedDataChecksum() );
 
     //  Set the checksum to maintain the clean page contract
@@ -5873,7 +6005,7 @@ VOID CPAGE::RehydratePage()
     //  Validate that the page is valid and intact with its previous data.
     //
 
-    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
+    Assert( JET_errSuccess == ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), pgvr::DebugCheck, OnErrorFireWall, CheckTagsNonOverlapping ) || FEmptyPage() || FPreInitPage() );
 
     Assert( CbPage() == m_platchManager->CbBuffer( m_bfl ) );
 
@@ -6287,6 +6419,26 @@ ERR CPAGE::ErrEnumTags( CPAGE::PFNVISITNODE pfnEval, void * pvCtx ) const
     return JET_errSuccess;
 }
 
+//  ErrAccumulatePageStats() is called once for each page with pkdf == NULL, and then called on each node 
+//  on the page (both regular nodes and reserved nodes - EXCEPT the external header) with the pkdf and 
+//  itag and node flags set appropriately.
+//
+//  The pvCtx for dbspacedump.cxx / eseutil will be coming from one of two places:
+//  1) First for internal pages ...
+//       BTREE_STATS -> pParentOfLeaf (a BTREE_STATS_PARENT_OF_LEAF) -> pInternalPageStats (which is a BTREE_STATS_PAGE_SPACE pvCtx below).
+//  2) And then for leaf pages ...
+//       BTREE_STATS -> pFullWalk (the BTREE_STATS_PAGE_SPACE / pvCtx below)
+//
+//  ... this allows us to keep the stats on the node sizes separated and unpoluted for leaf nodes vs. 
+//  internal nodes (which have data payloads [pgnos] of little relation to what the tree is about).
+//
+//  The processing is a breadth first search (from ErrBTUTLAcross()), so you should expect to see root, 
+//  then all childen of root, and so on, until all parents of leaves, and then finally all leaf pages 
+//  (in order, from left to right).
+//
+//  Note: LV pages come through here, but also go through an analagous ErrAccumulateLvPageData() function
+//  for LV specific accumulations and stats.
+//
 ERR ErrAccumulatePageStats(
     const CPAGE::PGHDR * const  ppghdr,
     INT                         itag,
@@ -7035,10 +7187,12 @@ ERR CPAGE::ErrDumpToIrsRaw( _In_ PCWSTR wszReason, _In_ PCWSTR wszDetails ) cons
     ERR      err;
     INST    *pinst = PinstFromIfmp( m_ifmp );
     __int64  fileTime;
-    WCHAR    szDate[32];
-    WCHAR    szTime[32];
+    WCHAR    wszDate[32];
+    WCHAR    wszTime[32];
     size_t   cchRequired;
     CPRINTF * pcprintfPageTrace = NULL;
+    
+    CBasicProcessInfo procinfo( PinstFromIfmp( m_ifmp ) );
 
     const BOOL fCleanUpStateSaved = FOSSetCleanupState( fFalse );   //  just for diagnostics.
 
@@ -7049,15 +7203,22 @@ ERR CPAGE::ErrDumpToIrsRaw( _In_ PCWSTR wszReason, _In_ PCWSTR wszDetails ) cons
     fileTime = UtilGetCurrentFileTime();
     ErrUtilFormatFileTimeAsTimeWithSeconds(
             fileTime,
-            szTime,
-            _countof(szTime),
+            wszTime,
+            _countof(wszTime),
             &cchRequired);
     ErrUtilFormatFileTimeAsDate(
             fileTime,
-            szDate,
-            _countof(szDate),
+            wszDate,
+            _countof(wszDate),
             &cchRequired);
-    (*pcprintfPageTrace)( "[%d.%d] Begin " __FUNCTION__ "( %ws - %ws ).  Time %ws %ws\n", DwUtilProcessId(), DwUtilThreadId(), wszReason, wszDetails, szTime, szDate );
+    (*pcprintfPageTrace)( "Begin " __FUNCTION__ "( %ws ) @ Time %ws %ws\n", wszReason, wszTime, wszDate );
+    // Consider adding ERRFormatIssueSource() to get last error information and Server Version.
+    (*pcprintfPageTrace)( "Corruption Details:  %ws\n", wszDetails );
+    (*pcprintfPageTrace)( "Process Information: %ws (PID,Mode,ulApi,PV)\n", procinfo.Wsz() );
+    (*pcprintfPageTrace)( "Thread Information:  Tid=0x%x, IOR=%d.%d.%d.%d, objid=%d\n", 
+        DwUtilThreadId(), 
+        TcCurr().iorReason.Iorp(), TcCurr().iorReason.Iorp(), TcCurr().iorReason.Iorp(), TcCurr().iorReason.Iorp(), 
+        TcCurr().dwEngineObjid );
 
     (*pcprintfPageTrace)( "Begin dump of pgno %d (0x%X)\n", PgnoThis(), PgnoThis() );
     DumpHeader( pcprintfPageTrace );
@@ -7083,15 +7244,15 @@ ERR CPAGE::ErrDumpToIrsRaw( _In_ PCWSTR wszReason, _In_ PCWSTR wszDetails ) cons
     fileTime = UtilGetCurrentFileTime();
     ErrUtilFormatFileTimeAsTimeWithSeconds(
             fileTime,
-            szTime,
-            _countof(szTime),
+            wszTime,
+            _countof(wszTime),
             &cchRequired);
     ErrUtilFormatFileTimeAsDate(
             fileTime,
-            szDate,
-            _countof(szDate),
+            wszDate,
+            _countof(wszDate),
             &cchRequired);
-    (*pcprintfPageTrace)( "[%d.%d] End " __FUNCTION__ "().  Time %ws %ws\n", DwUtilProcessId(), DwUtilThreadId(), szTime, szDate );
+    (*pcprintfPageTrace)( "[%d.%d] End " __FUNCTION__ "().  Time %ws %ws\n", DwUtilProcessId(), DwUtilThreadId(), wszTime, wszDate );
 
 HandleError:
 

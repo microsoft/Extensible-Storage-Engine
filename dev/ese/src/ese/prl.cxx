@@ -502,7 +502,7 @@ ERR PatchRequest::ErrValidatePatchArguments_(
 {
     ERR err;
     CPAGE cpage;
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::ActivePagePatch );
 
     if ( Id_() != id )
     {
@@ -804,6 +804,7 @@ VOID PagePatching::TryPatchFromCopy( const IFMP ifmp, const PGNO pgno, VOID *pv,
                 ( fFailOnRuntimeLostFlushOnly ? pgvfFailOnRuntimeLostFlushOnly : pgvfDefault ) |
                 ( fReplayingRequiredRange ? pgvfDoNotCheckForLostFlush : pgvfDefault );
     CPageValidationLogEvent validationaction(
+                pgvr::RaidCopySelfPatch,
                 ifmp,
                 CPageValidationLogEvent::LOG_NONE,
                 LOGGING_RECOVERY_CATEGORY );

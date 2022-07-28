@@ -5016,7 +5016,7 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPage( void* pvPage, PGNO pgno, USHORT c
     Assert( pgno > 0 );
 
     ERR err = JET_errSuccess;
-    CPageValidationNullAction nullaction;
+    CPageValidationNullAction nullaction( pgvr::RevertSnapshot );
     TraceContextScope tcRevertPage( iorpRevertPage );
 
     QWORD cbSize = 0;

@@ -5747,7 +5747,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         }
         if ( !SUCCEEDED( hr ) )
         {
-            wprintf( L"   VSS Subsystem Init failed, 0x%x\n", hr );
+            wprintf( L"   VSS Create Shadow failed, 0x%x\n", hr );
             Error( ErrERRCheck( JET_errOSSnapshotNotAllowed ) );
         }
 
@@ -5768,7 +5768,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         }
         if ( !SUCCEEDED( hr ) )
         {
-            wprintf( L"   VSS Subsystem Init failed, 0x%x\n", hr );
+            wprintf( L"   VSS Mount Shadow failed, 0x%x\n", hr );
             Error( ErrERRCheck( JET_errOSSnapshotNotAllowed ) );
         }
 

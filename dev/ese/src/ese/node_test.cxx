@@ -101,11 +101,11 @@ JETUNITTEST ( Node, BasicNodePageChecks )
     NDITestFillOutSimplePage( cpageSmall );
     NDITestFillOutSimplePage( cpageLarge );
 
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
 
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
 }
 
 class CpageDeallocator
@@ -184,14 +184,14 @@ JETUNITTEST ( Node, PrefixCorruptionMinor )
     NDCorruptNodePrefixSize( cpageSmall, rand() % 2, JET_bitTestHookCorruptSizeLargerThanNode );
     NDCorruptNodePrefixSize( cpageLarge, rand() % 2, JET_bitTestHookCorruptSizeLargerThanNode );
 
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
 
     const bool fPreviouslySet = FNegTestSet( fCorruptingPageLogically );
     Expected( fPreviouslySet == fFalse );
 
-    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
-    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
 
     if ( !fPreviouslySet )
     {
@@ -207,14 +207,14 @@ JETUNITTEST ( Node, PrefixCorruptionShortWrap )
     NDCorruptNodePrefixSize( cpageSmall, rand() % 2, JET_bitTestHookCorruptSizeShortWrapLarge );
     NDCorruptNodePrefixSize( cpageLarge, rand() % 2, JET_bitTestHookCorruptSizeShortWrapLarge );
 
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
 
     const bool fPreviouslySet = FNegTestSet( fCorruptingPageLogically );
     Expected( fPreviouslySet == fFalse );
 
-    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
-    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
 
     if ( !fPreviouslySet )
     {
@@ -229,14 +229,14 @@ JETUNITTEST ( Node, SuffixCorruptionMinor )
     NDCorruptNodeSuffixSize( cpageSmall, rand() % cpageSmall.Clines(), JET_bitTestHookCorruptSizeLargerThanNode );
     NDCorruptNodeSuffixSize( cpageLarge, rand() % cpageSmall.Clines(), JET_bitTestHookCorruptSizeLargerThanNode );
 
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
 
     const bool fPreviouslySet = FNegTestSet( fCorruptingPageLogically );
     Expected( fPreviouslySet == fFalse );
 
-    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
-    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
 
     if ( !fPreviouslySet )
     {
@@ -251,14 +251,14 @@ JETUNITTEST ( Node, SuffixCorruptionShortWrap )
     NDCorruptNodeSuffixSize( cpageSmall, rand() % cpageSmall.Clines(), JET_bitTestHookCorruptSizeShortWrapLarge );
     NDCorruptNodeSuffixSize( cpageLarge, rand() % cpageSmall.Clines(), JET_bitTestHookCorruptSizeShortWrapLarge );
 
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
 
     const bool fPreviouslySet = FNegTestSet( fCorruptingPageLogically );
     Expected( fPreviouslySet == fFalse );
 
-    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
-    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
 
     if ( !fPreviouslySet )
     {
@@ -276,14 +276,14 @@ JETUNITTEST ( Node, PrefixSuffixCorruptionMinor )
     NDCorruptNodeSuffixSize( cpageSmall, ilineCorrupted, JET_bitTestHookCorruptSizeLargerThanNode );
     NDCorruptNodeSuffixSize( cpageLarge, ilineCorrupted, JET_bitTestHookCorruptSizeLargerThanNode );
 
-    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
-    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+    CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
 
     const bool fPreviouslySet = FNegTestSet( fCorruptingPageLogically );
     Expected( fPreviouslySet == fFalse );
 
-    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
-    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
+    CHECK( JET_errDatabaseCorrupted == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) );
 
     if ( !fPreviouslySet )
     {
@@ -619,12 +619,12 @@ JETUNITTESTEX ( Node, TestCorruptPrefixCbFullFuzzResilientCodePaths, JetSimpleUn
             NDCorruptNodePrefixSize( cpageLarge, iline, 0, (USHORT)i );
 
             //  Basic can't catch these corruptions.
-            CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
-            CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+            CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+            CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
 
             FNegTestSet( fCorruptingPageLogically );
-            const ERR errSmall = cpageSmall.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
-            const ERR errLarge = cpageLarge.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
+            const ERR errSmall = cpageSmall.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
+            const ERR errLarge = cpageLarge.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
             FNegTestUnset( fCorruptingPageLogically );
 
             if ( errSmall >= JET_errSuccess )
@@ -724,12 +724,12 @@ JETUNITTESTEX ( Node, TestCorruptSuffixCbFullFuzzResilientCodePaths, JetSimpleUn
             NDCorruptNodeSuffixSize( cpageLarge, iline, 0, (USHORT)i );
 
             //  Basic can't catch these corruptions.
-            CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
-            CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+            CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
+            CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) );
 
             FNegTestSet( fCorruptingPageLogically );
-            const ERR errSmall = cpageSmall.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
-            const ERR errLarge = cpageLarge.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
+            const ERR errSmall = cpageSmall.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
+            const ERR errLarge = cpageLarge.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
             FNegTestUnset( fCorruptingPageLogically );
 
             if ( errSmall >= JET_errSuccess )
@@ -835,8 +835,8 @@ JETUNITTESTEX ( Node, TestCorruptItagMicFreeFullFuzzResilientCodePaths, JetSimpl
         ERR errSmall, errLarge;
 
         FNegTestSet( fCorruptingPageLogically );
-        errSmall = cpageSmall.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
-        errLarge = cpageLarge.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
+        errSmall = cpageSmall.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
+        errLarge = cpageLarge.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
 
         if ( errSmall >= JET_errSuccess )
         {
@@ -847,8 +847,8 @@ JETUNITTESTEX ( Node, TestCorruptItagMicFreeFullFuzzResilientCodePaths, JetSimpl
             cGoodLarge++;
         }
 
-        errSmall = cpageSmall.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
-        errLarge = cpageLarge.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
+        errSmall = cpageSmall.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
+        errLarge = cpageLarge.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckDefault );
         FNegTestUnset( fCorruptingPageLogically );
 
         if ( errSmall >= JET_errSuccess )
@@ -972,13 +972,13 @@ JETUNITTESTEX ( Node, TestCorruptTagIbFullFuzzResilientCodePaths, JetSimpleUnitT
 
             ERR errSmall, errLarge;
 
-            errSmall = cpageSmall.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
+            errSmall = cpageSmall.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
             if ( errSmall >= JET_errSuccess )
             {
                 cGoodSmall++;
             }
 
-            errLarge = cpageLarge.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
+            errLarge = cpageLarge.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
             if ( errLarge >= JET_errSuccess )
             {
                 cGoodLarge++;
@@ -986,13 +986,13 @@ JETUNITTESTEX ( Node, TestCorruptTagIbFullFuzzResilientCodePaths, JetSimpleUnitT
 
             FNegTestSet( fCorruptingPageLogically );
 
-            errSmall = cpageSmall.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag /* don't even need CheckTagsNonOverlapping from CheckDefault */ );
+            errSmall = cpageSmall.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag /* don't even need CheckTagsNonOverlapping from CheckDefault */ );
             if ( errSmall >= JET_errSuccess )
             {
                 cGoodSmall++;
             }
 
-            errLarge = cpageLarge.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag /* don't even need CheckTagsNonOverlapping from CheckDefault */ );
+            errLarge = cpageLarge.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag /* don't even need CheckTagsNonOverlapping from CheckDefault */ );
             if ( errLarge >= JET_errSuccess )
             {
                 cGoodLarge++;
@@ -1102,13 +1102,13 @@ JETUNITTESTEX ( Node, TestCorruptTagCbFullFuzzResilientCodePaths, JetSimpleUnitT
 
             ERR errT;
 
-            errT = cpageSmall.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
+            errT = cpageSmall.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
             if ( errT >= JET_errSuccess )
             {
                 cGoodSmall++;
             }
 
-            errT = cpageLarge.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
+            errT = cpageLarge.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics );
             if ( errT >= JET_errSuccess )
             {
                 cGoodLarge++;
@@ -1116,13 +1116,13 @@ JETUNITTESTEX ( Node, TestCorruptTagCbFullFuzzResilientCodePaths, JetSimpleUnitT
 
             FNegTestSet( fCorruptingPageLogically );
 
-            errT = cpageSmall.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag /* don't even need CheckTagsNonOverlapping from CheckDefault */ );
+            errT = cpageSmall.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag /* don't even need CheckTagsNonOverlapping from CheckDefault */ );
             if ( errT >= JET_errSuccess )
             {
                 cGoodSmall++;
             }
 
-            errT = cpageLarge.ErrCheckPage( pcp, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag /* don't even need CheckTagsNonOverlapping from CheckDefault */ );
+            errT = cpageLarge.ErrCheckPage( pcp, pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag /* don't even need CheckTagsNonOverlapping from CheckDefault */ );
             if ( errT >= JET_errSuccess )
             {
                 cGoodLarge++;
@@ -1376,10 +1376,10 @@ JETUNITTEST ( Node, TestCorruptRandishFuzzingStress )
 
         corrSmall.CorruptIt( 1 + i % 4, 0x0, &cpageSmall );
 
-        ( cpageSmall.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) < JET_errSuccess ) ?
+        ( cpageSmall.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) < JET_errSuccess ) ?
             cBasicBadSmallPages++ :
             cJunk++;
-        ( cpageSmall.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) < JET_errSuccess ) ?
+        ( cpageSmall.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) < JET_errSuccess ) ?
             cBoundedBadSmallPages++ :
             cJunk++;
 
@@ -1389,10 +1389,10 @@ JETUNITTEST ( Node, TestCorruptRandishFuzzingStress )
 
         corrLarge.CorruptIt( 1 + i % 4, 0x0, &cpageLarge );
 
-        ( cpageLarge.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) < JET_errSuccess ) ?
+        ( cpageLarge.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckBasics ) < JET_errSuccess ) ?
             cBasicBadLargePages++ :
             cJunk++;
-        ( cpageLarge.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) < JET_errSuccess ) ?
+        ( cpageLarge.ErrCheckPage( CPRINTFNULL::PcprintfInstance(), pgvr::UnitTest, CPAGE::OnErrorReturnError, CPAGE::CheckLineBoundedByTag ) < JET_errSuccess ) ?
             cBoundedBadLargePages++ :
             cJunk++;
 

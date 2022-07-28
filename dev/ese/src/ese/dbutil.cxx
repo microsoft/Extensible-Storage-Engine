@@ -2637,7 +2637,7 @@ LOCAL ERR ErrDBUTLDumpPage(
     }
     else
     {
-        Call( cpage.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance() ) );
+        Call( cpage.ErrCheckPage( CPRINTFSTDOUT::PcprintfInstance(), pgvr::DbutilPageDump ) );
     }
     
     if ( NULL != wszPrintedKeyToSeek && 0 != cpage.Clines() )

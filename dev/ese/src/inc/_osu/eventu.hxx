@@ -14,6 +14,22 @@
 
 class INST;
 
+WCHAR WchReportInstState( const INST * const pinst );
+
+class CBasicProcessInfo
+{
+    WCHAR m_wszStateInfoEx[16 + 2 + 4 + 20];  //  PID + Recovery/Undo/Do-time/Term mode + ApiOpCode + Bu.il.dNum.ber
+
+public:
+
+    CBasicProcessInfo( const INST * const pinst );
+
+    const WCHAR * Wsz()
+    {
+        return m_wszStateInfoEx;
+    }
+};
+
 void UtilReportEvent(
     const EEventType    type,
     const CategoryId    catid,
