@@ -496,6 +496,15 @@ public:
 // use it here.  Declare a global function that wraps FUCB::OffsetOfIAE.
 SIZE_T FUCBOffsetOfIAE();
 
+// FCB state flags.
+enum FCBStateFlags : BYTE //  fcbsf
+{
+    fcbsfNone           = 0x00,
+    fcbsfInitialized    = 0x01,     // FCB is initialized.
+    fcbsfDeletePending  = 0x02,     // FCB has its FDeletePending() flag set.
+};
+DEFINE_ENUM_FLAG_OPERATORS_BASIC( FCBStateFlags );
+
 // File Control Block
 //
 class FCB
@@ -1055,7 +1064,7 @@ private:
     // =====================================================================
     // FCB creation/deletion.
     public:
-        static FCB *PfcbFCBGet( IFMP ifmp, PGNO pgnoFDP, INT *pfState, const BOOL fIncrementRefCount = fTrue, const BOOL fInitForRecovery = fFalse );
+        static FCB *PfcbFCBGet( const IFMP ifmp, const PGNO pgnoFDP, FCBStateFlags* const pfcbsf = NULL, const BOOL fIncrementRefCount = fTrue, const BOOL fInitForRecovery = fFalse );
         static ERR ErrCreate( PIB *ppib, IFMP ifmp, PGNO pgnoFDP, FCB **ppfcb );
         VOID CreateComplete_( ERR err, PCSTR szFile, const LONG lLine );
         VOID PrepareForPurge( const BOOL fPrepareChildren = fTrue );
@@ -1935,9 +1944,6 @@ INLINE VOID FCB::AssertDDL()
 
 // =========================================================================
 // Hashing.
-
-const INT fFCBStateNull             = 0;    // FCB does not exist in global hash table
-const INT fFCBStateInitialized      = 1;
 
 INLINE VOID FCB::Release()
 {

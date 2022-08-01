@@ -293,6 +293,7 @@ const INT rankDBMScanSignalControl      = 10;
 const INT rankBFCacheSizeSet            = 10;
 const INT rankFMPRedoMaps               = 10;
 const INT rankRBSFirstValidGen          = 10;
+const INT rankFMPLeakEstimation         = 10;
 const INT rankFlushMapAccess            = 13;
 const INT rankFlushMapGrowth            = 15;
 const INT rankFlushMapAsyncWrite        = 15;

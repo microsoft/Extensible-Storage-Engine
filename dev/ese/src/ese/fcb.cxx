@@ -734,12 +734,11 @@ VOID FCB::UnlinkIDB( FCB *pfcbTable )
 //  NOTE: this is the proper channel for accessing an FCB; it uses the locking
 //      protocol setup by the FCB hash-table and FCB latch
 
-FCB *FCB::PfcbFCBGet( IFMP ifmp, PGNO pgnoFDP, INT *pfState, const BOOL fIncrementRefCount, const BOOL fInitForRecovery )
+FCB *FCB::PfcbFCBGet( const IFMP ifmp, const PGNO pgnoFDP, FCBStateFlags* const pfcbsf, const BOOL fIncrementRefCount, const BOOL fInitForRecovery )
 {
-    INT             fState = fFCBStateNull;
+    FCBStateFlags   fcbsf = fcbsfNone;
     INST            *pinst = PinstFromIfmp( ifmp );
     FCB             *pfcbT;
-    BOOL            fDoIncRefCount = fFalse;
     FCBHash::ERR    errFCBHash;
     FCBHash::CLock  lockFCBHash;
     FCBHashKey      keyFCBHash( ifmp, pgnoFDP );
@@ -879,21 +878,9 @@ RetrieveFCB:
     Assert( pfcbT->Ifmp() == ifmp );
     Assert( pfcbT->PgnoFDP() == pgnoFDP );
 
-    if ( !fIncrementRefCount )
-    {
-
-        //  there is no state when "checking" the presence of the FCB
-
-        Assert( pfState == NULL );
-    }
-    else
-    {
-        fState = fFCBStateInitialized;
-
-        //  increment the reference count
-
-        fDoIncRefCount = fTrue;
-    }
+    Assert( fcbsf == fcbsfNone );
+    fcbsf |= fcbsfInitialized;
+    fcbsf |= ( pfcbT->FDeletePending() ? fcbsfDeletePending : fcbsfNone );
 
 
     // If this is the dummy FCB created by recovery, we need to fully populate
@@ -922,7 +909,7 @@ RetrieveFCB:
 
             //  try to get the FCB again
 
-            fState = fFCBStateNull;
+            fcbsf = fcbsfNone;
 
             cRetries++;
             goto RetrieveFCB;
@@ -931,7 +918,7 @@ RetrieveFCB:
 
     if ( pfcbT != pfcbNil )
     {
-        if ( fDoIncRefCount )
+        if ( fIncrementRefCount )
         {
             pfcbT->IncrementRefCount_( fTrue );
         }
@@ -941,9 +928,11 @@ RetrieveFCB:
 
 SetStateAndReturn:
     //  set the state
-    if ( pfState )
+    Assert( ( pfcbT == pfcbNil ) == ( fcbsf == fcbsfNone ) );           // Pointer and flag must agree.
+    Assert( ( fcbsf == fcbsfNone ) || ( fcbsf & fcbsfInitialized ) );   // Can't have any flags set if it's not initialized.
+    if ( pfcbsf )
     {
-        *pfState = fState;
+        *pfcbsf = fcbsf;
     }
 
     //  return the FCB

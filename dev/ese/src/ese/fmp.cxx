@@ -334,7 +334,8 @@ FMP::FMP()
         m_isdlCreate( isdltypeCreate ),
         m_isdlAttach( isdltypeAttach ),
         m_isdlDetach( isdltypeDetach ),
-        m_critOpenDbCheck( CLockBasicInfo( CSyncBasicInfo( szOpenDbCheck ), rankOpenDbCheck, 0 ) )
+        m_critOpenDbCheck( CLockBasicInfo( CSyncBasicInfo( szOpenDbCheck ), rankOpenDbCheck, 0 ) ),
+        m_rwlLeakEstimation( CLockBasicInfo( CSyncBasicInfo( szBFFMPContext ), rankFMPLeakEstimation, 0 ) )
 
         // TRY NOT TO ADD INITIALIZATION HERE!  Only like critical section contructors or
         // something that might live in the g_rgfmp outside / longer than the normal attached 
@@ -3098,49 +3099,49 @@ VOID FMP::WaitForAsyncIOForViewCache()
 ERR FMP::ErrStartRootSpaceLeakEstimation()
 //  ================================================================
 {
-    if ( (OBJID)AtomicCompareExchange( (LONG*)&m_objidLeakEstimation, (LONG)objidFDPOverMax, (LONG)objidNil ) != objidFDPOverMax )
+    ERR err = JET_errSuccess;
+
+    m_rwlLeakEstimation.EnterAsWriter();
+
+    Assert( m_objidLeakEstimation <= objidFDPOverMax );
+    if ( m_objidLeakEstimation != objidFDPOverMax )
     {
-        return ErrERRCheck( JET_errRootSpaceLeakEstimationAlreadyRunning );
+        Error( ErrERRCheck( JET_errRootSpaceLeakEstimationAlreadyRunning ) );
     }
 
+    m_objidLeakEstimation = objidNil;
+
+    Expected( m_cpgLeakEstimationCorrection == 0 );
     m_cpgLeakEstimationCorrection = 0;
 
-    return JET_errSuccess;
-}
-
-//  ================================================================
-OBJID FMP::OjidLeakEstimation() const
-//  ================================================================
-{
-    return m_objidLeakEstimation;
-}
-
-//  ================================================================
-VOID FMP::SetOjidLeakEstimation( const OBJID objid )
-//  ================================================================
-{
-    Assert( objid > objidNil );
-    Assert( objid <= objidFDPMax );
-
-    const OBJID objidOld = (OBJID)AtomicExchange( (LONG*)&m_objidLeakEstimation, (LONG)objid );
-    Assert( objidOld < objidFDPOverMax );
-    Assert( ( objid > objidOld ) || ( ( objid == objidOld ) && ( objid == objidFDPMax ) ) );
+HandleError:
+    m_rwlLeakEstimation.LeaveAsWriter();
+    return err;
 }
 
 //  ================================================================
 VOID FMP::StopRootSpaceLeakEstimation()
 //  ================================================================
 {
+    m_rwlLeakEstimation.EnterAsWriter();
     Expected( m_objidLeakEstimation < objidFDPOverMax );
     InitLeakEstimation();
+    m_rwlLeakEstimation.LeaveAsWriter();
 }
 
 //  ================================================================
-VOID FMP::InitLeakEstimation()
+VOID FMP::SetOjidLeakEstimation( const OBJID objid )
 //  ================================================================
 {
-    m_cpgLeakEstimationCorrection = 0;
-    m_objidLeakEstimation = objidFDPOverMax;
+    m_rwlLeakEstimation.EnterAsReader();
+
+    Expected( m_objidLeakEstimation < objidFDPOverMax );
+    Assert( objid > objidNil );
+    Assert( objid <= objidFDPMax );
+    Assert( ( objid > m_objidLeakEstimation ) || ( ( objid == m_objidLeakEstimation ) && ( objid == objidFDPMax ) ) );
+    m_objidLeakEstimation = objid;
+
+    m_rwlLeakEstimation.LeaveAsReader();
 }
 
 //  ================================================================
@@ -3157,10 +3158,36 @@ VOID FMP::AccumulateCorrectionForLeakEstimation( const OBJID objid, const CPG cp
     Assert( objid > objidNil );
     Assert( objid <= objidFDPMax );
 
-    if ( ( m_objidLeakEstimation != objidFDPOverMax ) && ( objid <= m_objidLeakEstimation ) )
+    // Check without a lock first (common case).
+    if ( m_objidLeakEstimation == objidFDPOverMax )
+    {
+        return;
+    }
+
+    m_rwlLeakEstimation.EnterAsReader();
+
+    const OBJID objidLeakEstimation = m_objidLeakEstimation;
+    if ( ( objidLeakEstimation != objidFDPOverMax ) && ( objid <= objidLeakEstimation ) )
     {
         (VOID)AtomicExchangeAdd( (LONG*)&m_cpgLeakEstimationCorrection, (LONG)cpg );
     }
+
+    m_rwlLeakEstimation.LeaveAsReader();
+}
+
+//  ================================================================
+OBJID FMP::OjidLeakEstimation() const
+//  ================================================================
+{
+    return m_objidLeakEstimation;
+}
+
+//  ================================================================
+VOID FMP::InitLeakEstimation()
+//  ================================================================
+{
+    m_cpgLeakEstimationCorrection = 0;
+    m_objidLeakEstimation = objidFDPOverMax;
 }
 
 //  ================================================================

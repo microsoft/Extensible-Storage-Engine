@@ -2620,6 +2620,8 @@ Space used by root space tree split buffers: %34 page(s) (%35 bytes, %36%%).%n
 Number of cached primary objects: %37%n
 Number of uncached primary objects: %38%n
 Correction applied to space owned by primary objects: %46 page(s) (%47 bytes, %48%%).%n
+Enumeration conflicts resolved successfully: %49%n
+Enumeration conflicts not resolved successfully: %50%n
 Performance: %39 page(s) read, %40 page(s) preread, %41 page(s) referenced, %42 page(s) dirtied, %43 page(s) re-dirtied.%n
 Duration: %44 minute(s) and %45 second(s).%n
 .

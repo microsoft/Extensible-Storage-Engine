@@ -980,12 +980,12 @@ LOCAL ERR ErrLGRICreateFucb(
     const BOOL  fSpace,
     FUCB        **ppfucb )
 {
-    ERR         err = JET_errSuccess;
-    FUCB        *pfucb  = pfucbNil;
-    FCB         *pfcb = pfcbNil;
-    BOOL        fState;
-    ULONG       cRetries = 0;
-    BOOL        fCreatedNewFCB = fFalse;
+    ERR             err = JET_errSuccess;
+    FUCB            *pfucb = pfucbNil;
+    FCB             *pfcb = pfcbNil;
+    FCBStateFlags   fcbsf;
+    ULONG           cRetries = 0;
+    BOOL            fCreatedNewFCB = fFalse;
 
     //  create fucb
     //
@@ -1005,8 +1005,8 @@ Restart:
 
     //  get fcb for table, if one exists
     //
-    pfcb = FCB::PfcbFCBGet( ifmp, pgnoFDP, &fState, fTrue /* FIncrementRefCount */, fTrue /* fInitForRecovery */);
-    Assert( pfcbNil == pfcb || fFCBStateInitialized == fState );
+    pfcb = FCB::PfcbFCBGet( ifmp, pgnoFDP, &fcbsf, fTrue /* FIncrementRefCount */, fTrue /* fInitForRecovery */);
+    Assert( pfcbNil == pfcb || ( fcbsf & fcbsfInitialized ) );
     if ( pfcbNil == pfcb )
     {
         //  there exists no fcb for FDP
@@ -1173,8 +1173,7 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
 
     Assert( NULL != pctablehash );
 
-    BOOL    fState;
-    FCB *   pfcb    = FCB::PfcbFCBGet( ifmp, pgnoFDP, &fState );
+    FCB *   pfcb    = FCB::PfcbFCBGet( ifmp, pgnoFDP );
 
     if ( pfcbNil == pfcb )
     {
@@ -1385,7 +1384,7 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
         pfcb->Purge();
     }
 
-    Assert( FCB::PfcbFCBGet( ifmp, pgnoFDP, &fState ) == pfcbNil );
+    Assert( FCB::PfcbFCBGet( ifmp, pgnoFDP ) == pfcbNil );
 
     return JET_errSuccess;
 }
@@ -10957,10 +10956,9 @@ ERR LOG::ErrLGRIRedoRootPageMove( PIB* const ppib, const DBTIME dbtime )
     OnDebug( rm.AssertValid( fFalse /* fBeforeMove */, fTrue /* fRedo */ ) );
 
     // We must not have reloaded these.
-    BOOL fUnused = fFalse;
-    Assert( FCB::PfcbFCBGet( ifmp, rm.pgnoFDP, &fUnused ) == pfcbNil );
-    Assert( FCB::PfcbFCBGet( ifmp, pgnoFDPMSO, &fUnused ) == pfcbNil );
-    Assert( FCB::PfcbFCBGet( ifmp, pgnoFDPMSOShadow, &fUnused ) == pfcbNil );
+    Assert( FCB::PfcbFCBGet( ifmp, rm.pgnoFDP ) == pfcbNil );
+    Assert( FCB::PfcbFCBGet( ifmp, pgnoFDPMSO ) == pfcbNil );
+    Assert( FCB::PfcbFCBGet( ifmp, pgnoFDPMSOShadow ) == pfcbNil );
 
     // We will log the root page move to the RBS even if PerformRootMove is skipped for the page as it is possible page was patched and it's was skipped.
     // Note: It is important that we capture this into the snapshot after we capture the preimage of the pages being moved.

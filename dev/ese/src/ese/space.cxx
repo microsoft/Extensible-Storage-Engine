@@ -500,20 +500,22 @@ INLINE VOID AssertSPIWrappedLatches( FUCB *pfucb, CSR *pcsr = pcsrNil )
 
 LOCAL VOID SPIAccumulateCorrectionForLeakEstimation( const FCB* const pfcb, const CPG cpg )
 {
-    // Some table/index creation paths early on may not have the object type set.
-    // Missing those is not a problem  because OBJIDs are never reused, so, except for
-    // a tiny window, if a new table (i.e., a new OBJID) is in the process of being created,
-    // then it means it's yet to be processed by the leak report (if it is currently running).
-    // That, in turn, means that it'll not need to participate in the correction by definition,
-    // since its OBJID is not past the one currently being processed.
-    // Assert( !pfcb->FTypeNull() );
+    FMP* const pfmp = &g_rgfmp[ pfcb->Ifmp() ];
 
-    if ( !pfcb->FTypeTable() || ( cpg == 0 ) )
+    // Skip it for temp DBs, or if there's nothing to be adjusted.
+    if ( pfmp->FIsTempDB() || ( cpg == 0 ) )
     {
         return;
     }
 
-    g_rgfmp[ pfcb->Ifmp() ].AccumulateCorrectionForLeakEstimation( pfcb->ObjidFDP(), cpg );
+    Assert( !pfcb->FTypeNull() );
+
+    if ( !pfcb->FTypeTable() )
+    {
+        return;
+    }
+
+    pfmp->AccumulateCorrectionForLeakEstimation( pfcb->ObjidFDP(), cpg );
 }
 
 //
@@ -7445,12 +7447,12 @@ LOCAL ERR ErrSPIFreeSEToParent(
     const PGNO  pgnoLast,
     const CPG   cpgSize )
 {
-    ERR         err;
-    FCB         *pfcb = pfucb->u.pfcb;
-    FCB         *pfcbParent;
-    BOOL        fState;
-    DIB         dib;
-    FUCB        *pfucbParentLocal = pfucbParent;
+    ERR             err;
+    FCB             *pfcb = pfucb->u.pfcb;
+    FCB             *pfcbParent;
+    FCBStateFlags   fcbsf;
+    DIB             dib;
+    FUCB            *pfucbParentLocal = pfucbParent;
     const CSPExtentKeyBM    CSPOEKey( SPEXTKEY::fSPExtentTypeOE, pgnoLast );
 
     Assert( pfcbNil != pfcb );
@@ -7477,9 +7479,9 @@ LOCAL ERR ErrSPIFreeSEToParent(
 
     //  parent must always be in memory
     //
-    pfcbParent = FCB::PfcbFCBGet( pfucb->ifmp, pgnoParentFDP, &fState, fTrue, fTrue );
+    pfcbParent = FCB::PfcbFCBGet( pfucb->ifmp, pgnoParentFDP, &fcbsf, fTrue, fTrue );
     Assert( pfcbParent != pfcbNil );
-    Assert( fFCBStateInitialized == fState );
+    Assert( fcbsf & fcbsfInitialized );
     Assert( !pfcb->FTypeNull() );
 
     if ( !pfcb->FInitedForRecovery() )
@@ -10529,7 +10531,7 @@ INLINE ERR ErrSPIFreeOwnedExtentsInList(
         SPIAccumulateCorrectionForLeakEstimation( pfcb, -cpgSize );
 
         Assert( !FFUCBSpace( pfucbParent ) );
-        
+
         CallR( ErrSPCaptureSnapshot( pfucbParent, pgnoFirst, cpgSize, !fFDPRevertable ) );
         CallR( ErrSPFreeExt( pfucbParent, pgnoFirst, cpgSize, "FreeFdpLarge" ) );
     }

@@ -577,13 +577,11 @@ class FMP
         // This can happen when we do a non-revertable delete outside the required range.
         CLogRedoMap *       m_pLogRedoMapDbtimeRevertIgnore;
 
-        // Stores the OBJID that is currently being processed by the leak estimation code.
-        // A value of objidFDPOverMax means it is not running.
-        volatile OBJID      m_objidLeakEstimation;
-
-        // missed page changes for the table that has already been processed. 
+        // Leaked space estimation.
         //
-        volatile CPG        m_cpgLeakEstimationCorrection;
+        CReaderWriterLock   m_rwlLeakEstimation;            // Reader/writer lock.
+        volatile OBJID      m_objidLeakEstimation;          // OBJID which has already been processed (objidFDPOverMax means it is not running).
+        volatile CPG        m_cpgLeakEstimationCorrection;  // Accumulated correction.
 
     // =====================================================================
     // Member retrieval.
@@ -795,13 +793,16 @@ public:
         CLogRedoMap* PLogRedoMapDbtimeRevertIgnore() const  { return m_pLogRedoMapDbtimeRevertIgnore; };
 
         // Space leak estimation.
-        ERR ErrStartRootSpaceLeakEstimation();
-        OBJID OjidLeakEstimation() const;
-        VOID SetOjidLeakEstimation( const OBJID objid );
-        VOID StopRootSpaceLeakEstimation();
-        VOID InitLeakEstimation();
-        VOID AccumulateCorrectionForLeakEstimation( const OBJID objid, const CPG cpg );
-        CPG CpgLeakEstimationCorrection() const;
+        //
+        ERR ErrStartRootSpaceLeakEstimation();                                              // Starts estimation. Returns JET_errRootSpaceLeakEstimationAlreadyRunning is already running.
+        VOID StopRootSpaceLeakEstimation();                                                 // Stops estimation. Only valid when already running.
+        VOID SetOjidLeakEstimation( const OBJID objid );                                    // Sets the OBJID which has already been processed.
+        CPG CpgLeakEstimationCorrection() const;                                            // The leak estimate correction.
+        VOID AccumulateCorrectionForLeakEstimation( const OBJID objid, const CPG cpg );     // Accumulates space change to estimate the correction.
+    private:
+        OBJID OjidLeakEstimation() const;                                                   // Returns the highest OBJID which has been processed.
+        VOID InitLeakEstimation();                                                          // Initializes leak estimation variables.
+
 
     // =====================================================================
     // Member manipulation.
@@ -988,9 +989,9 @@ public:
     // Physical File I/O Conversions
     public:
 
-        CPG CpgOfCb( const QWORD cb ) const          { return (CPG) ( cb / CbPage() ); }
-        QWORD CbOfCpg( const CPG cpg ) const         { return ( QWORD( cpg ) * CbPage() ); }
-        __int64 CbOfCpgSigned( const CPG cpg ) const { return ( __int64( cpg ) * CbPage() ); }
+       CPG CpgOfCb( const QWORD cb ) const          { return (CPG) ( cb / CbPage() ); }
+       QWORD CbOfCpg( const CPG cpg ) const         { return ( QWORD( cpg ) * CbPage() ); }
+       __int64 CbOfCpgSigned( const CPG cpg ) const { return ( __int64( cpg ) * CbPage() ); }
 
     // =====================================================================
     // Initialize/terminate FMP array
