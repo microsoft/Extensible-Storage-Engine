@@ -638,6 +638,7 @@ ERR ErrCATGetNextRootObject(
     _In_ const BOOL         fSortedByObjId,
     _Inout_ FUCB** const    ppfucbCatalog,
     _Out_ OBJID* const      pobjid,
+    _Out_ PGNO* const       ppgnoFDP = NULL,
     _Out_writes_opt_z_( JET_cbNameMost + 1 ) CHAR* const szObjectName = NULL );
 
 ERR ErrCATGetNextNonRootObject(

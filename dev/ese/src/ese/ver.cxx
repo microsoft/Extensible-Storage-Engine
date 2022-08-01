@@ -5757,20 +5757,20 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
         case operDeleteTable:
         {
-            INT         fState;
-            const IFMP  ifmp                = prce->Ifmp();
-            const PGNO  pgnoFDPTable        = ( (VERDELETETABLEDATA*) prce->PbData() )->pgnoFDP;
-            const PGNO  fRevertableDelete   = ( (VERDELETETABLEDATA*) prce->PbData() )->fRevertableTableDelete;
+            FCBStateFlags   fcbsf;
+            const IFMP      ifmp                = prce->Ifmp();
+            const PGNO      pgnoFDPTable        = ( (VERDELETETABLEDATA*) prce->PbData() )->pgnoFDP;
+            const PGNO      fRevertableDelete   = ( (VERDELETETABLEDATA*) prce->PbData() )->fRevertableTableDelete;
 
             // Will be set only for non-revertable deletes.
-            const PGNO  pgnoLVRoot          = ( (VERDELETETABLEDATA*) prce->PbData() )->pgnoFDPLV;
-            FCB         * const pfcbTable   = FCB::PfcbFCBGet(
-                                                    ifmp,
-                                                    pgnoFDPTable,
-                                                    &fState );
+            const PGNO      pgnoLVRoot          = ( (VERDELETETABLEDATA*) prce->PbData() )->pgnoFDPLV;
+            FCB             * const pfcbTable   = FCB::PfcbFCBGet(
+                                                        ifmp,
+                                                        pgnoFDPTable,
+                                                        &fcbsf );
             Assert( pfcbNil != pfcbTable );
             Assert( pfcbTable->FTypeTable() );
-            Assert( fFCBStateInitialized == fState );
+            Assert( fcbsf & fcbsfInitialized );
 
             //  verify VERNullifyAllVersionsOnFCB() not called during recovery,
             //  which would be bad because VERNullifyAllVersionsOnFCB() enters
@@ -5798,7 +5798,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
             if ( pfcbTable->Ptdb() != ptdbNil )
             {
-                Assert( fFCBStateInitialized == fState );
+                Assert( fcbsf & fcbsfInitialized );
                 FCB * const pfcbLV = pfcbTable->Ptdb()->PfcbLV();
                 if ( pfcbNil != pfcbLV )
                 {
@@ -5838,7 +5838,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
                             pgnoLVRoot );
             }
 
-            if ( fFCBStateInitialized == fState )
+            if ( fcbsf & fcbsfInitialized )
             {
                 pfcbTable->Release();
 
@@ -6030,10 +6030,6 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
     Assert( m_critRCEClean.FOwner() );
 
     const BOOL fCleanOneDb = ( ifmp != g_ifmpMax );
-
-    // Only two places we do per-DB RCE Clean is just before we want to
-    // detach the database, running shrink or reclaiming space leaks.
-    Assert( !fCleanOneDb || g_rgfmp[ifmp].FDetachingDB() || g_rgfmp[ifmp].FShrinkIsRunning() || g_rgfmp[ifmp].FLeakReclaimerIsRunning() );
 
     // keep the original value
     const BOOL fSyncronousTasks = m_fSyncronousTasks;
@@ -6668,18 +6664,18 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
 
                 case operDeleteTable:
                 {
-                    FCB     *pfcbTable;
-                    INT     fState;
+                    FCB             *pfcbTable;
+                    FCBStateFlags   fcbsf;
 
                     //  pfcb should be found, even if it's a sentinel
-                    pfcbTable = FCB::PfcbFCBGet( prce->Ifmp(), *(PGNO*)prce->PbData(), &fState );
+                    pfcbTable = FCB::PfcbFCBGet( prce->Ifmp(), *(PGNO*)prce->PbData(), &fcbsf );
                     Assert( pfcbTable != pfcbNil );
                     Assert( pfcbTable->FTypeTable() );
-                    Assert( fFCBStateInitialized == fState );
+                    Assert( fcbsf & fcbsfInitialized );
 
                     if ( pfcbTable->Ptdb() != ptdbNil )
                     {
-                        Assert( fFCBStateInitialized == fState );
+                        Assert( fcbsf & fcbsfInitialized );
 
                         pfcbTable->EnterDDL();
 
@@ -7848,16 +7844,16 @@ LOCAL VOID VERIUndoDeleteTable( const RCE * const prce )
     Assert( prce->TrxCommitted() == trxMax );
 
     //  may be pfcbNil if sentinel
-    INT fState;
-    FCB * const pfcbTable = FCB::PfcbFCBGet( prce->Ifmp(), *(PGNO*)prce->PbData(), &fState );
+    FCBStateFlags fcbsf;
+    FCB * const pfcbTable = FCB::PfcbFCBGet( prce->Ifmp(), *(PGNO*)prce->PbData(), &fcbsf );
     Assert( pfcbTable != pfcbNil );
     Assert( pfcbTable->FTypeTable() );
-    Assert( fFCBStateInitialized == fState );
+    Assert( fcbsf & fcbsfInitialized );
 
     // If regular FCB, decrement refcnt, else free sentinel.
     if ( pfcbTable->Ptdb() != ptdbNil )
     {
-        Assert( fFCBStateInitialized == fState );
+        Assert( fcbsf & fcbsfInitialized );
 
         pfcbTable->EnterDDL();
 

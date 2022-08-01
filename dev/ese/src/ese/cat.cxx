@@ -10179,7 +10179,7 @@ ERR ErrCATRenameTable(
 //  ================================================================
 {
     ERR             err;
-    INT             fState              = fFCBStateNull;
+    FCBStateFlags   fcbsf               = fcbsfNone;
     FCB             * pfcbTable         = pfcbNil;
     OBJID           objidTable;
     PGNO            pgnoFDPTable;
@@ -10192,10 +10192,10 @@ ERR ErrCATRenameTable(
     //  check to see if the FCB is present and initialized
     //  if its not present we can just update the catalog
 
-    pfcbTable = FCB::PfcbFCBGet( ifmp, pgnoFDPTable, &fState );
+    pfcbTable = FCB::PfcbFCBGet( ifmp, pgnoFDPTable, &fcbsf );
     if( pfcbNil != pfcbTable )
     {
-        if( fFCBStateInitialized != fState )
+        if( !( fcbsf & fcbsfInitialized ) )
         {
 
             //  this should only happen if this is called in a multi-threaded scenario
@@ -15241,6 +15241,7 @@ ERR ErrCATGetNextRootObject(
     _In_ const BOOL         fSortedByObjId,
     _Inout_ FUCB** const    ppfucbCatalog,
     _Out_ OBJID* const      pobjid,
+    _Out_ PGNO* const       ppgnoFDP,
     _Out_writes_opt_z_( JET_cbNameMost + 1 ) CHAR* const szObjectName )
 //  ================================================================
 {
@@ -15251,6 +15252,7 @@ ERR ErrCATGetNextRootObject(
 
     ERR err = JET_errSuccess;
     OBJID objid = objidNil;
+    PGNO pgnoFDP = pgnoNull;
     FUCB* pfucbCatalog = *ppfucbCatalog;
     BOOL fInitilializedFucb = fFalse;
     BOOL fCatalogLatched = fFalse;
@@ -15387,6 +15389,15 @@ ERR ErrCATGetNextRootObject(
     objid = *( (UnalignedLittleEndian<OBJID>*)dataField.Pv() );
     Assert( objid != objidNil );
 
+    if ( ppgnoFDP != NULL )
+    {
+        // Retrieve the pgnoFDP.
+        Call( ErrRECIRetrieveFixedColumn( pfcbNil, pfucbCatalog->u.pfcb->Ptdb(), fidMSO_PgnoFDP, pfucbCatalog->kdfCurr.data, &dataField ) );
+        Assert( dataField.Cb() == sizeof( pgnoFDP ) );
+        pgnoFDP = *( ( UnalignedLittleEndian<PGNO>* )dataField.Pv() );
+        Assert( pgnoFDP != pgnoNull );
+    }
+
     if ( szObjectName != NULL )
     {
         // Retrieve the object name.
@@ -15406,6 +15417,10 @@ HandleError:
         {
             OSStrCbCopyA( szObjectName, sizeof( szObjectNameT ), szObjectNameT );
         }
+        if ( ppgnoFDP != NULL )
+        {
+            *ppgnoFDP = pgnoFDP;
+        }
     }
     else
     {
@@ -15413,6 +15428,10 @@ HandleError:
         if ( szObjectName != NULL )
         {
             *szObjectName = '\0';
+        }
+        if ( ppgnoFDP != NULL )
+        {
+            *ppgnoFDP = pgnoNull;
         }
     }
 

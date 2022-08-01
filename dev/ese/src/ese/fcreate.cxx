@@ -1885,6 +1885,7 @@ LOCAL ERR ErrFILEICreateIndexes(
     //  force the FCB to be initialized successfully
 
     pfucbTableExtent->u.pfcb->Lock();
+    pfucbTableExtent->u.pfcb->SetTypeTable();
     pfucbTableExtent->u.pfcb->CreateComplete();
     pfucbTableExtent->u.pfcb->Unlock();
 
@@ -2295,6 +2296,7 @@ LOCAL ERR ErrFILEIInheritIndexes(
     //  force the FCB to be initialized successfully
 
     pfucbTableExtent->u.pfcb->Lock();
+    pfucbTableExtent->u.pfcb->SetTypeTable();
     pfucbTableExtent->u.pfcb->CreateComplete();
     pfucbTableExtent->u.pfcb->Unlock();
 
@@ -8806,6 +8808,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAl
         pfcb->Unlock();
     }
 
+    OnDebug( while ( ErrFaultInjection( 126380 ) < JET_errSuccess ) );
 
     // Look at all the existing FUCBs to verify that the table is not currently in use by the system.
     do

@@ -7778,7 +7778,7 @@ ERR ErrBTIOpen(
 {
     ERR             err;
     FCB             *pfcb;
-    INT             fState;
+    FCBStateFlags   fcbsf;
     ULONG           cRetries = 0;
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope( );
     tcScope->iorReason.SetIors( iorsBTOpen );
@@ -7788,13 +7788,13 @@ RetrieveFCB:
 
     //  get the FCB for the given ifmp/pgnoFDP
 
-    pfcb = FCB::PfcbFCBGet( ifmp, pgnoFDP, &fState, fTrue, !fWillInitFCB );
+    pfcb = FCB::PfcbFCBGet( ifmp, pgnoFDP, &fcbsf, fTrue, !fWillInitFCB );
     if ( pfcb == pfcbNil )
     {
 
         //  the FCB does not exist
 
-        Assert( fFCBStateNull == fState );
+        Assert( fcbsfNone == fcbsf );
 
         //  try to create a new B-tree which will cause the creation of the new FCB
 
@@ -7821,7 +7821,7 @@ RetrieveFCB:
     {
         tcScope->nParentObjectClass = pfcb->TCE();
 
-        if ( fFCBStateInitialized == fState )
+        if ( fcbsf & fcbsfInitialized )
         {
             Assert( pfcb->WRefCount() >= 1);
             err = ErrBTOpen( ppib, pfcb, ppfucb );

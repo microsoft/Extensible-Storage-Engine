@@ -5153,6 +5153,8 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
     const CPG cpgSplitBuffers,
     const ULONG cCachedPrimary,
     const ULONG cUncachedPrimary,
+    const ULONG cEnumerationConflictsSucceeded,
+    const ULONG cEnumerationConflictsFailed,
     const JET_THREADSTATS& jts,
     const ULONG ulMinElapsed,
     const double dblSecElapsed )
@@ -5189,7 +5191,9 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
         OSFormatW( L"%u", cUncachedPrimary ),
         OSFormatW( L"%u", jts.cPageRead ), OSFormatW( L"%u", jts.cPagePreread ), OSFormatW( L"%u", jts.cPageReferenced ), OSFormatW( L"%u", jts.cPageDirtied ), OSFormatW( L"%u", jts.cPageRedirtied ),
         OSFormatW( L"%u", ulMinElapsed ), OSFormatW( L"%.3f", dblSecElapsed ),
-        OSFormatW( L"%d", cpgOwnedPrimaryCorrection ), OSFormatW( L"%I64d", pfmp->CbOfCpgSigned( cpgOwnedPrimaryCorrection ) ), ( ( cpgOwnedPrimaryOriginal != 0 ) ? OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedPrimaryCorrection ) / (double)cpgOwnedPrimaryOriginal ) : L"-" )
+        OSFormatW( L"%d", cpgOwnedPrimaryCorrection ), OSFormatW( L"%I64d", pfmp->CbOfCpgSigned( cpgOwnedPrimaryCorrection ) ), ( ( cpgOwnedPrimaryOriginal != 0 ) ? OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedPrimaryCorrection ) / (double)cpgOwnedPrimaryOriginal ) : L"-" ),
+        OSFormatW( L"%u", cEnumerationConflictsSucceeded ),
+        OSFormatW( L"%u", cEnumerationConflictsFailed )
     };
     UtilReportEvent(
         eventInformation,
@@ -5245,6 +5249,8 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
     BOOL fRunning = fFalse;
     JET_THREADSTATS jtsStart = { 0 }, jtsEnd = { 0 };
     OBJID objidLast = objidNil;
+    PGNO pgnoFDPLast = pgnoNull;
+    ULONG cEnumerationConflictsFailed = 0, cEnumerationConflictsSucceeded = 0;
     CPG cpgOwnedPrimary = 0, cpgOwnedPrimaryCorrection = 0;
     ULONG cCachedPrimary = 0, cUncachedPrimary = 0;
     CPG cpgUsedRoot = 0, cpgUsedOe = 0, cpgUsedAe = 0;
@@ -5277,9 +5283,9 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
     ppib->SetFSessionLeakReport();
 
     CHAR szObjectName[ JET_cbNameMost + 1 ];
-    for ( err = ErrCATGetNextRootObject( ppib, ifmp, fTrue, &pfucbCatalog, &objidLast, szObjectName );
+    for ( err = ErrCATGetNextRootObject( ppib, ifmp, fTrue, &pfucbCatalog, &objidLast, &pgnoFDPLast, szObjectName );
         ( err >= JET_errSuccess ) && ( objidLast != objidNil );
-        err = ErrCATGetNextRootObject( ppib, ifmp, fTrue, &pfucbCatalog, &objidLast, szObjectName ) )
+        err = ErrCATGetNextRootObject( ppib, ifmp, fTrue, &pfucbCatalog, &objidLast, &pgnoFDPLast, szObjectName ) )
     {
 #ifdef DEBUG
         Assert( objidLast != objidSystemRoot );  // Root object is not supposed to be returned here.
@@ -5307,37 +5313,111 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
             // Test injection.
             OnDebug( while ( objidLast >= (OBJID)UlConfigOverrideInjection( 48550, objidFDPOverMax ) ) );
 
-            err = ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szObjectName, JET_bitTableReadOnly | JET_bitTableTryPurgeOnClose );
-            if ( err == JET_errObjectNotFound )
+            BOOL fRetried = fFalse, fRetry = fFalse;
+            const BOOL fInfiniteRetries = OnDebugOrRetail( fTrue, fFalse );
+            ERR errRetry = JET_errSuccess;
+            const CHAR* wszRetryReason = "";
+            do
             {
-                err = JET_errSuccess;
+                fRetried = fRetry;
+                if ( fRetry )
+                {
+                    UtilSleep( 10 );
+                    fRetry = fFalse;
+                }
+
+                err = ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szObjectName, JET_bitTableReadOnly | JET_bitTableTryPurgeOnClose );
+                if ( ( err == JET_errObjectNotFound ) || ( err == JET_errTableLocked ) )
+                {
+                    // We are probably racing with table deletion.
+                    FCBStateFlags fcbsf = fcbsfNone;
+                    const BOOL fFoundFcb = ( FCB::PfcbFCBGet( ifmp, pgnoFDPLast, &fcbsf, fFalse /* fIncrementRefCount */, fTrue /* fInitForRecovery */ ) != pfcbNil );
+                    const BOOL fDeletePending = fFoundFcb && ( fcbsf & fcbsfDeletePending );
+
+                    if ( fFoundFcb && !fDeletePending )
+                    {
+                        // This is unexpected if we know the table is actually getting deleted.
+                        Assert( err != JET_errObjectNotFound );
+                        fRetry = fTrue;
+                        wszRetryReason = "DelNotPending";
+                    }
+                    else if ( fFoundFcb && fDeletePending )
+                    {
+                        // Table deletion is still pending.
+                        fRetry = fTrue;
+                        wszRetryReason = "DelPending";
+
+                        // Perform cleanup.
+                        (void)PverFromPpib( ppib )->ErrVERRCEClean( ifmp );
+                    }
+                    else
+                    {
+                        Assert( !fFoundFcb );
+                        if ( err == JET_errTableLocked )
+                        {
+                            // Either the version store entry for the table deletion has cleared,
+                            // or an exclusive user released the table and the FCB got purged.
+                            fRetry = fTrue;
+                            wszRetryReason = "FcbNotFound";
+                        }
+                        else
+                        {
+                            // Version store entry for the table deletion has cleared.
+                            // No need to retry.
+                            Assert( err == JET_errObjectNotFound );
+                        }
+                    }
+
+                    errRetry = err;
+                    err = JET_errSuccess;
+                }
+                else
+                {
+                    Assert( !fRetry );
+                    Call( err );
+
+                    cUncachedPrimary++;
+
+                    // Test injection.
+                    OnDebug( while ( objidLast >= (OBJID)UlConfigOverrideInjection( 57894, objidFDPOverMax ) ) );
+
+                    Call( ErrSPGetInfo(
+                        ppib,
+                        ifmp,
+                        pfucbTable,
+                        (BYTE*)&cpgPrimaryObject,
+                        sizeof( cpgPrimaryObject ),
+                        fSPOwnedExtent,
+                        gci::Allow ) );
+
+                    cpgOwnedPrimary += cpgPrimaryObject;
+
+                    Call( ErrFILECloseTable( ppib, pfucbTable ) );
+                    pfucbTable = pfucbNil;
+                }
+
+                if ( fRetried )
+                {
+                    if ( fRetry )
+                    {
+                        cEnumerationConflictsFailed++;
+                        if ( !fInfiniteRetries )
+                        {
+                            FireWall( OSFormat( "LeakReportConflict:%s:%d", wszRetryReason, errRetry ) );
+                        }
+                    }
+                    else
+                    {
+                        cEnumerationConflictsSucceeded++;
+                    }
+                }
+
+                Assert( pfucbTable == pfucbNil );
+                Assert( err >= JET_errSuccess );
             }
-            else
-            {
-                Call( err );
-
-                cUncachedPrimary++;
-                
-                // Test injection.
-                OnDebug( while ( objidLast >= (OBJID)UlConfigOverrideInjection( 57894, objidFDPOverMax ) ) );
-
-                Call( ErrSPGetInfo(
-                    ppib,
-                    ifmp,
-                    pfucbTable,
-                    (BYTE*)&cpgPrimaryObject,
-                    sizeof( cpgPrimaryObject ),
-                    fSPOwnedExtent,
-                    gci::Allow ) );
-
-                cpgOwnedPrimary += cpgPrimaryObject;
-
-                Call( ErrFILECloseTable( ppib, pfucbTable ) );
-                pfucbTable = pfucbNil;
-            }
-
-            Assert( pfucbTable == pfucbNil );
+            while ( fRetry && ( !fRetried || fInfiniteRetries ) );
         }
+
         pfmp->SetOjidLeakEstimation( objidLast );
 
 #ifdef DEBUG
@@ -5506,6 +5586,8 @@ HandleError:
             rgcpgRootSpaceInfo[ 2 ],    // cpgSplitBuffers
             cCachedPrimary,
             cUncachedPrimary,
+            cEnumerationConflictsSucceeded,
+            cEnumerationConflictsFailed,
             jts,
             ulMinElapsed,
             dblSecElapsed );
