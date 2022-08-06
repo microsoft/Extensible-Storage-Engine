@@ -7861,7 +7861,12 @@ HandleError:
 ERR ErrBTIGotoRoot( FUCB *pfucb, LATCH latch )
 {
     ERR     err;
-    PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTOpen );
+
+    //  this is a utility function used not only in BTOpen, but many places, we should inherit 
+    //  the iors from whom called us.  there are many SP functions calling this, it may be some
+    //  could use enhancement setting a more contextually correct iors.
+    auto tc = TcCurr();
+    PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, tc.iorReason.Iors() != iorsNone ? tc.iorReason.Iors() : iorsBTOpen );
 
     //  should have no page latched
     //
