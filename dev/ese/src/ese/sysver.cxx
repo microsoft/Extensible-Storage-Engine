@@ -96,6 +96,7 @@ constexpr FormatVersions g_rgfmtversEngine[] = {
     { JET_efvIndexDeferredPopulate, /* 9540 */          { 1568,260,540 }, { 8,120,260 }, { 3,0,0 } }, // [2022/03/02]  
     { JET_efvReservedTags, /* 9560 */                   { 1568,270,560 }, { 8,120,260 }, { 3,0,0 } }, // [2022/06/17]
     { JET_efvRBSTooSoonDeletes, /* 9580 */              { 1568,280,580 }, { 8,130,280 }, { 3,0,0 } }, // [2022/07/14]
+    { JET_efvOptionallyUniqueIndices, /* 9600 */        { 1568,290,600 }, { 8,130,280 }, { 3,0,0 } }, // [2022/07/14]
 };
 
 constexpr INT g_cfmtversEngine = std::size( g_rgfmtversEngine );

@@ -71,6 +71,7 @@ typedef USHORT  IDXFLAG;
 const IDXFLAG   fIDXExtendedColumns  = 0x0001;   // IDXSEGs are comprised of JET_COLUMNIDs, not FIDs
 const IDXFLAG   fIDXDotNetGuid       = 0x0002;   // GUIDs sort according to .Net rules
 const IDXFLAG   fIDXDeferredPopulate = 0x0004;   // Index is not completely populated and so is not normally usable.
+const IDXFLAG   fIDXOptionallyUnique = 0x0008;   // Index can be used to enforce uniqueness, but doesn't require it.
 
 INLINE BOOL FIDXExtendedColumns( const IDXFLAG idxflag )        { return ( idxflag & fIDXExtendedColumns ); }
 INLINE BOOL FIDXDotNetGUID( const IDXFLAG idxflag )     { return ( idxflag & fIDXDotNetGuid ); }
@@ -551,6 +552,10 @@ class IDB
         INLINE BOOL FDeferredPopulate() const           { return ( m_fidxPersisted & fIDXDeferredPopulate ); }
         INLINE VOID SetFDeferredPopulate()              { m_fidxPersisted |= fIDXDeferredPopulate; }
         INLINE VOID ResetFDeferredPopulate()            { m_fidxPersisted &= ~fIDXDeferredPopulate; }
+
+        INLINE BOOL FOptionallyUnique() const           { return ( m_fidxPersisted & fIDXOptionallyUnique ); }
+        INLINE VOID SetFOptionallyUnique()              { m_fidxPersisted |= fIDXOptionallyUnique; }
+        INLINE VOID ResetFOptionallyUnique()            { m_fidxPersisted &= ~fIDXOptionallyUnique; }
 
         // Whether the user specified a locale when creating the index. The default locale may
         // still be used and persisted, but FLocaleSet() will be false in that case.

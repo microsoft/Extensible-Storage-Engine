@@ -280,6 +280,7 @@ private:
             FLAG32      m_fMustRollbackToLevel0:1;          //    session must rollback to level 0 before being able to commit
             FLAG32      m_fDBScan:1;                        //    session is for DBSCAN
             FLAG32      m_fLeakReport:1;                    //    session is for the leak report
+            FLAG32      m_fEnforceOptionallyUniqueIndices:1;//    session is enforcing uniqueness on optionally unique indices. 
 #if defined(DEBUG) || defined(EXPENSIVE_INLINE_EXTENT_PAGE_COUNT_CACHE_VALIDATION)
             FLAG32      m_fUpdatingExtentPageCountCache:1;  //    session is currently updating the cached CPG values in the catalog
 #endif
@@ -494,6 +495,10 @@ public:
     BOOL                FBatchIndexCreation() const                         { return m_fBatchIndexCreation; }
     VOID                SetFBatchIndexCreation()                            { m_fBatchIndexCreation = fTrue; }
     VOID                ResetFBatchIndexCreation()                          { m_fBatchIndexCreation = fFalse; }
+
+    BOOL                FEnforceOptionallyUniqueIndices() const             { return m_fEnforceOptionallyUniqueIndices; }
+    VOID                SetFEnforceOptionallyUniqueIndices()                { m_fEnforceOptionallyUniqueIndices = fTrue; }
+    VOID                ResetFEnforceOptionallyUniqueIndices()              { m_fEnforceOptionallyUniqueIndices = fFalse; }
 
     VOID                * PvRecordFormatConversionBuffer() const            { return m_pvRecordFormatConversionBuffer; }
     ERR                 ErrAllocPvRecordFormatConversionBuffer();

@@ -38,6 +38,7 @@ ERR VTAPI ErrIsamGetLock( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
 {
     PIB     *ppib = reinterpret_cast<PIB *>( sesid );
     FUCB    *pfucb = reinterpret_cast<FUCB *>( vtid );
+    DIRLOCK dirlock;
     ERR     err;
 
     CallR( ErrPIBCheck( ppib ) );
@@ -47,25 +48,71 @@ ERR VTAPI ErrIsamGetLock( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
     if ( ppib->Level() <= 0 )
         return ErrERRCheck( JET_errNotInTransaction );
 
-    if ( JET_bitReadLock == grbit )
+    switch ( grbit & ( JET_bitWriteLock | JET_bitReadLock ) )
     {
-        Call( ErrDIRGetLock( pfucb, readLock ) );
+        case JET_bitReadLock:
+            dirlock = readLock;
+            break;
+
+        case JET_bitWriteLock:
+            //  ensure that table is updatable
+            //
+            CallR( ErrFUCBCheckUpdatable( pfucb )  );
+            if ( !FFMPIsTempDB( pfucb->ifmp ) )
+            {
+                CallR( ErrPIBCheckUpdatable( ppib ) );
+            }
+            dirlock = writeLock;
+            break;
+
+        default:
+            Error( ErrERRCheck( JET_errInvalidGrbit ));
+            break;
     }
-    else if ( JET_bitWriteLock == grbit )
+
+    if ( grbit & JET_bitKeyLock )
     {
-        //  ensure that table is updatable
-        //
-        CallR( ErrFUCBCheckUpdatable( pfucb )  );
-        if ( !FFMPIsTempDB( pfucb->ifmp ) )
+        FUCB     *pfucbUsed;
+        BOOKMARK bm;
+
+        if ( pfucbNil == pfucb->pfucbCurIndex )
         {
-            CallR( ErrPIBCheckUpdatable( ppib ) );
+            // We're using the primary index.
+            pfucbUsed = pfucb;
+            Assert( pfucbUsed->u.pfcb->FPrimaryIndex() );
+            Assert( pfucbUsed->u.pfcb->Pidb() == pidbNil
+                    || pfucbUsed->u.pfcb->Pidb()->FPrimary() );
+        }
+        else
+        {
+            // We're using a 2ndary index.
+            pfucbUsed = pfucb->pfucbCurIndex;
+            Assert( pfucbUsed->u.pfcb->FTypeSecondaryIndex() );
+            Assert( pfucbUsed->u.pfcb->Pidb() != pidbNil );
+            Assert( !pfucbUsed->u.pfcb->Pidb()->FPrimary() );
         }
 
-        Call( ErrDIRGetLock( pfucb, writeLock ) );
+        // Caller wants us to lock based on the search key.
+        if ( !FKSPrepared( pfucbUsed ) )
+        {
+            Error( ErrERRCheck( JET_errKeyNotMade ) );
+        }
+
+        if ( pfucbUsed->dataSearchKey.FNull() ||
+             NULL == pfucbUsed->dataSearchKey.Pv() )
+        {
+            Expected( fFalse );
+            Error( ErrERRCheck( JET_errKeyNotMade ) );
+        }
+
+        bm.Nullify();
+        bm.key.suffix = pfucbUsed->dataSearchKey;
+
+        Call( ErrDIRGetLock( pfucbUsed, dirlock, bm ) );
     }
     else
     {
-        err = ErrERRCheck( JET_errInvalidGrbit );
+        Call( ErrDIRGetLock( pfucb, dirlock ) );
     }
 
 HandleError:

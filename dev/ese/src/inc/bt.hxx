@@ -159,7 +159,7 @@ ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, c
 //  **************************************
 //  update operations
 //
-ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock );
+ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock, BOOKMARK& bookmark );
 ERR ErrBTReplace( FUCB * const pfucb, const DATA& data, const DIRFLAG dirflags );
 
 template< typename TDelta >

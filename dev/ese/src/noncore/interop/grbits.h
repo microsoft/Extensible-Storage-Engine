@@ -207,6 +207,7 @@ MSINTERNAL enum class MJET_GRBIT
     RangeRemove = 0x00000008,
     ReadLock = 0x00000001,
     WriteLock = 0x00000002,
+    KeyLock = 0x00000004,
     MoveKeyNE = 0x00000001,
     SeekEQ = 0x00000001,
     SeekLT = 0x00000002,
@@ -242,6 +243,7 @@ MSINTERNAL enum class MJET_GRBIT
     IndexImmutableStructure = 0x00080000, // Do not write to the input structures during a JetCreateIndexN call.
     IndexDeferredPopulateCreate = 0x00100000, // Only create the index, don't actually populate it.
     IndexDeferredPopulateProcess = 0x00200000, // Populate an index that was previously created with JET_bitIndexDeferredPopulateCreate
+    IndexOptionallyUnique = 0x00400000, // Index uniqueness is only enforced on updates using JET_bitUpdateEnforceOptionallyUniqueIndices
     KeyAscending = 0x00000000,
     KeyDescending = 0x00000001,
     TableDenyWrite = 0x00000001,
@@ -332,6 +334,7 @@ MSINTERNAL enum class MJET_GRBIT
     SpaceHintsUtilizeExactExtents = 0x00000200, // This changes the internal allocation policy to always allocate extents of the size requested by the space hints.
     UpdateCheckESE97Compatibility = 0x00000001, // check whether record fits if represented in ESE97 database format
     UpdateNoVersion = 0x00000002, // do not create rollback or versioning information for update
+    UpdateEnforceOptionallyUniqueIndices = 0x00000004, // Enforce optionally unique indices.
     EscrowNoRollback = 0x0001,
     RetrieveCopy = 0x00000001,
     RetrieveFromIndex = 0x00000002,
