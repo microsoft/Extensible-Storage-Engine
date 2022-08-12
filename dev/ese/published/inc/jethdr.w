@@ -678,6 +678,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvIndexDeferredPopulate                        9540    //  Adds support for deferred population of indices.
 #define JET_efvReservedTags                                 9560    //  Allows adding additional reserved tags to cpage.
 #define JET_efvRBSTooSoonDeletes                            9580    //  Allows to decide if we can now perform non-revertable delete even if root page of table was moved recently by shrink or created recently.
+#define JET_efvOptionallyUniqueIndices                      9600    //  Allows creation of optionally unique indices.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -4629,6 +4630,11 @@ typedef struct
 
 #define JET_bitReadLock                 0x00000001
 #define JET_bitWriteLock                0x00000002
+// end_PubEsent
+#if ( JET_VERSION >= 0x0A01 )
+#define JET_bitKeyLock                  0x00000004
+#endif // JET_VERSION >= 0x0A01
+// begin_PubEsent
 
     /* Constants for JetMove */
 
@@ -4705,6 +4711,9 @@ typedef struct
 #define JET_bitIndexDeferredPopulateCreate  0x00100000  // Only create the index, don't actually populate it.
 #define JET_bitIndexDeferredPopulateProcess 0x00200000  // Populate an index that was previously created with JET_bitIndexDeferredPopulateCreate
 #endif // JET_VERSION >= 0x0A00
+#if ( JET_VERSION >= 0x0A01 )
+#define JET_bitIndexOptionallyUnique    0x00400000  // Index uniqueness is only enforced on updates using JET_bitUpdateEnforceOptionallyUniqueIndices
+#endif // JET_VERSION >= 0x0A01
 
 // These are not persisted anywhere. These are bits used by the 'Isam layer', a simpler C#-based
 // interface to access ESE databases.
@@ -4958,6 +4967,9 @@ typedef struct
 #endif // JET_VERSION >= 0x0502
 // end_PubEsent
 #define JET_bitUpdateNoVersion                  0x00000002  //  do not create rollback or versioning information for update
+#if ( JET_VERSION >= 0x0A01 )
+#define JET_bitUpdateEnforceOptionallyUniqueIndices 0x00000004 // Enforce optionally unique indices.
+#endif // JET_VERSION >= 0x0A01
 // begin_PubEsent
 
     /* Flags for JetEscrowUpdate */

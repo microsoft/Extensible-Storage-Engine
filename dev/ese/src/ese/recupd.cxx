@@ -956,6 +956,11 @@ ERR VTAPI ErrIsamUpdate(
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
 
+    if ( grbit & JET_bitUpdateEnforceOptionallyUniqueIndices )
+    {
+        ppib->SetFEnforceOptionallyUniqueIndices();
+    }
+
     if ( FFUCBReplacePrepared( pfucb ) )
     {
         BOOKMARK *pbm;
@@ -996,6 +1001,8 @@ ERR VTAPI ErrIsamUpdate(
     {
         RECIFreeCopyBuffer( pfucb );
     }
+
+    ppib->ResetFEnforceOptionallyUniqueIndices();
 
     AssertDIRMaybeNoLatch( ppib, pfucb );
     Assert( err != JET_errNoCurrentRecord );
@@ -2054,6 +2061,63 @@ ERR ErrRECIInsertIndexEntry(
     Assert( NULL != pInsertContext );
 
     PERFOpt( PERFIncCounterTable( cRECIndexInserts, PinstFromPfucb( pfucbIdx ), TceFromFUCB( pfucbIdx ) ) );
+
+    if ( pidb->FOptionallyUnique() && pfucbIdx->ppib->FEnforceOptionallyUniqueIndices() )
+    {
+        DIB      dib;
+        BOOKMARK bm;
+
+        bm.Nullify();
+        bm.key = keyToInsert;
+        dib.pos = posDown;
+        dib.pbm = &bm;
+        dib.dirflag = fDIRExact;
+
+        // First, globally lock the key so no one else can insert it.
+        // Note: this lock is automatically released if the JetUpdate this call is part of
+        // fails.
+        Call( ErrDIRGetLock( pfucbIdx, writeLock, bm ) );
+
+        // Now, make sure the key is not already in use somewhere.
+        err = ErrDIRDown( pfucbIdx, &dib );
+
+        // Massage some internal "warnings".  fDIRExact does not always result in the error code
+        // you'd expect.
+        switch ( err )
+        {
+            case wrnNDFoundLess:
+            case wrnNDFoundGreater:
+                // Although we landed on something, it wasn't what we wanted.
+                DIRUp( pfucbIdx );
+                err = ErrERRCheck( JET_errRecordNotFound );
+                break;
+
+            default:
+                break;
+        }
+
+        // Ignore warnings.
+        switch ( min( err, JET_errSuccess ) )
+        {
+            case JET_errSuccess:
+                // But, report any warnings.
+                CallS( err );
+
+                // There's already something with this key.
+                Error( ErrERRCheck( JET_errKeyDuplicate ) );
+
+            case JET_errNoCurrentRecord:
+            case JET_errRecordNotFound:
+                // Nope, not already in use.
+                err = JET_errSuccess;
+                break;
+
+            default:
+                // We don't really expect any other errors.
+                Assert( fFalse );
+                Error( err );
+        }
+    }
 
     err = ErrDIRInsert(
         pfucbIdx,

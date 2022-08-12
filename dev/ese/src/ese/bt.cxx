@@ -5161,7 +5161,7 @@ HandleError:
 //  UNDONE: we don't need to latch the page at all. just create
 //          the version using the bookmark in the FUCB
 //
-ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock )
+ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock, BOOKMARK &bm )
 {
     Assert( dirlock == writeLock
             || dirlock == readLock );
@@ -5194,7 +5194,7 @@ ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock )
         Call( pver->ErrVERCheckTransactionSize( pfucb->ppib ) );
         Call( pver->ErrVERModify(
                 pfucb,
-                pfucb->bmCurr,
+                bm,
                 oper,
                 &prce,
                 NULL ) );

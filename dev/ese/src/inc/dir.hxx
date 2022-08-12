@@ -189,7 +189,8 @@ ERR ErrDIRTermAppend( FUCB *pfucb );
 ERR ErrDIRDelete( FUCB *pfucb, DIRFLAG dirflag, RCE *prcePrimary = prceNil );
 
 ERR ErrDIRReplace( FUCB *pfucb, const DATA& data, DIRFLAG dirflag );
-ERR ErrDIRGetLock( FUCB *pfucb, DIRLOCK dirlock );
+ERR ErrDIRGetLock( FUCB *pfucb, DIRLOCK dirlock );                      // Pre-existing default is to use bmCurr.  Use an overload
+ERR ErrDIRGetLock( FUCB *pfucb, DIRLOCK dirlock, BOOKMARK& bmToLock );  //         to allow supplying bookmark other than that.
 
 template< typename TDelta >
 ERR ErrDIRDelta(

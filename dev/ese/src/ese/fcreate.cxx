@@ -1440,6 +1440,7 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
     const BOOL                      fConditional        = ( pidxcreate->cConditionalColumn > 0 );
     const BOOL                      fPrimary            = ( grbit & JET_bitIndexPrimary );
     const BOOL                      fDeferredPopulate   = ( grbit & JET_bitIndexDeferredPopulateCreate );
+    const BOOL                      fOptionallyUnique   = ( grbit & JET_bitIndexOptionallyUnique );
     const BOOL                      fUnique             = ( grbit & ( JET_bitIndexUnique|JET_bitIndexPrimary ) );
     const BOOL                      fDisallowNull       = ( grbit & JET_bitIndexDisallowNull );
     const BOOL                      fIgnoreNull         = ( grbit & JET_bitIndexIgnoreNull );
@@ -1451,9 +1452,9 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
     const BOOL                      fCustomTupleLimits  = ( grbit & JET_bitIndexTupleLimits );
     const BOOL                      fTuples             = ( ( grbit & JET_bitIndexTuples )
                                                             || fCustomTupleLimits );
-    const BOOL                      fCrossProduct   = ( grbit & JET_bitIndexCrossProduct );
-    const BOOL                      fNestedTable    = ( grbit & JET_bitIndexNestedTable );
-    const BOOL                      fDotNetGuid     = ( grbit & JET_bitIndexDotNetGuid );
+    const BOOL                      fCrossProduct       = ( grbit & JET_bitIndexCrossProduct );
+    const BOOL                      fNestedTable        = ( grbit & JET_bitIndexNestedTable );
+    const BOOL                      fDotNetGuid         = ( grbit & JET_bitIndexDotNetGuid );
     const BOOL                      fKeyMost            = ( grbit & JET_bitIndexKeyMost );
     const BOOL                      fDisallowTruncation = ( grbit & JET_bitIndexDisallowTruncation );
 
@@ -1461,6 +1462,12 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
     ULONG                           cFields             = 0;
     USHORT                          cbKeyMost           = 0;
     USHORT                          cbVarSegMac         = 0;
+
+    // grbits that rely on an EFV
+    if ( fOptionallyUnique )
+    {
+        CallR( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvOptionallyUniqueIndices ) );
+    }
 
     //  if index has custom key size set then set in IDB
     //  otherwise default to historic maximum key size of 255 bytes
@@ -1494,6 +1501,13 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
     //  do not allow primary indexes with any ignore bits on
     //
     if ( fPrimary && ( fIgnoreNull || fIgnoreAnyNull || fIgnoreFirstNull ) )
+    {
+        err = ErrERRCheck( JET_errInvalidGrbit );
+        return err;
+    }
+
+    // Optionally Unique is only allowed on non-unique secondary indices.
+    if ( fOptionallyUnique && ( fPrimary || fUnique ) )
     {
         err = ErrERRCheck( JET_errInvalidGrbit );
         return err;
@@ -1775,6 +1789,11 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
     if ( fDeferredPopulate )
     {
         pidb->SetFDeferredPopulate();
+    }
+
+    if ( fOptionallyUnique )
+    {
+        pidb->SetFOptionallyUnique();
     }
 
     //  not both linear and cross product
@@ -9554,6 +9573,7 @@ VOID IDB::SetFlagsFromGrbit( const JET_GRBIT grbit )
     const BOOL  fDotNetGuid         = ( grbit & JET_bitIndexDotNetGuid );
     const BOOL  fDisallowTruncation = ( grbit & JET_bitIndexDisallowTruncation );
     const BOOL  fDeferredPopulate   = ( grbit & JET_bitIndexDeferredPopulateCreate );
+    const BOOL  fOptionallyUnique   = ( grbit & JET_bitIndexOptionallyUnique );
 
     ResetFlags();
 
@@ -9595,6 +9615,11 @@ VOID IDB::SetFlagsFromGrbit( const JET_GRBIT grbit )
     if ( fDeferredPopulate )
     {
         SetFDeferredPopulate();
+    }
+
+    if ( fOptionallyUnique )
+    {
+        SetFOptionallyUnique();
     }
 
     //  not both linear and cross product

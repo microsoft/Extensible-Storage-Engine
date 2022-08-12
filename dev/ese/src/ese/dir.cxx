@@ -1490,6 +1490,20 @@ HandleError:
 
 //  lock record by calling BTLockRecord
 //
+ERR ErrDIRGetLock( FUCB *pfucb, DIRLOCK dirlock, BOOKMARK &bm )
+{
+    ERR     err = JET_errSuccess;
+
+    Call( ErrBTLock( pfucb, dirlock, bm ) );
+    CallS( err );
+
+    return err;
+
+HandleError:
+    Assert( !Pcsr( pfucb )->FLatched() );
+    return err;
+}
+
 ERR ErrDIRGetLock( FUCB *pfucb, DIRLOCK dirlock )
 {
     ERR     err = JET_errSuccess;
@@ -1519,10 +1533,10 @@ ERR ErrDIRGetLock( FUCB *pfucb, DIRLOCK dirlock )
                     pfucb->locLogical == locAfterLast ||
                     pfucb->locLogical == locBeforeFirst ||
                     pfucb->locLogical == locOnSeekBM );
-            return( ErrERRCheck( JET_errNoCurrentRecord ) );
+            Error( ErrERRCheck( JET_errNoCurrentRecord ) );
     }
 
-    Call( ErrBTLock( pfucb, dirlock ) );
+    Call( ErrBTLock( pfucb, dirlock, pfucb->bmCurr ) );
     CallS( err );
 
     return err;
