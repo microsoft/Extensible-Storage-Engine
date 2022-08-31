@@ -1155,7 +1155,7 @@ HandleError:
 }
 
 
-void __cdecl main(int argc, char ** argv)
+void __cdecl main2(int argc, char ** argv)
 {
 
     JET_ERR                 err                                     = JET_errSuccess;

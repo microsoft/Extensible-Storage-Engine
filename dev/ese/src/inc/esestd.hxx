@@ -164,3 +164,6 @@ using namespace std;
 
 #include "jettest.hxx"
 
+// Disables data and checksum verification 
+// Author: Nemanja Kojic (July 16, 2022)
+#define Vound_DataVerificationsEnabled false

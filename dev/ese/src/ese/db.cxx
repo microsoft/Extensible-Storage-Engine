@@ -2622,7 +2622,7 @@ ERR ErrDBReadHeaderCheckConsistency(
         Error( ErrERRCheck( JET_errInvalidDatabaseVersion ) );
     }
 
-    if ( !g_fRepair )
+    if ( Vound_DataVerificationsEnabled && !g_fRepair )
     {
         if ( pdbfilehdr->Dbstate() != JET_dbstateCleanShutdown )
         {

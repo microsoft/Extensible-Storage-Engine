@@ -5783,7 +5783,11 @@ LOCAL ERR ErrCATIInitFIELD(
 //  UtilMemCpy( &pfield->coltyp, dataField.Pv(), sizeof(JET_COLTYP) );
     Assert( pfield->coltyp >= JET_coltypNil );  // May be Nil if column deleted.
     Assert( pfield->coltyp < JET_coltypMax );
-    Assert( pfield->coltyp != JET_coltypSLV );
+    
+    if (Vound_DataVerificationsEnabled) 
+    {
+        Assert(pfield->coltyp != JET_coltypSLV);
+    }
 
     Assert( FFixedFid( fidMSO_SpaceUsage ) );
     Call( ErrRECIRetrieveFixedColumn(
@@ -6238,7 +6242,7 @@ LOCAL ERR ErrCATIBuildFIELDArray(
             Assert( FidOfColumnid( columnid ) <= ptdb->FidTaggedLast() );
         }
 
-        if ( !FNegTest( fInvalidAPIUsage ) && FFIELDFinalize( field.ffield ) && !s_fLimitFinalizeFfieldNyi )
+        if (Vound_DataVerificationsEnabled && !FNegTest( fInvalidAPIUsage ) && FFIELDFinalize( field.ffield ) && !s_fLimitFinalizeFfieldNyi )
         {
             //  This warns if anyone has a previously stored field from JET_bitColumnFinalize grbit usage, that
             //  we've discouraged usage of.  This would be very hard to get rid of.

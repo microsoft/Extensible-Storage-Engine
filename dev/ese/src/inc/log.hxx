@@ -2203,14 +2203,16 @@ INLINE BOOL INST::FComputeLogDisabled()
 {
     Assert(m_plog);
 
-    if ( _wcsnicmp( SzParam( this, JET_paramRecovery ), L"repair", 6 ) == 0 )
+    PCWSTR paramRecovery = SzParam(this, JET_paramRecovery);
+
+    if ( _wcsnicmp(paramRecovery , L"repair", 6 ) == 0 )
     {
         // If JET_paramRecovery is exactly "repair", then enable logging.  If anything
         // follows "repair", then disable logging.
-        return ( SzParam( this, JET_paramRecovery )[6] != L'\0' );
+        return ( paramRecovery[6] != L'\0' );
     }
-    return (    SzParam( this, JET_paramRecovery )[0] == L'\0' ||
-                _wcsicmp ( SzParam( this, JET_paramRecovery ), wszOn ) != 0 );
+    return (    paramRecovery[0] == L'\0' ||
+                _wcsicmp ( paramRecovery, wszOn ) != 0 );
 }
 
 //  A place with all the storage / disk / controller induced errors that occur against the transaction log.

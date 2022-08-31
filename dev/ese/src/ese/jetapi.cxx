@@ -13706,7 +13706,7 @@ LOCAL JET_ERR JetGetPageInfoEx(
                 memcpy( pInfo2->rgChecksumExpected, &checksumExpected.rgChecksum[ 1 ], sizeof( pInfo2->rgChecksumExpected ) );
             }
 
-            if( checksumActual != checksumExpected )
+            if( Vound_DataVerificationsEnabled && checksumActual != checksumExpected )
             {
                 err = ErrERRCheck( JET_errReadVerifyFailure );
             }

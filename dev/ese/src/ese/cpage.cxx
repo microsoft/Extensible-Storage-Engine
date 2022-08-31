@@ -4005,6 +4005,11 @@ ERR CPAGE::ErrValidatePage(
     __in CFlushMap* pflushmap )
 //  ================================================================
 {
+    if (!Vound_DataVerificationsEnabled) 
+    {
+        return JET_errSuccess;
+    }
+
     Assert( pgvf < pgvfMax );
     Assert( pvalidationaction );
     Assert( FIsNormalSized() );
@@ -4340,6 +4345,11 @@ ERR CPAGE::ErrCheckPage(
      ) const
 //  ================================================================
 {
+    if (!Vound_DataVerificationsEnabled)
+    {
+        return JET_errSuccess;
+    }
+
     ERR                 err     = JET_errSuccess;
     const PGHDR * const ppghdr  = (PGHDR*)m_bfl.pv;
     ULONG              *rgdw    = NULL;

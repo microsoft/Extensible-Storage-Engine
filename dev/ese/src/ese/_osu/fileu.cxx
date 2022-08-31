@@ -706,6 +706,12 @@ void AssertDatabaseHeaderConsistent( const DBFILEHDR * const pdbfilehdr, const D
 {
     //  retail does nothing
 #ifdef DEBUG
+    if (!Vound_DataVerificationsEnabled) 
+    {
+        // Database header validation is skipped in debug mode too.
+        return;
+    }
+
     const BYTE* pbDbHeaderT         = NULL;
 
     Assert( pdbfilehdr != NULL );
