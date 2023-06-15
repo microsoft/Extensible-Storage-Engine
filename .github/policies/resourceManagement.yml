@@ -1,0 +1,27 @@
+id: 
+name: GitOps.PullRequestIssueManagement
+description: GitOps.PullRequestIssueManagement primitive
+owner: 
+resource: repository
+disabled: false
+where: 
+configuration:
+  resourceManagementConfiguration:
+    scheduledSearches: []
+    eventResponderTasks:
+    - if:
+      - payloadType: Pull_Request
+      - isAction:
+          action: Opened
+      then:
+      - addCodeFlowLink
+      description: 
+    - if:
+      - payloadType: Pull_Request
+      then:
+      - assignTo:
+          users:
+          - '@2BitSalute'
+      description: 
+onFailure: 
+onSuccess: 
