@@ -18247,6 +18247,11 @@ HandleError:
 
 INLINE ERR ErrBFIValidatePage( const PBF pbf, const BFLatchType bflt, const CPageEvents cpe, const TraceContext& tc )
 {
+    if (!Vound_DataVerificationsEnabled) 
+    {
+        return JET_errSuccess;
+    }
+
     //  we should only see bfltShared, bfltExclusive, and bfltWrite
 
     Assert( bflt == bfltShared || bflt == bfltExclusive || bflt == bfltWrite );
@@ -18305,7 +18310,7 @@ LOCAL BOOL FBFIBufferIsZeroed( const PBF pbf ); // fwd decl - temp until pgno va
 
 void BFIValidatePagePgno_( const PBF pbf, PCSTR szFunction )
 {
-    if ( FBFIDatabasePage( pbf ) && !FIsSmallPage() )
+    if (Vound_DataVerificationsEnabled && FBFIDatabasePage( pbf ) && !FIsSmallPage() )
     {
         CPAGE cpage;
         cpage.LoadPage( pbf->ifmp, pbf->pgno, pbf->pv, CbBFIBufferSize( pbf ) );
@@ -18333,7 +18338,10 @@ void BFIValidatePagePgno_( const PBF pbf, PCSTR szFunction )
 
 void BFIValidatePageUsed( const PBF pbf )
 {
-    Assert( pbf->sxwl.FOwnExclusiveLatch() || pbf->sxwl.FOwnWriteLatch() );
+    if (Vound_DataVerificationsEnabled)
+    {
+        Assert(pbf->sxwl.FOwnExclusiveLatch() || pbf->sxwl.FOwnWriteLatch());
+    }
 }
 
 const ULONG shfUserPriorityTag = 24;
@@ -18402,6 +18410,11 @@ void BFITrackCacheMissLatency( const PBF pbf, HRT hrtStartWait, const BFTraceCac
 
 ERR ErrBFIValidatePageSlowly( PBF pbf, const BFLatchType bflt, const CPageEvents cpe, const TraceContext& tc )
 {
+    if (!Vound_DataVerificationsEnabled) 
+    {
+        return JET_errSuccess;
+    }
+
     ERR err = errCodeInconsistency;
     BOOL fRetryingLatch = fFalse;
     TICK tickStartRetryLatch = 0;
@@ -18922,6 +18935,11 @@ ERR ErrBFIVerifyPageSimplyWork( const PBF pbf )
 
 ERR ErrBFIVerifyPage( const PBF pbf, const CPageEvents cpe, const BOOL fFixErrors )
 {
+    if (!Vound_DataVerificationsEnabled)
+    {
+        return JET_errSuccess;
+    }
+
     ERR err = JET_errSuccess;
     CPageEvents cpeActual = cpe;
 
