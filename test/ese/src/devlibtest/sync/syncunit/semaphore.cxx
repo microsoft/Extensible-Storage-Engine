@@ -675,3 +675,29 @@ HandleError:
     SyncBasicTestTerm;
     return err;
 }
+
+CUnitTest( SyncSemaphoreNoopReleaseAllWaiters, 0x0, "" );
+ERR SyncSemaphoreNoopReleaseAllWaiters::ErrTest()
+{
+    SyncBasicTestInit;
+
+    CSemaphore* psemaphore = new CSemaphore( CSyncBasicInfo( "CSemaphore test." ) );
+
+    TestCheck( psemaphore->CWait() == 0 );
+    TestCheck( psemaphore->CAvail() == 0 );
+
+    psemaphore->Release();
+
+    TestCheck( psemaphore->CWait() == 0 );
+    TestCheck( psemaphore->CAvail() == 1 );
+
+    psemaphore->ReleaseAllWaiters();
+
+    TestCheck( psemaphore->CWait() == 0 );
+    TestCheck( psemaphore->CAvail() == 1 );
+
+HandleError:
+    delete psemaphore;
+    SyncBasicTestTerm;
+    return err;
+}
