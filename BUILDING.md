@@ -35,8 +35,8 @@ $env:Path += ";C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64"
 
 ## CMake Generator Kit: Visual Studio
 We tested the following kits:
-- `Visual Studio Enterprise 2019 Release - amd64`
-- `Visual Studio Build Tools 2017 Release - amd64`
+    - `Visual Studio Enterprise 2019 Release - amd64`
+    - `Visual Studio Build Tools 2017 Release - amd64`
 
 Please see the [Visual Studio Generators](https://cmake.org/cmake/help/latest/manual/cmake-generators.7.html#visual-studio-generators) article on cmake.org for more.
 

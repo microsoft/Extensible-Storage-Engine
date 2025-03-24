@@ -41,7 +41,6 @@ bool LeakDetectionTest::FRunUnderESE97() const      { return true; }
 
 class TestClassWithLock
 {
-
     public:
         TestClassWithLock() :
             m_testLock( CLockBasicInfo( CSyncBasicInfo( "TestClassWithLock::m_testLock" ), 0, 0 ) )

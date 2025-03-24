@@ -1,5 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+
 #include "Microsoft-ETW-ESE.rc"
 
 #define RC_VERSION_FILE_DESCRIPTION     "Microsoft ESE ETW\0"

@@ -5055,7 +5055,7 @@ LOCAL JET_ERR ErrInit(  INST        *pinst,
         {
 #ifdef USE_HAPUBLISH_API
             const WCHAR* rgwsz[] = { L"Ha Publishing started for this database.", };
-#endif // USE_HAPUBLISH_API
+#endif
 
             // system sanity check
             OSUHAPublishEvent(

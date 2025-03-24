@@ -1,5 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+
 //  SvcInit.h : Application Sample of ESE
 //
 

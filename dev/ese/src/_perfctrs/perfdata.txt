@@ -1,5 +1,5 @@
-; Copyright (c) Microsoft Corporation.
-; Licensed under the MIT License.
+;// Copyright (c) Microsoft Corporation.
+;// Licensed under the MIT License.
 ;
 ;Header files included in all generated CXX files:
 ;

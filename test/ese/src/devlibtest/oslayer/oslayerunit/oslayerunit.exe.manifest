@@ -4,6 +4,7 @@
 Copyright (c) Microsoft Corporation.
 Licensed under the MIT License.
 -->
+
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1"> 
     <application>
