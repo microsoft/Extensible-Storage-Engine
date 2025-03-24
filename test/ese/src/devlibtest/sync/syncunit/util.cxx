@@ -28,14 +28,12 @@ void AssertExpectedAsserts()
 
 void SetExpectedAsserts( ULONG cExpectedAsserts )
 {
-
     ResetExpectedAsserts();
     g_cExpectedAsserts = cExpectedAsserts;
 }
 
 void ResetExpectedAsserts()
 {
-
     g_cExpectedAsserts = 0;
     g_cAssertsFound = 0;
 }
@@ -48,7 +46,6 @@ void AssertFail( const char * szMessage, const char * szFilename, LONG lLine, ..
 {
     if ( g_cExpectedAsserts > g_cAssertsFound )
     {
-
         wprintf( L"\t\t\tIgnoring Expected Assert( %hs ) ... @ %d (in %hs)!\n", szMessage, lLine, szFilename );     \
         g_cAssertsFound++;
         return;

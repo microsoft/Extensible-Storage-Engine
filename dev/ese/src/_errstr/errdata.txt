@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// Here is an idealized hierarchy of JET errors (go forth and create order where there is chaos) ...
 
+// (The error hierarchy and comments have been moved to jethdr.w)
 
 
 
@@ -56,6 +58,7 @@
 	INTERNAL_ERR( -270,	Unknown,	errBFIPageFaultPendingHungIO	 )
 	INTERNAL_ERR( -271,	Unknown,	errBFIPageFlushPendingSlowIO	 )
 	INTERNAL_ERR( -272,	Unknown,	errBFIPageAbandoned	 )
+//	OBSOLETE_ERR( -273,	Unknown,	errBFIPrereadPageBeyondEOF	 )
 	INTERNAL_WRN( 275,	Unknown,	wrnVERRCEMoved	 )
 	INTERNAL_ERR( -300,	Unknown,	errPMOutOfPageSpace	 )
 	INTERNAL_ERR( -301,	Unknown,	errPMItagTooBig	 )
@@ -79,7 +82,7 @@
 	INTERNAL_WRN( 319,	Unknown,	wrnNDDuplicateItem	 )
 	INTERNAL_ERR( -320,	Unknown,	errNDNoItem	 )
 	EXTERNAL_WRN( 321,	State,		JET_wrnRemainingVersions	 )
-	INTERNAL_ERR( -322,	Corruption,	JET_errPreviousVersion	 )
+	INTERNAL_ERR( -322,	Corruption,	JET_errPreviousVersion	 )	// Already in public header, but should never happen / internal error.  More of a code inconsistency issue if it does.
 	OBSOLETE_ERR( -323,	Unknown,	JET_errPageBoundary	 )
 	OBSOLETE_ERR( -324,	Unknown,	JET_errKeyBoundary	 )
 	INTERNAL_ERR( -325,	Unknown,	errDIRInPageFather	 )
@@ -91,7 +94,7 @@
 	INTERNAL_ERR( -331,	Unknown,	errSPOutOfAvailExtCacheSpace	 )
 	INTERNAL_ERR( -332,	Unknown,	errSPOutOfOwnExtCacheSpace	 )
 	INTERNAL_WRN( 333,	Unknown,	wrnBTMultipageOLC	 )
-	EXTERNAL_ERR( -334,	Operation,	JET_errNTSystemCallFailed	 )
+	EXTERNAL_ERR( -334,	Operation,	JET_errNTSystemCallFailed	 )	// eseutil only today
 	INTERNAL_WRN( 335,	Unknown,	wrnBTShallowTree	 )
 	INTERNAL_ERR( -336,	Unknown,	errBTMergeNotSynchronous	 )
 	INTERNAL_WRN( 337,	Unknown,	wrnSPReservedPages	 )
@@ -106,8 +109,8 @@
 	EXTERNAL_ERR( -346,	State,		JET_errKeyTruncated	 )
 	INTERNAL_ERR( -347,	State,		errSPNoSpaceForYou	 )
 	EXTERNAL_ERR( -348,	State,		JET_errDatabaseLeakInSpace	 )
-	INTERNAL_ERR( -349,	Unknown,	errNDNotFound	 )
-	INTERNAL_ERR( -350,	Unknown,	errNDOutSonRange	 )
+	INTERNAL_ERR( -349,	Unknown,	errNDNotFound	 )		// was: -312, moved due to abs value conflict
+	INTERNAL_ERR( -350,	Unknown,	errNDOutSonRange	 )	// was: -314, moved due to abs value conflict
 	EXTERNAL_ERR( -351,	Corruption,	JET_errBadEmptyPage	 )
 	INTERNAL_WRN( 352,	State,		wrnBTNotVisibleRejected	 )
 	INTERNAL_WRN( 353,	State,		wrnBTNotVisibleAccumulated	 )
@@ -135,7 +138,7 @@
 	INTERNAL_ERR( -419,	Unknown,	errRECCompressionNotPossible	 )
 	INTERNAL_WRN( 420,	Unknown,	wrnRECCompressionScrubDetected	 )
 	EXTERNAL_ERR( -421,	State,		JET_errSeparatedLongValue	 )
-	INTERNAL_WRN( 422,	Unknown,	wrnFLDNullFirstSeg	 )
+	INTERNAL_WRN( 422,	Unknown,	wrnFLDNullFirstSeg	 )	// was: 408, moved due to abs value conflict
 	EXTERNAL_ERR( -423,	Usage,		JET_errMustBeSeparateLongValue	 )
 	EXTERNAL_ERR( -424,	Usage,		JET_errInvalidPreread	 )
 	INTERNAL_WRN( 425,	Unknown,	wrnRECSeparatedEncryptedLV	 )
@@ -155,21 +158,21 @@
 	EXTERNAL_ERR( -509,	Corruption,	JET_errMissingPreviousLogFile	 )
 	EXTERNAL_ERR( -510,	IO,		JET_errLogWriteFail	 )
 	EXTERNAL_ERR( -511,	Fatal,		JET_errLogDisabledDueToRecoveryFailure	 )
-	INTERNAL_ERR( -512,	State,		JET_errCannotLogDuringRecoveryRedo	 )
+	INTERNAL_ERR( -512,	State,		JET_errCannotLogDuringRecoveryRedo	 )	// if this is external, not sure State is correct categorization
 	EXTERNAL_ERR( -513,	Inconsistent,	JET_errLogGenerationMismatch	 )
 	EXTERNAL_ERR( -514,	Inconsistent,	JET_errBadLogVersion	 )
 	EXTERNAL_ERR( -515,	Corruption,	JET_errInvalidLogSequence	 )
 	EXTERNAL_ERR( -516,	Usage,		JET_errLoggingDisabled	 )
 	OBSOLETE_ERR( -517,	Usage,	    JET_errLogBufferTooSmall	 )
 	INTERNAL_ERR( -518,	Unknown,	errLGNotSynchronous	 )
-	EXTERNAL_ERR( -519,	Fragmentation,	JET_errLogSequenceEnd	 )
+	EXTERNAL_ERR( -519,	Fragmentation,	JET_errLogSequenceEnd	 )		// Note this is sort a fragmentation issue for the log.
 	EXTERNAL_ERR( -520,	State,		JET_errNoBackup	 )
 	EXTERNAL_ERR( -521,	Usage,		JET_errInvalidBackupSequence	 )
 	EXTERNAL_ERR( -523,	State,		JET_errBackupNotAllowedYet	 )
 	EXTERNAL_ERR( -524,	IO,		JET_errDeleteBackupFileFail	 )
 	EXTERNAL_ERR( -525,	IO,		JET_errMakeBackupDirectoryFail	 )
 	EXTERNAL_ERR( -526,	Usage,		JET_errInvalidBackup	 )
-	EXTERNAL_ERR( -527,	State,		JET_errRecoveredWithErrors	 )
+	EXTERNAL_ERR( -527,	State,		JET_errRecoveredWithErrors	 )	// I think this is to enable repair on dirty DB ... could not prove it was internal only though.
 	EXTERNAL_ERR( -528,	Corruption,	JET_errMissingLogFile	 )
 	EXTERNAL_ERR( -529,	Disk,		JET_errLogDiskFull	 )
 	EXTERNAL_ERR( -530,	Inconsistent,	JET_errBadLogSignature	 )
@@ -181,26 +184,26 @@
 	EXTERNAL_ERR( -536,	Corruption,	JET_errRedoAbruptEnded	 )
 	OBSOLETE_ERR( -538,	Unknown,	JET_errPatchFileMissing	 )
 	EXTERNAL_ERR( -539,	Inconsistent,	JET_errDatabaseLogSetMismatch	 )
-	OBSOLETE_ERR( -540,	Unknown,	JET_errDatabaseStreamingFileMismatch	 )
+	OBSOLETE_ERR( -540,	Unknown,	JET_errDatabaseStreamingFileMismatch	 )	// Tag:CodeInIfDefs
 	EXTERNAL_ERR( -541,	Usage,		JET_errLogFileSizeMismatch	 )
 	EXTERNAL_ERR( -542,	Inconsistent,	JET_errCheckpointFileNotFound	 )
 	EXTERNAL_ERR( -543,	Inconsistent,	JET_errRequiredLogFilesMissing	 )
 	EXTERNAL_ERR( -544,	Usage,		JET_errSoftRecoveryOnBackupDatabase	 )
-	EXTERNAL_ERR( -545,	State,		JET_errLogFileSizeMismatchDatabasesConsistent	 )
-	EXTERNAL_ERR( -546,	Fragmentation,	JET_errLogSectorSizeMismatch	 )
+	EXTERNAL_ERR( -545,	State,		JET_errLogFileSizeMismatchDatabasesConsistent	 )	// FUTURE- should this have been a warning?
+	EXTERNAL_ERR( -546,	Fragmentation,	JET_errLogSectorSizeMismatch	 )			// "Log fragmentation."
 	EXTERNAL_ERR( -547,	State,		JET_errLogSectorSizeMismatchDatabasesConsistent	 )
-	EXTERNAL_ERR( -548,	Fragmentation,	JET_errLogSequenceEndDatabasesConsistent	 )
-	OBSOLETE_ERR( -549,	Unknown,	JET_errStreamingDataNotLogged	 )
-	EXTERNAL_ERR( -550,	Inconsistent,	JET_errDatabaseDirtyShutdown	 )
+	EXTERNAL_ERR( -548,	Fragmentation,	JET_errLogSequenceEndDatabasesConsistent	 )	// "Log fragmentation."
+	OBSOLETE_ERR( -549,	Unknown,	JET_errStreamingDataNotLogged	 )	// Tag:CodeInDeadCode
+	EXTERNAL_ERR( -550,	Inconsistent,	JET_errDatabaseDirtyShutdown	 )	// Aliased: JET_errDatabaseInconsistent
 	EXTERNAL_ERR( -551,	Inconsistent,	JET_errConsistentTimeMismatch	 )
-	OBSOLETE_ERR( -552,	Unknown,	JET_errDatabasePatchFileMismatch	 )
+	OBSOLETE_ERR( -552,	Unknown,	JET_errDatabasePatchFileMismatch	 )	// Tag:CodeInDownlevelRecovery
 	EXTERNAL_ERR( -553,	Inconsistent,	JET_errEndingRestoreLogTooLow	 )
 	EXTERNAL_ERR( -554,	Inconsistent,	JET_errStartingRestoreLogTooHigh	 )
 	EXTERNAL_ERR( -555,	Inconsistent,	JET_errGivenLogFileHasBadSignature	 )
 	EXTERNAL_ERR( -556,	Inconsistent,	JET_errGivenLogFileIsNotContiguous	 )
 	EXTERNAL_ERR( -557,	Inconsistent,	JET_errMissingRestoreLogFiles	 )
 	OBSOLETE_WRN( 558,	Unknown,	JET_wrnExistingLogFileHasBadSignature	 )
-	OBSOLETE_WRN( 559,	Unknown,	JET_wrnExistingLogFileIsNotContiguous	 )
+	OBSOLETE_WRN( 559,	Unknown,	JET_wrnExistingLogFileIsNotContiguous	 )	// Tag:CodeInComments
 	EXTERNAL_ERR( -560,	State,		JET_errMissingFullBackup	 )
 	OBSOLETE_ERR( -561,	Unknown,	JET_errBadBackupDatabaseSize	 )
 	EXTERNAL_ERR( -562,	State,		JET_errDatabaseAlreadyUpgraded	 )
@@ -209,6 +212,7 @@
 	EXTERNAL_ERR( -565,	Inconsistent,	JET_errMissingCurrentLogFiles	 )
 	EXTERNAL_ERR( -566,	Corruption,	JET_errDbTimeTooOld	 )
 	EXTERNAL_ERR( -567,	Corruption,	JET_errDbTimeTooNew	 )
+//	INTERNAL_WRN( 568,	Unknown,	wrnCleanedUpMismatchedFiles	 )
 	EXTERNAL_ERR( -569,	Inconsistent,	JET_errMissingFileToBackup	 )
 	EXTERNAL_ERR( -570,	Corruption,	JET_errLogTornWriteDuringHardRestore	 )
 	EXTERNAL_ERR( -571,	Corruption,	JET_errLogTornWriteDuringHardRecovery	 )
@@ -266,7 +270,7 @@
 	EXTERNAL_ERR( -1010,	Usage,		JET_errInvalidDatabaseId	 )
 	EXTERNAL_ERR( -1011,	Memory,		JET_errOutOfMemory	 )
 	EXTERNAL_ERR( -1012,	Quota,		JET_errOutOfDatabaseSpace	 )
-	EXTERNAL_ERR( -1013,	Memory,		JET_errOutOfCursors	 )
+	EXTERNAL_ERR( -1013,	Memory,		JET_errOutOfCursors	 )		// Tag:Quota
 	EXTERNAL_ERR( -1014,	Memory,		JET_errOutOfBuffers	 )
 	EXTERNAL_ERR( -1015,	Usage,		JET_errTooManyIndexes	 )
 	EXTERNAL_ERR( -1016,	Usage,		JET_errTooManyKeys	 )
@@ -284,9 +288,9 @@
 	EXTERNAL_ERR( -1028,	Usage,		JET_errInvalidDatabase	 )
 	EXTERNAL_ERR( -1029,	Usage,		JET_errNotInitialized	 )
 	EXTERNAL_ERR( -1030,	Usage,		JET_errAlreadyInitialized	 )
-	EXTERNAL_ERR( -1031,	Operation,	JET_errInitInProgress	 )
-	EXTERNAL_ERR( -1032,	IO,		JET_errFileAccessDenied	 )
-	OBSOLETE_ERR( -1034,	Usage,		JET_errQueryNotSupported	 )
+	EXTERNAL_ERR( -1031,	Operation,	JET_errInitInProgress	 )	// matched to TermInProgress
+	EXTERNAL_ERR( -1032,	IO,		JET_errFileAccessDenied	 )	// This could possibly be Inconsistent.
+	OBSOLETE_ERR( -1034,	Usage,		JET_errQueryNotSupported	 )	// FUTURE- should be obsolete. we should change where this error is returned
 	OBSOLETE_ERR( -1035,	Unknown,	JET_errSQLLinkNotSupported	 )
 	EXTERNAL_ERR( -1038,	State,		JET_errBufferTooSmall	 )
 	EXTERNAL_WRN( 1039,	State,		JET_wrnSeekNotEqual	 )
@@ -295,7 +299,7 @@
 	OBSOLETE_ERR( -1044,	Unknown,	JET_errInvalidFilename	 )
 	EXTERNAL_ERR( -1045,	Usage,		JET_errInvalidBookmark	 )
 	EXTERNAL_ERR( -1046,	Usage,		JET_errColumnInUse	 )
-	EXTERNAL_ERR( -1047,	State,		JET_errInvalidBufferSize	 )
+	EXTERNAL_ERR( -1047,	State,		JET_errInvalidBufferSize	 )	// Tempting to use Usage here, BUT it is already used in several State contexts.  The ship has sailed.
 	EXTERNAL_ERR( -1048,	Usage,		JET_errColumnNotUpdatable	 )
 	EXTERNAL_ERR( -1051,	State,		JET_errIndexInUse	 )
 	OBSOLETE_ERR( -1052,	Unknown,	JET_errLinkNotSupported	 )
@@ -303,13 +307,13 @@
 	EXTERNAL_ERR( -1054,	Usage,		JET_errNotInTransaction	 )
 	OBSOLETE_WRN( 1055,	Unknown,	JET_wrnNoErrorInfo	 )
 	EXTERNAL_ERR( -1057,	Usage,		JET_errMustRollback	 )
-	EXTERNAL_WRN( 1058,	Usage,		JET_wrnNoIdleActivity	 )
+	EXTERNAL_WRN( 1058,	Usage,		JET_wrnNoIdleActivity	 )	// FUTURE- note nothing uses the JET_bitIdleVersionStoreTest, that would trigger this...
 	EXTERNAL_ERR( -1059,	Usage,		JET_errTooManyActiveUsers	 )
 	OBSOLETE_ERR( -1061,	Unknown,	JET_errInvalidCountry	 )
 	EXTERNAL_ERR( -1062,	Usage,		JET_errInvalidLanguageId	 )
 	EXTERNAL_ERR( -1063,	Usage,		JET_errInvalidCodePage	 )
 	EXTERNAL_ERR( -1064,	Usage,		JET_errInvalidLCMapStringFlags	 )
-	INTERNAL_ERR( -1065,	Usage,		JET_errVersionStoreEntryTooBig	 )
+	INTERNAL_ERR( -1065,	Usage,		JET_errVersionStoreEntryTooBig	 )	// calling this Resource, Usage, or Quota is all not exactly right ... it's more of an internal condition that should never happen / get returned. More of a code inconsistency issue if does.
 	EXTERNAL_ERR( -1066,	Usage,		JET_errVersionStoreOutOfMemoryAndCleanupTimedOut	 )
 	OBSOLETE_WRN( 1067,	Unknown,	JET_wrnNoWriteLock	 )
 	EXTERNAL_WRN( 1068,	State,	JET_wrnColumnSetNull	 )
@@ -337,7 +341,7 @@
 	EXTERNAL_ERR( -1093,	Usage,		JET_errInvalidSesparamId	 )
 	EXTERNAL_ERR( -1094,	State,		JET_errTooManyRecords	)
 	EXTERNAL_ERR( -1095,	Usage,		JET_errInvalidDbparamId	 )
-	EXTERNAL_ERR( -1101,	Memory,		JET_errOutOfSessions	 )
+	EXTERNAL_ERR( -1101,	Memory,		JET_errOutOfSessions	 )	// Tag:Quota
 	EXTERNAL_ERR( -1102,	State,		JET_errWriteConflict	 )
 	EXTERNAL_ERR( -1103,	Usage,		JET_errTransTooDeep	 )
 	EXTERNAL_ERR( -1104,	Usage,		JET_errInvalidSesid	 )
@@ -357,21 +361,21 @@
 	EXTERNAL_WRN( 1122,		State,		JET_wrnShrinkNotPossible	)
 	EXTERNAL_ERR( -1123,	Corruption,	JET_errRecoveryVerifyFailure	 )	
 	EXTERNAL_ERR( -1124,	Usage,		JET_errFilteredMoveNotSupported	 )	
-	OBSOLETE_ERR( -1150,	Unknown,	JET_errMustCommitDistributedTransactionToLevel0	 )
-	OBSOLETE_ERR( -1151,	Unknown,	JET_errDistributedTransactionAlreadyPreparedToCommit	 )
-	OBSOLETE_ERR( -1152,	Unknown,	JET_errNotInDistributedTransaction	 )
-	OBSOLETE_ERR( -1153,	Unknown,	JET_errDistributedTransactionNotYetPreparedToCommit	 )
-	OBSOLETE_ERR( -1154,	Unknown,	JET_errCannotNestDistributedTransactions	 )
-	OBSOLETE_ERR( -1160,	Unknown,	JET_errDTCMissingCallback	 )
-	OBSOLETE_ERR( -1161,	Unknown,	JET_errDTCMissingCallbackOnRecovery	 )
-	OBSOLETE_ERR( -1162,	Unknown,	JET_errDTCCallbackUnexpectedError	 )
-	OBSOLETE_WRN( 1163,	Unknown,	JET_wrnDTCCommitTransaction	 )
-	OBSOLETE_WRN( 1164,	Unknown,	JET_wrnDTCRollbackTransaction	 )
+	OBSOLETE_ERR( -1150,	Unknown,	JET_errMustCommitDistributedTransactionToLevel0	 )	// Tag:CodeInIfDefs 
+	OBSOLETE_ERR( -1151,	Unknown,	JET_errDistributedTransactionAlreadyPreparedToCommit	 )	// Tag:ShouldBeInIfDefs
+	OBSOLETE_ERR( -1152,	Unknown,	JET_errNotInDistributedTransaction	 )			// Tag:ShouldBeInIfDefs
+	OBSOLETE_ERR( -1153,	Unknown,	JET_errDistributedTransactionNotYetPreparedToCommit	 )	// Tag:ShouldBeInIfDefs
+	OBSOLETE_ERR( -1154,	Unknown,	JET_errCannotNestDistributedTransactions	 )	// Tag:CodeInIfDefs 
+	OBSOLETE_ERR( -1160,	Unknown,	JET_errDTCMissingCallback	 )	// Tag:CodeInIfDefs 
+	OBSOLETE_ERR( -1161,	Unknown,	JET_errDTCMissingCallbackOnRecovery	 )	// Tag:CodeInIfDefs 
+	OBSOLETE_ERR( -1162,	Unknown,	JET_errDTCCallbackUnexpectedError	 )	// Tag:CodeInIfDefs 
+	OBSOLETE_WRN( 1163,	Unknown,	JET_wrnDTCCommitTransaction	 )	// Tag:CodeInIfDefs 
+	OBSOLETE_WRN( 1164,	Unknown,	JET_wrnDTCRollbackTransaction	 )	// Tag:CodeInIfDefs 
 	EXTERNAL_ERR( -1201,	Usage,		JET_errDatabaseDuplicate	 )
 	EXTERNAL_ERR( -1202,	Usage,		JET_errDatabaseInUse	 )
-	EXTERNAL_ERR( -1203,	Usage,		JET_errDatabaseNotFound	 )
+	EXTERNAL_ERR( -1203,	Usage,		JET_errDatabaseNotFound	 )	// May be tempted to use Inconsistent but given how many cases, people need this to not be as critical.  It is almost State in fact.
 	EXTERNAL_ERR( -1204,	Usage,		JET_errDatabaseInvalidName	 )
-	EXTERNAL_ERR( -1205,	Usage,		JET_errDatabaseInvalidPages	 )
+	EXTERNAL_ERR( -1205,	Usage,		JET_errDatabaseInvalidPages	 )	// On recovery 
 	EXTERNAL_ERR( -1206,	Corruption,	JET_errDatabaseCorrupted	 )
 	EXTERNAL_ERR( -1207,	Usage,		JET_errDatabaseLocked	 )
 	EXTERNAL_ERR( -1208,	Usage,		JET_errCannotDisableVersioning	 )
@@ -436,7 +440,7 @@
 	EXTERNAL_ERR( -1405,	Usage,		JET_errIndexMustStay	 )
 	EXTERNAL_ERR( -1406,	Usage,		JET_errIndexInvalidDef	 )
 	EXTERNAL_ERR( -1409,	Usage,		JET_errInvalidCreateIndex	 )
-	EXTERNAL_ERR( -1410,	Memory,		JET_errTooManyOpenIndexes	 )
+	EXTERNAL_ERR( -1410,	Memory,		JET_errTooManyOpenIndexes	 )	// Tag:Quota??
 	EXTERNAL_ERR( -1411,	Usage,		JET_errMultiValuedIndexViolation	 )
 	EXTERNAL_ERR( -1412,	Corruption,	JET_errIndexBuildCorrupted	 )
 	EXTERNAL_ERR( -1413,	Corruption,	JET_errPrimaryIndexCorrupted	 )
@@ -497,7 +501,7 @@
 	EXTERNAL_ERR( -1540,	Usage,		JET_errColumnNoEncryptionKey	 )
 	EXTERNAL_WRN( 1541,	State,		JET_wrnColumnReference	 )
 	EXTERNAL_ERR( -1601,	State,		JET_errRecordNotFound	 )
-	EXTERNAL_ERR( -1602,	Usage,		JET_errRecordNoCopy	 )
+	EXTERNAL_ERR( -1602,	Usage,		JET_errRecordNoCopy	 )	// Interestingly, only used in sort code.
 	EXTERNAL_ERR( -1603,	State,		JET_errNoCurrentRecord	 )
 	EXTERNAL_ERR( -1604,	Usage,		JET_errRecordPrimaryChanged	 )
 	EXTERNAL_ERR( -1605,	State,		JET_errKeyDuplicate	 )
@@ -512,7 +516,7 @@
 	EXTERNAL_ERR( -1621,	Usage,		JET_errUpdateMustVersion	 )
 	EXTERNAL_ERR( -1622,	Corruption,	JET_errDecryptionFailed	 )
 	EXTERNAL_ERR( -1623,	Usage,		JET_errEncryptionBadItag )
-	EXTERNAL_ERR( -1701,	Memory,		JET_errTooManySorts	 )
+	EXTERNAL_ERR( -1701,	Memory,		JET_errTooManySorts	 )	// Tag:Quota
 	OBSOLETE_ERR( -1702,	Unknown,	JET_errInvalidOnSort	 )
 	OBSOLETE_ERR( -1803,	Unknown,	JET_errTempFileOpenError	 )
 	EXTERNAL_ERR( -1805,	Usage,		JET_errTooManyAttachedDatabases	 )
@@ -570,7 +574,7 @@
 	EXTERNAL_ERR( -2103,	Usage,		JET_errSpaceHintsInvalid )
 	EXTERNAL_ERR( -2401,	Usage,		JET_errOSSnapshotInvalidSequence	 )
 	EXTERNAL_ERR( -2402,	Operation,	JET_errOSSnapshotTimeOut	 )
-	EXTERNAL_ERR( -2403,	State,		JET_errOSSnapshotNotAllowed	 )
+	EXTERNAL_ERR( -2403,	State,		JET_errOSSnapshotNotAllowed	 )	// basically backup in progress for snapshot
 	EXTERNAL_ERR( -2404,	Usage,		JET_errOSSnapshotInvalidSnapId	 )
 	INTERNAL_ERR( -2405,	Unknown,	errOSSnapshotNewLogStopped	 )
 	EXTERNAL_ERR( -2501, 	Usage,		JET_errTooManyTestInjections )
@@ -585,9 +589,9 @@
 	OBSOLETE_ERR( -4002,	Unknown,	JET_errFileIOAbort	 )
 	OBSOLETE_ERR( -4003,	Unknown,	JET_errFileIORetry	 )
 	OBSOLETE_ERR( -4004,	Unknown,	JET_errFileIOFail	 )
-	EXTERNAL_ERR( -4005,	Usage,		JET_errFileCompressed	 )
+	EXTERNAL_ERR( -4005,	Usage,		JET_errFileCompressed	 )	// or could view as a lighter version of Inconsistent.
 	INTERNAL_ERR( -4006,	Resource,	errDiskTilt	 )
-	INTERNAL_WRN( 4007,	State,		4007 	 )
+	INTERNAL_WRN( 4007,	State,		4007 /* wrnDiskGameOn */	 )   // Tag:CodeInComments
 	INTERNAL_WRN( 4009,	State,	wrnIOPending	)
 	INTERNAL_WRN( 4010,	IO,	wrnIOSlow	)
 

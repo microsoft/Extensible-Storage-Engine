@@ -2013,6 +2013,7 @@ ERR CResource::ErrGetParam( JET_RESOPER resop, DWORD_PTR * const pdwParam ) cons
     {
         if ( JET_resoperTag != resop )
         {
+            //  cannot clear if we requested tag info because pointer might not be DWORD_PTR aligned
             *pdwParam = 0;
         }
         switch ( resop )
