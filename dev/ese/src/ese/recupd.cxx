@@ -2789,10 +2789,10 @@ HandleError:
 
 class TRACK_INDEX_ENTRY_DATA {
 public:
-    enum ACTION {
-        eSkip = 0,
-        eDelete = 1,
-        eInsert = 2,
+    enum class ACTION : BYTE {
+        Skip = 0,
+        Delete = 1,
+        Insert = 2,
     };
 
 private:
@@ -2804,43 +2804,42 @@ public:
     TRACK_INDEX_ENTRY_DATA()
     {
         m_Key.Nullify();
-        m_Action = eSkip;
+        m_Action = ACTION::Skip;
     }
 
     ~TRACK_INDEX_ENTRY_DATA()
     {
         PVOID pbTemp = m_Key.suffix.Pv();
 
-        Assert( eDelete == m_Action || eInsert == m_Action || eSkip == m_Action );
+        Assert( ACTION::Delete == m_Action || ACTION::Insert == m_Action || ACTION::Skip == m_Action );
 
         if ( NULL != pbTemp )
         {
-            delete [] pbTemp;
+            RESKEY.Free( pbTemp );
         }
-
-        m_Key.Nullify();
-        m_Action = eSkip;
     }
 
     ERR ErrSet(const KEY& Key, const ACTION Action)
     {
-        Assert( eDelete == Action || eInsert == Action || eSkip == Action );
+        BYTE *pbTemp;
+        ERR err = JET_errSuccess;
+
+        Assert( ACTION::Delete == Action || ACTION::Insert == Action || ACTION::Skip == Action );
+
+        // We don't reuse these, and we initialize them to NULL in the constructor.
+        Assert( m_Key.FNull() );
 
         m_Action = Action;
-        m_Key.Nullify();
 
-        BYTE *pbTemp = new BYTE[ Key.Cb() ];
-        if (NULL == pbTemp)
-        {
-            return ErrERRCheck( JET_errOutOfMemory );
-        }
+        Alloc( pbTemp = (BYTE *)RESKEY.PvRESAlloc() );
 
         Key.CopyIntoBuffer( pbTemp, Key.Cb() );
 
         m_Key.suffix.SetPv( pbTemp );
         m_Key.suffix.SetCb( Key.Cb() );
 
-        return JET_errSuccess;
+    HandleError:
+        return err;
     }
 
     KEY Key() const
@@ -2860,35 +2859,39 @@ public:
             return;
         }
 
-        // For a sequence of eDeletes, turn all but the last one into an eSkip.
-        // For a sequence of iInserts, turn all but the first one into an eSkip.
-        // For an eDelete followed by an eInsert, turn both into eSkips.
-#define STATE(X, Y)  ( (X << 4) | Y )
-        Assert( ( 1 << 4 ) > next.m_Action );
+        static_assert( ( sizeof( this->m_Action ) == sizeof( BYTE ) ), "Necessary for the following macro" );
+        static_assert( ( sizeof( USHORT ) == 2 * sizeof( BYTE ) ), "Necessary for the following macro");
+#define STATE(X, Y)  ( (USHORT)X << 8 | (USHORT)Y )
 
+        // For a sequence of ACTION::Deletes, turn all but the last one into an ACTION::Skip.
+        // For a sequence of ACTION::Inserts, turn all but the first one into an ACTION::Skip.
+        // For an ACTION::Delete followed by an ACTION::Insert, turn both into ACTION::Skips.
         switch ( STATE(this->m_Action, next.m_Action ) )
         {
-            case STATE( eDelete, eDelete ): //  => STATE(eSkip, eDelete)
-                this->m_Action = eSkip;
+            case STATE( ACTION::Delete, ACTION::Delete ): //  => STATE(ACTION::Skip, ACTION::Delete)
+                this->m_Action = ACTION::Skip;
                 break;
 
-            case STATE( eInsert, eInsert): // => STATE( eInsert, eSkip )
-            case STATE( eSkip, eInsert): // => STATE( eSkip, eSkip )
-                next.m_Action = eSkip;
+            case STATE( ACTION::Insert, ACTION::Insert):  // => STATE( ACTION::Insert, ACTION::Skip )
+                next.m_Action = ACTION::Skip;
                 break;
 
-            case STATE( eDelete, eInsert ): // => STATE( eSkip, eSkip )
-                this->m_Action = eSkip;
-                next.m_Action = eSkip;
+            case STATE( ACTION::Skip, ACTION::Insert):    // => STATE( ACTION::Skip, ACTION::Skip )
+                next.m_Action = ACTION::Skip;
                 break;
 
-            case STATE( eSkip, eDelete ): // => STATE( eSkip, eDelete )
+            case STATE( ACTION::Delete, ACTION::Insert ): // => STATE( ACTION::Skip, ACTION::Skip )
+                this->m_Action = ACTION::Skip;
+                next.m_Action = ACTION::Skip;
                 break;
 
-            case STATE( eSkip, eSkip ):
-            case STATE( eDelete, eSkip ):
-            case STATE( eInsert, eSkip ):
-            case STATE( eInsert, eDelete ):
+            case STATE( ACTION::Skip, ACTION::Delete ):   // => STATE( ACTION::Skip, ACTION::Delete )
+                break;
+
+            case STATE( ACTION::Skip, ACTION::Skip ):
+            case STATE( ACTION::Delete, ACTION::Skip ):
+            case STATE( ACTION::Insert, ACTION::Skip ):
+            case STATE( ACTION::Insert, ACTION::Delete ):
                 AssertSz( fFalse, "Can't happen" );
                 break;
 
@@ -2907,8 +2910,8 @@ public:
         TRACK_INDEX_ENTRY_DATA *pVal1 = (TRACK_INDEX_ENTRY_DATA *)pvVal1;
         TRACK_INDEX_ENTRY_DATA *pVal2 = (TRACK_INDEX_ENTRY_DATA *)pvVal2;
 
-        Assert( eDelete == pVal1->m_Action || eInsert == pVal1->m_Action || eSkip == pVal1->m_Action );
-        Assert( eDelete == pVal2->m_Action || eInsert == pVal2->m_Action || eSkip == pVal2->m_Action );
+        Assert( ACTION::Delete == pVal1->m_Action || ACTION::Insert == pVal1->m_Action || ACTION::Skip == pVal1->m_Action );
+        Assert( ACTION::Delete == pVal2->m_Action || ACTION::Insert == pVal2->m_Action || ACTION::Skip == pVal2->m_Action );
 
         int comp;
 
@@ -2916,9 +2919,9 @@ public:
 
         if (0 == comp )
         {
-            static_assert( ( eSkip < eDelete ), "Required");
-            static_assert( ( eDelete < eInsert ), "Required");
-            comp = (pVal1->Action() - pVal2->Action());
+            static_assert( ( (INT)ACTION::Skip < (INT)ACTION::Delete ), "Required");
+            static_assert( ( (INT)ACTION::Delete < (INT)ACTION::Insert ), "Required");
+            comp = ((INT)pVal1->Action() - (INT)pVal2->Action());
         }
 
         return comp;
@@ -2927,38 +2930,55 @@ public:
 
 struct TRACK_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
 {
+    static const ULONG             m_cLocalStorage = 4;
+#ifdef DEBUG
+    static const ULONG             m_cMinimumAllocation = 8; // Lower than retail to force exercise of realloc code during testing.
+#else
+    static const ULONG             m_cMinimumAllocation = 128;
+#endif
     TRACK_INDEX_ENTRY_DATA::ACTION m_eCurrentAction;
-    ULONG m_cDataUsed;
-    ULONG m_cDataAlloced;
-    TRACK_INDEX_ENTRY_DATA *m_pData;
+    ULONG                          m_cDataUsed;
+    ULONG                          m_cDataAlloced;
+    TRACK_INDEX_ENTRY_DATA         *m_pData;
+    // For the common case of indexing over a small number of keys, optimize to avoid using the heap by having
+    // a small number of data entries available in the structure..
+    TRACK_INDEX_ENTRY_DATA         m_DataLocal[TRACK_INDEX_ENTRY_CONTEXT::m_cLocalStorage];
 
     TRACK_INDEX_ENTRY_CONTEXT( RECOPER Recoper )
         : INDEX_ENTRY_CALLBACK_CONTEXT( Recoper )
     {
-        m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::eSkip;
+        m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Skip;
         m_cDataUsed = 0;
-        m_cDataAlloced = 0;
-        m_pData = NULL;
+        m_cDataAlloced = _countof( m_DataLocal );
+        m_pData = m_DataLocal;
     }
 
     ~TRACK_INDEX_ENTRY_CONTEXT()
     {
-        if ( NULL != m_pData )
+        Assert( NULL != m_pData );
+
+        if ( ( m_DataLocal != m_pData ) && ( NULL != m_pData ) )
         {
             delete [] m_pData;
         }
     }
 
-    ERR ErrReserveAdditionalData( ULONG cDataRequested = 1 )
+    ERR ErrReserveAdditionalData( const ULONG cDataRequested = 1 )
     {
         ERR err = JET_errSuccess;
         ULONG cNeeded;
         ULONG cTotalRequested = m_cDataUsed + cDataRequested;
 
-        // At the minimum, allocate 256 of them.
-        if ( 256 >= cTotalRequested )
+        if ( ( m_pData == m_DataLocal ) && ( cTotalRequested <= m_cDataAlloced ) )
         {
-            cNeeded = 256;
+            // Using local storage embedded in 'this', and it still fits.
+            cNeeded = m_cDataAlloced;
+            Assert( m_cDataAlloced == _countof( m_DataLocal ) ); 
+        }
+        else if ( TRACK_INDEX_ENTRY_CONTEXT::m_cMinimumAllocation >= cTotalRequested )
+        {
+            // Enforce a minimum if we're going to Alloc.
+            cNeeded = TRACK_INDEX_ENTRY_CONTEXT::m_cMinimumAllocation;
         }
         else
         {
@@ -2971,17 +2991,26 @@ struct TRACK_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
         
         if ( cNeeded > m_cDataAlloced )
         {
-            TRACK_INDEX_ENTRY_DATA *pDataTemp;
+            TRACK_INDEX_ENTRY_DATA *pDataNewT;
+            TRACK_INDEX_ENTRY_DATA *pDataOldT;
 
-            Alloc( pDataTemp = new TRACK_INDEX_ENTRY_DATA[ cNeeded ] );
+            Alloc( pDataNewT = new TRACK_INDEX_ENTRY_DATA[ cNeeded ] );
+            pDataOldT = m_pData;
 
-            if ( NULL != m_pData )
-            {
-                memcpy(pDataTemp, m_pData, m_cDataAlloced * sizeof( TRACK_INDEX_ENTRY_DATA ) );
-                delete [] m_pData;
-            }
+            // Move everything from the old array to the new.  Memset the old array to 0 to
+            // reflect the fact that we've taken responsibility for all the pointers out of
+            // the pDataOldT and placed them into pDataNewT so the destructor on pDataOldT
+            // doesn't free memory we're still using.
+            memcpy( pDataNewT, pDataOldT, m_cDataUsed * sizeof( TRACK_INDEX_ENTRY_DATA ) );
+            memset( pDataOldT, 0, m_cDataUsed * sizeof( TRACK_INDEX_ENTRY_DATA ) );
+            m_pData = pDataNewT;
             m_cDataAlloced = cNeeded;
-            m_pData = pDataTemp;
+
+            if ( pDataOldT != m_DataLocal )
+            {
+                delete [] pDataOldT;
+            }
+
         }
 
     HandleError:
@@ -2995,8 +3024,8 @@ struct TRACK_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
         }
 
         //
-        // We tracked keys to post process.  Sort by key, with eDeletes from the old record
-        // coming before eInserts from the new record.  There should be no eSkips at this time,
+        // We tracked keys to post process.  Sort by key, with ACTION::Deletes from the old record
+        // coming before ACTION::Inserts from the new record.  There should be no ACTION::Skips at this time,
         // they all come during AdjustForDuplicateKeys().
         //
         qsort( m_pData, m_cDataUsed, sizeof( m_pData[ 0 ] ), &(TRACK_INDEX_ENTRY_DATA::Comp) );
@@ -3026,8 +3055,8 @@ ERR ErrRECITrackIndexEntry(
     Assert( NULL != pContext );
     Assert( NULL != pTrackContext );
 
-    Assert( TRACK_INDEX_ENTRY_DATA::eInsert == pTrackContext->m_eCurrentAction ||
-            TRACK_INDEX_ENTRY_DATA::eDelete == pTrackContext->m_eCurrentAction );
+    Assert( TRACK_INDEX_ENTRY_DATA::ACTION::Insert == pTrackContext->m_eCurrentAction ||
+            TRACK_INDEX_ENTRY_DATA::ACTION::Delete == pTrackContext->m_eCurrentAction );
 
     Call( pTrackContext->ErrReserveAdditionalData() );
     Call( pTrackContext->m_pData[pTrackContext->m_cDataUsed].ErrSet( keyRead, pTrackContext->m_eCurrentAction ) );
@@ -3105,7 +3134,7 @@ ERR ErrRECIReplaceInIndex(
     }
     else {
         // Track all the old keys for potential deletion.
-        TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::eDelete;
+        TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Delete;
         Call( ErrRECIEnumerateKeys(
                   pfucb,
                   pfucbIdx,
@@ -3119,7 +3148,7 @@ ERR ErrRECIReplaceInIndex(
         Assert( fFalse == fIndexUpdated );
 
         // Track all the new keys for potential insertion.
-        TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::eInsert;
+        TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Insert;
         Call( ErrRECIEnumerateKeys(
                   pfucb,
                   pfucbIdx,
@@ -3145,12 +3174,12 @@ ERR ErrRECIReplaceInIndex(
             {
                 switch (TrackContext.m_pData[i].Action())
                 {
-                    case TRACK_INDEX_ENTRY_DATA::eSkip:
+                    case TRACK_INDEX_ENTRY_DATA::ACTION::Skip:
                         // Key either was in both old and new record AND/OR was present in old or new
                         // more than once.  We act only once on a key.
                         continue;
 
-                    case TRACK_INDEX_ENTRY_DATA::eDelete:
+                    case TRACK_INDEX_ENTRY_DATA::ACTION::Delete:
                         Call( ErrRECIDeleteIndexEntry(
                                   pfucbIdx,
                                   TrackContext.m_pData[i].Key(),
@@ -3161,8 +3190,8 @@ ERR ErrRECIReplaceInIndex(
                                   &DeleteContext ) );
                         break;
 
-                    case TRACK_INDEX_ENTRY_DATA::eInsert:
-                        // Necessary on the first eInsert, cheap on all the others.
+                    case TRACK_INDEX_ENTRY_DATA::ACTION::Insert:
+                        // Necessary on the first ACTION::Insert, cheap on all the others.
                         DIRGotoRoot( pfucbIdx );
 
                         Call( ErrRECIInsertIndexEntry(
