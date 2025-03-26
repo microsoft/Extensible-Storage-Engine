@@ -142,73 +142,6 @@ VOID Xpress10CorsicaTerm()
     g_pWrapper = NULL;
 }
 
-CORSICA_STATUS ChannelRegister( ULONG ChannelId, CORSICA_FAILURE_REASON *preason )
-{
-    CORSICA_STATUS status;
-    CORSICA_CHANNEL_ADD_RESOURCE_INPUT addResource;
-    CORSICA_CHANNEL_ADD_RESOURCE_OUTPUT addResourceOut;
-
-    status = CorsicaChannelCreate( g_pWrapper->m_hDevice, ChannelId, 0 /* ChannelCreateFlags */, &g_pWrapper->m_hChannel );
-    if (FAILED(status))
-    {
-        *preason = CorsicaChannelCreateFailed;
-        goto HandleError;
-    }
-
-    CORSICA_CHANNEL_ADD_RESOURCE_INPUT_INIT(&addResource);
-    addResource.ResourceType = CorsicaChannelAddResourceTypeQueue;
-    addResource.Queue.EngineClass = CorsicaEngineClassHigh;
-    addResource.Queue.EngineType = CorsicaEngineTypeCE;
-    addResource.Queue.Priority = CorsicaQueuePriority0;
-
-    for (ULONG i = 0; i < NUM_CE_QUEUES; i++)
-    {
-        CORSICA_CHANNEL_ADD_RESOURCE_OUTPUT_INIT(&addResourceOut);
-        status = CorsicaChannelAddResource( g_pWrapper->m_hChannel, &addResource, &addResourceOut );
-        if (FAILED(status))
-        {
-            *preason = CorsicaChannelAddResourceFailed;
-            goto HandleError;
-        }
-
-        g_pWrapper->m_rgusDefaultCeQueueId[i] = addResourceOut.Queue.QueueId;
-    }
-
-    addResource.Queue.EngineType = CorsicaEngineTypeDD;
-
-    for (ULONG i = 0; i < NUM_DD_QUEUES; i++)
-    {
-        CORSICA_CHANNEL_ADD_RESOURCE_OUTPUT_INIT(&addResourceOut);
-        status = CorsicaChannelAddResource( g_pWrapper->m_hChannel, &addResource, &addResourceOut );
-        if (FAILED(status))
-        {
-            *preason = CorsicaChannelAddResourceFailed;
-            goto HandleError;
-        }
-
-        g_pWrapper->m_rgusDefaultDdQueueId[i] = addResourceOut.Queue.QueueId;
-    }
-
-    status = CorsicaChannelFinalize( g_pWrapper->m_hChannel );
-    if (FAILED(status))
-    {
-        *preason = CorsicaChannelFinalizeFailed;
-        goto HandleError;
-    }
-
-    return status;
-
-HandleError:
-    if (g_pWrapper->m_hChannel != NULL)
-    {
-        CorsicaChannelDelete(g_pWrapper->m_hChannel);
-        g_pWrapper->m_hChannel = NULL;
-    }
-
-    return status;
-}
-
-
 ERR ErrXpress10CorsicaInit()
 {
     ERR err = ErrERRCheck( JET_errDeviceFailure );
@@ -220,6 +153,8 @@ ERR ErrXpress10CorsicaInit()
     CORSICA_DEVICE_SETUP_INFORMATION deviceSetupInfo;
     CORSICA_DEVICE_USER_RESOURCE_INFORMATION userResources;
     CORSICA_DEVICE_INFORMATION deviceInformation;
+    CORSICA_CHANNEL_ADD_RESOURCE_INPUT addResource;
+    CORSICA_CHANNEL_ADD_RESOURCE_OUTPUT addResourceOut;
 
     g_pWrapper = new CORSICA_WRAPPER;
     if ( g_pWrapper == NULL )
@@ -308,18 +243,51 @@ ERR ErrXpress10CorsicaInit()
         goto HandleError;
     }
 
-    ULONG attempt = 0;
-    do
-    {
-        // Temp fix for channel-id conflict between multiple processes to try random channels,
-        // corsica team working on a better API to checkout channel.
-        ULONG ChannelId = rand() % userResources.QueueGroupCount;
-        status = ChannelRegister( ChannelId, &reason );
-        attempt++;
-    }
-    while ( status == HRESULT_FROM_WIN32(ERROR_NO_SYSTEM_RESOURCES) && attempt < 10 );
+    status = CorsicaChannelCreate( g_pWrapper->m_hDevice, CORSICA_CHANNEL_CREATE_QUEUE_GROUP_ANY, 0 /* ChannelCreateFlags */, &g_pWrapper->m_hChannel );
     if (FAILED(status))
     {
+        reason = CorsicaChannelCreateFailed;
+        goto HandleError;
+    }
+
+    CORSICA_CHANNEL_ADD_RESOURCE_INPUT_INIT(&addResource);
+    addResource.ResourceType = CorsicaChannelAddResourceTypeQueue;
+    addResource.Queue.EngineClass = CorsicaEngineClassHigh;
+    addResource.Queue.EngineType = CorsicaEngineTypeCE;
+    addResource.Queue.Priority = CorsicaQueuePriority0;
+
+    for (ULONG i = 0; i < NUM_CE_QUEUES; i++)
+    {
+        CORSICA_CHANNEL_ADD_RESOURCE_OUTPUT_INIT(&addResourceOut);
+        status = CorsicaChannelAddResource( g_pWrapper->m_hChannel, &addResource, &addResourceOut );
+        if (FAILED(status))
+        {
+            reason = CorsicaChannelAddResourceFailed;
+            goto HandleError;
+        }
+
+        g_pWrapper->m_rgusDefaultCeQueueId[i] = addResourceOut.Queue.QueueId;
+    }
+
+    addResource.Queue.EngineType = CorsicaEngineTypeDD;
+
+    for (ULONG i = 0; i < NUM_DD_QUEUES; i++)
+    {
+        CORSICA_CHANNEL_ADD_RESOURCE_OUTPUT_INIT(&addResourceOut);
+        status = CorsicaChannelAddResource( g_pWrapper->m_hChannel, &addResource, &addResourceOut );
+        if (FAILED(status))
+        {
+            reason = CorsicaChannelAddResourceFailed;
+            goto HandleError;
+        }
+
+        g_pWrapper->m_rgusDefaultDdQueueId[i] = addResourceOut.Queue.QueueId;
+    }
+
+    status = CorsicaChannelFinalize( g_pWrapper->m_hChannel );
+    if (FAILED(status))
+    {
+        reason = CorsicaChannelFinalizeFailed;
         goto HandleError;
     }
 
