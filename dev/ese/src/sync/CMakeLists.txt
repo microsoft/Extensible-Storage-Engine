@@ -11,3 +11,7 @@ add_library(sync STATIC
 target_include_directories(sync PRIVATE
     ${INC_OUTPUT_DIRECTORY}/jet
 )
+
+target_link_libraries(sync
+    synchronization
+)
