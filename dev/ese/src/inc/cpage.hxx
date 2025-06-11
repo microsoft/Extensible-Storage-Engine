@@ -369,7 +369,10 @@ class CPAGE
         BOOL    FNewChecksumFormat  ( ) const;
         BOOL    FLastNodeHasNullKey( ) const;
 
-        BOOL    FShrunkPage ( ) const;
+        BOOL        FShrunkPage         ( ) const;
+        BOOL        FRevertedNewPage    ( ) const;
+        static BOOL FRevertedNewPage    ( const DBTIME dbtime ) { return dbtimeRevert == dbtime; }
+
         enum PageFlushType;
         PageFlushType Pgft      ( ) const;
 

@@ -219,6 +219,11 @@ HandleError:
     CallSx( err, JET_errOutOfMemory );
 }
 
+VOID CLogRedoMap::ClearPgno( __in PGNO pgno )
+{
+    ClearPgno( pgno, pgno );
+}
+
 VOID CLogRedoMap::GetOldestLgposEntry( __out PGNO* const ppgno, __out RedoMapEntry* const prme, __out CPG* const pcpg ) const
 {
     Assert( FAnyPgnoSet() );

@@ -2252,12 +2252,12 @@ ERR CFlushMap::ErrSetRangePgnoFlushType_( const PGNO pgnoFirst, const CPG cpg, c
         Assert( pfmd->sxwl.FNotOwner() );
         pfmd->sxwl.AcquireSharedLatch();
 
-        const BOOL fValidDbTime = ( ( dbtime != dbtimeNil ) && ( dbtime != dbtimeInvalid ) && ( dbtime != dbtimeShrunk ) && ( dbtime > 0 ) && ( dbtime != dbtimeRevert ) );
+        const BOOL fValidDbTime = ( ( dbtime != dbtimeNil ) && ( dbtime != dbtimeInvalid ) && ( dbtime != dbtimeShrunk ) && ( dbtime > 0 ) && !CPAGE::FRevertedNewPage( dbtime ) );
         Expected( fValidDbTime ||
-            ( dbtime == dbtimeNil ) ||      // used whenever the true dbtime can't be obtained.
-            ( dbtime == 0 ) ||              // uninitialized pages.
-            ( dbtime == dbtimeShrunk ) ||   // beyond EOF pages referenced in recovery are initialized with dbtimeShrunk.
-            ( dbtime == dbtimeRevert ) );   // Page which was reverted to a new page by RBS.
+            ( dbtime == dbtimeNil ) ||              // used whenever the true dbtime can't be obtained.
+            ( dbtime == 0 ) ||                      // uninitialized pages.
+            ( dbtime == dbtimeShrunk ) ||           // beyond EOF pages referenced in recovery are initialized with dbtimeShrunk.
+            CPAGE::FRevertedNewPage( dbtime ) );    // Page which was reverted to a new page by RBS.
 
 #ifndef ENABLE_JET_UNIT_TEST
         // Real code (i.e., not unit tests) should not be setting valid flush types on ranges.

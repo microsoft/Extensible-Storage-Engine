@@ -21545,7 +21545,7 @@ ERR ErrBFIPrepareFlushPage(
         CPAGE cpage;
         Assert( CbBFIBufferSize( pbf ) == CbBFIPageSize( pbf ) );
         cpage.LoadPage( pbf->ifmp, pbf->pgno, pbf->pv, CbBFIBufferSize( pbf ) );
-        if ( !FBFIBufferIsZeroed( pbf ) && ( cpage.Dbtime() != dbtimeShrunk ) && ( cpage.Dbtime() != dbtimeRevert ) )
+        if ( !FBFIBufferIsZeroed( pbf ) && ( cpage.Dbtime() != dbtimeShrunk ) && !cpage.FRevertedNewPage() )
         {
             pgftPageCurrent = cpage.Pgft();
 
@@ -24444,7 +24444,7 @@ void BFISyncWriteComplete(  const ERR           err,
             Assert( cbBuffer == cbPage );
             cpage.LoadPage( pbf->ifmp, pbf->pgno, pbf->pv, cbBuffer );
             dbtime = cpage.Dbtime();
-            if ( !FUtilZeroed( (BYTE*)pbf->pv, cbBuffer ) && ( dbtime != dbtimeShrunk ) && ( dbtime != dbtimeRevert ) )
+            if ( !FUtilZeroed( (BYTE*)pbf->pv, cbBuffer ) && ( dbtime != dbtimeShrunk ) && !cpage.FRevertedNewPage() )
             {
                 pgft = cpage.Pgft();
             }
@@ -25263,7 +25263,7 @@ void BFIAsyncWriteComplete( const ERR           err,
             Assert( cbBuffer == cbPage );
             cpage.LoadPage( pbf->ifmp, pbf->pgno, pbf->pv, cbBuffer );
             dbtime = cpage.Dbtime();
-            if ( !FUtilZeroed( (BYTE*)pbf->pv, cbBuffer ) && ( dbtime != dbtimeShrunk ) && ( dbtime != dbtimeRevert ) )
+            if ( !FUtilZeroed( (BYTE*)pbf->pv, cbBuffer ) && ( dbtime != dbtimeShrunk ) && !cpage.FRevertedNewPage() )
             {
                 pgft = cpage.Pgft();
             }

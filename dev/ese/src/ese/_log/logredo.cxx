@@ -126,8 +126,7 @@ LOCAL ERR ErrReplacePageImage(
     if ( pagetrimTrimmed == csr.PagetrimState() )
     {
 #if DEBUG
-        Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() &&
-                g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( pgno ) );
+        Assert( g_rgfmp[ ifmp ].FPgnoInZeroedOrRevertedMaps( pgno ) );
 #endif
     }
     else
@@ -517,6 +516,54 @@ VOID LGIReportPageDataMissing( const INST* pinst, const IFMP ifmp, const PGNO pg
     OSTraceResumeGC();
 }
 
+LOCAL
+VOID LGIReportBadRevertedPage( const INST* pinst, const IFMP ifmp, const PGNO pgno, const ERR err, const LGPOS& lgposMismatchLR, const CPG cpgAffected )
+{
+    Assert( FMP::FAllocatedFmp( ifmp ) );
+
+    const FMP* const pfmp = FMP::FAllocatedFmp( ifmp ) ? &g_rgfmp[ ifmp ] : NULL;
+    const LGPOS lgposStop = pinst->m_plog->LgposLGLogTipNoLock();
+
+    OSTraceSuspendGC();
+    const WCHAR* wszDatabaseName = pfmp ?
+        pfmp->WszDatabaseName() :
+        pinst->m_wszInstanceName;
+    wszDatabaseName = wszDatabaseName ? wszDatabaseName : L"";
+    const WCHAR* rgwsz[] =
+    {
+        wszDatabaseName,
+        OSFormatW( L"%I32u (0x%08x)", pgno, pgno ),
+        OSFormatW( L"(%08I32X,%04hX,%04hX)", lgposMismatchLR.lGeneration, lgposMismatchLR.isec, lgposMismatchLR.ib ),
+        OSFormatW( L"(%08I32X,%04hX,%04hX)", lgposStop.lGeneration, lgposStop.isec, lgposStop.ib ),
+        OSFormatW( L"%d", err ),
+        pfmp ?
+            OSFormatW( L"%d", (INT)pfmp->FContainsDataFromFutureLogs() ) :
+            L"?",
+        OSFormatW( L"%d", cpgAffected )
+    };
+    UtilReportEvent(
+        eventError,
+        LOGGING_RECOVERY_CATEGORY,
+        RECOVERY_DATABASE_BAD_REVERTED_PAGE_ID,
+        _countof( rgwsz ),
+        rgwsz,
+        0,
+        NULL,
+        pinst );
+    OSUHAPublishEvent(
+        HaDbFailureTagCorruption,
+        pinst,
+        Ese2HaId( LOGGING_RECOVERY_CATEGORY ),
+        HaDbIoErrorNone,
+        wszDatabaseName,
+        OffsetOfPgno( pgno ),
+        g_cbPage,
+        Ese2HaId( RECOVERY_DATABASE_BAD_REVERTED_PAGE_ID ),
+        _countof( rgwsz ),
+        rgwsz );
+    OSTraceResumeGC();
+}
+
 //  access page RIW latched
 //  remove dependence
 //
@@ -536,6 +583,7 @@ INLINE ERR LOG::ErrLGIAccessPage(
     DBTIME dbtime = 0;
     BOOL fBeyondEofPageOk = fFalse;
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
+    BOOL fRevertedNewPage = fFalse;
 
     Assert( pgnoNull != pgno );
     Assert( NULL != ppib );
@@ -544,8 +592,7 @@ INLINE ERR LOG::ErrLGIAccessPage(
     //  right off the bat, if the pgno for this redo operation is already
     //  tracked by the log redo map, we should just skip it instead of
     //  trying to operate on a page that we know is not up-to-date.
-    CLogRedoMap* pLogRedoMapZeroed = g_rgfmp[ifmp].PLogRedoMapZeroed();
-    if ( pLogRedoMapZeroed && pLogRedoMapZeroed->FPgnoSet( pgno ) )
+    if ( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( pgno ) )
     {
         pcsr->SetPagetrimState( pagetrimTrimmed, pgno );
 
@@ -562,11 +609,16 @@ INLINE ERR LOG::ErrLGIAccessPage(
     if ( errPage >= JET_errSuccess )
     {
         dbtime = pcsr->Cpage().Dbtime();
+        fRevertedNewPage = pcsr->Cpage().FRevertedNewPage();
     }
 
     //  If a shrink or trim have happened at any point in the log range we are recovering,
     //  trying to access a page would either yield JET_errFileIOBeyondEOF or
     //  JET_errPageNotInitialized if such a page was within the shrunk or trimmed range.
+    //
+    //  If a page was freed at any point in the log range we are recovering, and if that
+    //  page was later reverted back from a future point to a new page, it will have a dbtime
+    //  equal to dbtimeRevert.
     //
     //  JET_errFileIOBeyondEOF is simple to understand: the database has shrunk
     //  and a redo operation applies to a page in this area. For these operations,
@@ -583,7 +635,8 @@ INLINE ERR LOG::ErrLGIAccessPage(
     fBeyondEofPageOk = fUninitPageOk && g_rgfmp[ifmp].FOlderDemandExtendDb();
     if ( ( ( ( errPage == JET_errFileIOBeyondEOF ) && !fBeyondEofPageOk ) ||
            ( ( errPage == JET_errPageNotInitialized ) && !fUninitPageOk ) ||
-           ( ( errPage >= JET_errSuccess ) && pcsr->Cpage().FShrunkPage() && !fUninitPageOk ) ) &&
+           ( ( errPage >= JET_errSuccess ) && pcsr->Cpage().FShrunkPage() && !fUninitPageOk ) ||
+           ( ( errPage >= JET_errSuccess ) && fRevertedNewPage && !fUninitPageOk ) ) &&
          FRedoMapNeeded( ifmp ) )
     {
         if ( errPage >= JET_errSuccess )
@@ -593,14 +646,17 @@ INLINE ERR LOG::ErrLGIAccessPage(
 
 
         Call( g_rgfmp[ifmp].ErrEnsureLogRedoMapsAllocated() );
-        pLogRedoMapZeroed = g_rgfmp[ifmp].PLogRedoMapZeroed();
-        Call( pLogRedoMapZeroed->ErrSetPgno(
+
+        CLogRedoMap* const pLogRedoMapToSet = fRevertedNewPage ? g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() : g_rgfmp[ ifmp ].PLogRedoMapZeroed();
+
+        Call( pLogRedoMapToSet->ErrSetPgno(
             pgno,
             LgposLGLogTipNoLock(),
             ( errPage < JET_errSuccess ) ? errPage : ErrERRCheck( JET_errRecoveryVerifyFailure ),
             dbtimeNil,
             dbtime,
             dbtimeNil ) );
+
         SetPendingRedoMapEntries();
         pcsr->SetPagetrimState( pagetrimTrimmed, pgno );
 
@@ -610,7 +666,7 @@ INLINE ERR LOG::ErrLGIAccessPage(
     }
     else
     {
-        if ( ( errPage >= JET_errSuccess ) && ( pcsr->Cpage().FShrunkPage() ) )
+        if ( ( errPage >= JET_errSuccess ) && ( pcsr->Cpage().FShrunkPage() || fRevertedNewPage ) )
         {
             pcsr->ReleasePage();
             Error( ErrERRCheck( JET_errRecoveryVerifyFailure ) );
@@ -645,7 +701,14 @@ HandleError:
              ( ( err == JET_errPageNotInitialized ) && !fUninitPageOk ) ||
              ( ( err == JET_errRecoveryVerifyFailure ) && !fUninitPageOk ) )
         {
-            LGIReportPageDataMissing( m_pinst, ifmp, pgno, err, LgposLGLogTipNoLock(), 1 );
+            if ( fRevertedNewPage )
+            {
+                LGIReportBadRevertedPage( m_pinst, ifmp, pgno, err, LgposLGLogTipNoLock(), 1 );
+            }
+            else
+            {
+                LGIReportPageDataMissing( m_pinst, ifmp, pgno, err, LgposLGLogTipNoLock(), 1 );
+            }
         }
         else if ( ( err != JET_errFileIOBeyondEOF ) &&
                   ( err != JET_errPageNotInitialized ) &&
@@ -719,7 +782,7 @@ HandleError:
         {
             // But it's still a success...
             Assert( FRedoMapNeeded( ifmp ) );
-            Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() && g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( pgno ) );
+            Assert( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( pgno ) );
 
             err = JET_errSuccess;
         }
@@ -796,7 +859,7 @@ ERR LOG::ErrLGRIAccessNewPage(
 
             Assert( pagetrimTrimmed == pcsrNew->PagetrimState() );
             Assert( FRedoMapNeeded( ifmp ) );
-            Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() && g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( pgnoNew ) );
+            Assert( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( pgnoNew ) );
 
             *pfRedoNewPage = fFalse;
 
@@ -2730,8 +2793,16 @@ ERR LOG::ErrLGRIRedoFreeEmptyPages(
 
             Assert( pagetrimTrimmed == pcsrEmpty->PagetrimState() );
             Assert( FRedoMapNeeded( ifmp ) );
-            Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() && g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( rgemptypage[i].pgno ) );
+            Assert( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( rgemptypage[i].pgno ) );
             Assert( !pcsrEmpty->FLatched() );
+
+            // Clear the page from dbtimerevert redo map since the page is being freed.
+            // Any future operation on this page should be a new page operation and we shouldn't have to worry about dbtime.
+            //
+            if ( g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() )
+            {
+                g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( rgemptypage[i].pgno );
+            }
         }
         else
         {
@@ -2850,7 +2921,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 
         Assert( pagetrimTrimmed == csr.PagetrimState() );
         Assert( FRedoMapNeeded( ifmp ) );
-        Assert( g_rgfmp[ifmp].PLogRedoMapZeroed() && g_rgfmp[ifmp].PLogRedoMapZeroed()->FPgnoSet( pgno ) );
+        Assert( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( pgno ) );
         Assert( !csr.FLatched() );
     }
     else
@@ -6485,7 +6556,7 @@ ERR LOG::ErrLGRIRedoConvertFDP( PIB *ppib, const LRCONVERTFDP *plrconvertfdp )
     {
         Assert( pagetrimTrimmed == csrRoot.PagetrimState() );
         Assert( FRedoMapNeeded( ifmp ) );
-        Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() && g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( pgnoFDP ) );
+        Assert( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( pgnoFDP ) );
         err = JET_errSuccess;
         fRedoRoot = fFalse;
     }
@@ -6686,7 +6757,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
                 const LRNODE_* plrNode = (LRNODE_ * ) plr;
                 const IFMP  ifmp = m_pinst->m_mpdbidifmp[ plrNode->dbid ];
                 Assert( FRedoMapNeeded( ifmp ) );
-                Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() && g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( plrNode->le_pgno ) );
+                Assert( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( plrNode->le_pgno ) );
 #endif
                 break;
             }
@@ -7722,7 +7793,7 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
         {
             Assert( pagetrimTrimmed == psplit->csrRight.PagetrimState() );
             Assert( FRedoMapNeeded( ifmp ) );
-            Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() && g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( pgnoRight ) );
+            Assert( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( pgnoRight ) );
             err = JET_errSuccess;
         }
         else
@@ -7839,7 +7910,7 @@ ERR LOG::ErrLGRIRedoSplitPath( PIB *ppib, const LRSPLIT_ *plrsplit, SPLITPATH **
     {
         Assert( pagetrimTrimmed == psplitPath->csr.PagetrimState() );
         Assert( FRedoMapNeeded( ifmp ) );
-        Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() && g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( pgnoSplit ) );
+        Assert( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( pgnoSplit ) );
         err = JET_errSuccess;
     }
     else
@@ -8742,6 +8813,27 @@ HandleError:
     return err;
 }
 
+//  Clears the redo map storing the dbtimerevert pages for the empty merged pages which were skipped from redo operations earlier in the required range.
+//
+LOCAL VOID LGIRedoMergeClearRedoMapDbtimeRevert( const MERGEPATH* const pmergePathTip, const IFMP ifmp )
+{
+    // There is no redomap dbtimerevert. So nothing needs to be cleared.
+    if ( !g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() )
+    {
+        return;
+    }
+
+    for ( const MERGEPATH *pmergePath = pmergePathTip; pmergePath != NULL; pmergePath = pmergePath->pmergePathParent )
+    {
+        Assert( pmergePath->csr.Pgno() != pgnoNull );
+
+        if ( pmergePath->fEmptyPage )
+        {
+            g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( pmergePath->csr.Pgno() );
+        }
+    }
+}
+
 //  ================================================================
 ERR LOG::ErrLGRIRedoNewPage( const LRNEWPAGE * const plrnewpage )
 //  ================================================================
@@ -8856,8 +8948,7 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
 
     if ( pgnoNull != plrpagemove->PgnoLeft() )
     {
-        if ( g_rgfmp[ifmp].PLogRedoMapZeroed() &&
-             g_rgfmp[ifmp].PLogRedoMapZeroed()->FPgnoSet( plrpagemove->PgnoLeft() ) )
+        if ( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( plrpagemove->PgnoLeft() ) )
         {
             pmergePath->pmerge->csrLeft.SetPagetrimState( pagetrimTrimmed, plrpagemove->PgnoLeft() );
         }
@@ -8877,8 +8968,7 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
 
     if ( pgnoNull != plrpagemove->PgnoRight() )
     {
-        if ( g_rgfmp[ifmp].PLogRedoMapZeroed() &&
-             g_rgfmp[ifmp].PLogRedoMapZeroed()->FPgnoSet( plrpagemove->PgnoRight() ) )
+        if ( g_rgfmp[ifmp].FPgnoInZeroedOrRevertedMaps( plrpagemove->PgnoRight() ) )
         {
             pmergePath->pmerge->csrRight.SetPagetrimState( pagetrimTrimmed, plrpagemove->PgnoRight() );
         }
@@ -8937,6 +9027,7 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
                 plrpagemove->DbtimeAfter(),
                 plrpagemove->DbtimeSourceBefore() ) );
         pmergePath->csr.UpgradeFromRIWLatch();
+
         fRedoSource = fTrue;
     }
 
@@ -8963,6 +9054,12 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
     
     LGIRedoMergeUpdateDbtime( pmergePath, plrpagemove->DbtimeAfter() );
     BTPerformPageMove( pmergePath );
+
+    // Remove the source page from dbtimerevert redo map as it is freed now.
+    if ( g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() )
+    {
+        g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( plrpagemove->PgnoSource() );
+    }
 
 HandleError:
 
@@ -9282,8 +9379,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             // If either the dbtime from local page or dbtime from log record is dbtimeRevert, we will skip checking the consistency of the page.
             const BOOL fDbtimeRevertedNewPage = 
                 ( CmpLgpos( g_rgfmp[ ifmp ].Pdbfilehdr()->le_lgposCommitBeforeRevert, m_lgposRedo ) > 0 &&
-                    dbtimePage == dbtimeRevert ) || 
-                plrscancheck->DbtimePage() == dbtimeRevert;
+                  CPAGE::FRevertedNewPage( dbtimePage ) ) || 
+                CPAGE::FRevertedNewPage( plrscancheck->DbtimePage() );
 
             // Matching uninitialized state is OK, proceed only if at least one of the dbtimes is initialized
             // If this was a page which was reverted to a new page by RBS, we should ignore dbscan checks till the max log at the time of revert is replayed.
@@ -9764,6 +9861,10 @@ ERR LOG::ErrLGRIRedoMerge( PIB *ppib, DBTIME dbtime )
     //  calls BTIPerformMerge
     //
     BTIPerformMerge( pfucb, pmergePathLeaf );
+
+    //  removes page with db time dbtimerevert from dbtimerevert redomap if page is empty.
+    //
+    LGIRedoMergeClearRedoMapDbtimeRevert( pmergePathLeaf, m_pinst->m_mpdbidifmp[ dbid ] );
 
 HandleError:
     AssertSz( errSkipLogRedoOperation != err, "%s() got errSkipLogRedoOperation from ErrLGRICheckRedoCondition(dbtime=%d=%#x).\n",
@@ -11119,6 +11220,14 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
         CallR( err );
         BFMarkAsSuperCold( &bfl );
         BFWriteUnlatch( &bfl );
+    }
+
+    // Clear the page from dbtimerevert redo map since the pages in the given extent are being freed.
+    // Any future operation on this page should be a new page operation and we shouldn't have to worry about dbtime.
+    //
+    if ( g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() )
+    {
+        g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( pgnoFirst, pgnoFirst + cpgExtent - 1 );
     }
 
     return JET_errSuccess;
@@ -12925,6 +13034,7 @@ ERR LOG::ErrLGIVerifyRedoMapForIfmp( const IFMP ifmp )
 
     const CLogRedoMap* const pLogRedoMapZeroed = g_rgfmp[ ifmp ].PLogRedoMapZeroed();
     const CLogRedoMap* const pLogRedoMapBadDbTime = g_rgfmp[ ifmp ].PLogRedoMapBadDbTime();
+    const CLogRedoMap* const pLogRedoMapDbtimeRevert = g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert();
 
     if ( NULL != pLogRedoMapZeroed )
     {
@@ -12991,6 +13101,32 @@ ERR LOG::ErrLGIVerifyRedoMapForIfmp( const IFMP ifmp )
                 cpg );
 
             Assert( err == JET_errDbTimeTooOld );
+        }
+    }
+
+    if ( NULL != pLogRedoMapDbtimeRevert )
+    {
+        //  oh, oh. An operation was not reconciled. We must fail
+        //  recovery accordingly.
+        if ( pLogRedoMapDbtimeRevert->FAnyPgnoSet() )
+        {
+            pLogRedoMapDbtimeRevert->GetOldestLgposEntry( &pgno, &rme, &cpg );
+            Assert( CPAGE::FRevertedNewPage( rme.dbtimePage ) );
+            Assert( rme.err < JET_errSuccess );
+
+            Expected( rme.err == JET_errRecoveryVerifyFailure );
+
+            OSTrace( JET_tracetagRecoveryValidation,
+                OSFormat( "IFMP %d: Failed recovery as log redo map for dbtimeRevert detected at least one unreconciled entry in pgno: %d.", ifmp, pgno ) );
+
+            err = ErrERRCheck( rme.err );
+            LGIReportBadRevertedPage(
+                m_pinst,
+                ifmp,
+                pgno,
+                err,
+                rme.lgpos,
+                cpg );
         }
     }
 

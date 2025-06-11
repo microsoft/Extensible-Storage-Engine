@@ -1629,6 +1629,15 @@ Language=English
 Tag: %10%n
 .
 
+MessageId=565
+SymbolicName=RECOVERY_DATABASE_BAD_REVERTED_PAGE_ID
+Language=English
+%1 (%2) %3Database %4: Page %5 failed verification due to being reverted to a new page using revert snapshot, but the log record at log position %6 expected the page to not be a new page (currently replaying log position %7).  Recovery/restore will fail with error %8.  This problem is likely due to a bad revert operation.
+%nAdditional information:
+%n%tWithin initial required range: %9
+%n%tTotal number of pages affected: %10
+.
+
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 
