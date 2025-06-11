@@ -3544,6 +3544,12 @@ BOOL CPAGE::FShrunkPage ( ) const
     return dbtimeShrunk == Dbtime();
 }
 
+//  ================================================================
+BOOL CPAGE::FRevertedNewPage ( ) const
+//  ================================================================
+{
+    return CPAGE::FRevertedNewPage( Dbtime() );
+}
 
 //  ================================================================
 VOID CPAGE::ResetAllFlags( INT fFlags )

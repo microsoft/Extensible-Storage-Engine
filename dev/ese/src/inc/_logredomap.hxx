@@ -74,5 +74,6 @@ class CLogRedoMap
             __in const DBTIME dbtimePage,
             __in const DBTIME dbtimeAfter );
         VOID ClearPgno( __in PGNO pgnoStart, __in PGNO pgnoEnd );
+        VOID ClearPgno( __in PGNO pgno );
         VOID GetOldestLgposEntry( __out PGNO* const ppgno, __out RedoMapEntry* const prme, __out CPG* const pcpg ) const;
 };

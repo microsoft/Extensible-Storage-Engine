@@ -484,6 +484,12 @@ class FMP
         // The above gets hit occasionally when running `accept nocopy dml onetest forever`.
         CLogRedoMap *       m_pLogRedoMapBadDbtime;
 
+        // Keeps track of which pages have a dbtime equal to dbtimerevert
+        // dbtimerevert indicates a page which was reverted back to a new page using revert snapshot.
+        // This implies that there is a log record later in the required range which frees up 
+        // this erroneous page.
+        CLogRedoMap *       m_pLogRedoMapDbtimeRevert;
+
     // =====================================================================
     // Member retrieval..
     public:
@@ -675,6 +681,7 @@ public:
         //
         CLogRedoMap* PLogRedoMapZeroed() const        { return m_pLogRedoMapZeroed; };
         CLogRedoMap* PLogRedoMapBadDbTime() const     { return m_pLogRedoMapBadDbtime; };
+        CLogRedoMap* PLogRedoMapDbtimeRevert() const  { return m_pLogRedoMapDbtimeRevert; };
 
     // =====================================================================
     // Member manipulation.
@@ -1116,6 +1123,8 @@ public:
     }
 
     ERR ErrPgnoLastFileSystem( PGNO* const ppgnoLast ) const;
+
+    BOOL FPgnoInZeroedOrRevertedMaps( const PGNO pgno ) const;
 
     friend DBFILEHDR * PdbfilehdrEDBGAccessor( const FMP * const pfmp );
 

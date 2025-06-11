@@ -358,6 +358,7 @@ FMP::~FMP()
     Assert( m_cAsyncIOForViewCachePending == 0 );
     Assert( NULL == m_pLogRedoMapZeroed );
     Assert( NULL == m_pLogRedoMapBadDbtime );
+    Assert( NULL == m_pLogRedoMapDbtimeRevert );
 }
 
 /******************************************************************/
@@ -2280,11 +2281,13 @@ ERR FMP::ErrEnsureLogRedoMapsAllocated()
     m_sxwlRedoMaps.AcquireExclusiveLatch();
 
     Assert( ( m_pLogRedoMapZeroed == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );
+    Assert( ( m_pLogRedoMapDbtimeRevert == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );
+
     Assert( m_pinst->FRecovering() && ( m_pinst->m_plog->FRecoveringMode() == fRecoveringRedo ) );
 
     ERR err = JET_errSuccess;
 
-    if ( ( m_pLogRedoMapZeroed != NULL ) && ( m_pLogRedoMapBadDbtime != NULL ) )
+    if ( ( m_pLogRedoMapZeroed != NULL ) && ( m_pLogRedoMapBadDbtime != NULL ) && ( m_pLogRedoMapDbtimeRevert != NULL ) )
     {
         m_sxwlRedoMaps.ReleaseExclusiveLatch();
         return JET_errSuccess;
@@ -2302,6 +2305,12 @@ ERR FMP::ErrEnsureLogRedoMapsAllocated()
     {
         Alloc( m_pLogRedoMapBadDbtime = new CLogRedoMap() );
         Call( m_pLogRedoMapBadDbtime->ErrInitLogRedoMap( Ifmp() ) );
+    }
+
+    if ( m_pLogRedoMapDbtimeRevert == NULL )
+    {
+        Alloc( m_pLogRedoMapDbtimeRevert = new CLogRedoMap() );
+        Call( m_pLogRedoMapDbtimeRevert->ErrInitLogRedoMap( Ifmp() ) );
     }
 
 HandleError:
@@ -2328,9 +2337,9 @@ VOID FMP::FreeLogRedoMaps( const BOOL fAllocCleanup )
         Assert( m_sxwlRedoMaps.FOwnWriteLatch() );
     }
 
-    Assert( fAllocCleanup || ( ( m_pLogRedoMapZeroed == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) ) );
+    Assert( fAllocCleanup || ( ( m_pLogRedoMapZeroed == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) && ( m_pLogRedoMapBadDbtime == NULL ) == ( m_pLogRedoMapDbtimeRevert == NULL ) ) );
 
-    if ( ( m_pLogRedoMapZeroed == NULL ) && ( m_pLogRedoMapBadDbtime == NULL ) )
+    if ( ( m_pLogRedoMapZeroed == NULL ) && ( m_pLogRedoMapBadDbtime == NULL ) && ( m_pLogRedoMapDbtimeRevert == NULL ) )
     {
         if ( !fAllocCleanup )
         {
@@ -2359,6 +2368,13 @@ VOID FMP::FreeLogRedoMaps( const BOOL fAllocCleanup )
         m_pLogRedoMapBadDbtime = NULL;
     }
 
+    if ( m_pLogRedoMapDbtimeRevert != NULL )
+    {
+        m_pLogRedoMapDbtimeRevert->TermLogRedoMap();
+        delete m_pLogRedoMapDbtimeRevert;
+        m_pLogRedoMapDbtimeRevert = NULL;
+    }
+
     if ( !fAllocCleanup )
     {
         m_sxwlRedoMaps.ReleaseWriteLatch();
@@ -2374,9 +2390,11 @@ BOOL FMP::FRedoMapsEmpty()
     m_sxwlRedoMaps.AcquireSharedLatch();
 
     Assert( ( m_pLogRedoMapZeroed == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );
+    Assert( ( m_pLogRedoMapDbtimeRevert == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );
 
     const BOOL fRedoMapsEmpty = ( ( m_pLogRedoMapZeroed == NULL ) || ( !m_pLogRedoMapZeroed->FAnyPgnoSet() ) ) &&
-                                 ( ( m_pLogRedoMapBadDbtime == NULL ) || ( !m_pLogRedoMapBadDbtime->FAnyPgnoSet() ) );
+                                ( ( m_pLogRedoMapBadDbtime == NULL ) || ( !m_pLogRedoMapBadDbtime->FAnyPgnoSet() ) ) &&
+                                ( ( m_pLogRedoMapDbtimeRevert == NULL ) || ( !m_pLogRedoMapDbtimeRevert->FAnyPgnoSet() ) );
 
     m_sxwlRedoMaps.ReleaseSharedLatch();
 
@@ -2936,6 +2954,14 @@ ERR FMP::ErrPgnoLastFileSystem( PGNO* const ppgnoLast ) const
 
 HandleError:
     return err;
+}
+
+//  ================================================================
+ERR FMP::FPgnoInZeroedOrRevertedMaps( const PGNO pgno ) const
+//  ================================================================
+{
+    return ( PLogRedoMapZeroed() && PLogRedoMapZeroed()->FPgnoSet( pgno ) ) || 
+           ( PLogRedoMapDbtimeRevert() && PLogRedoMapDbtimeRevert()->FPgnoSet( pgno ) );
 }
 
 #ifdef ENABLE_JET_UNIT_TEST

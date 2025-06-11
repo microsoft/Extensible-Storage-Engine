@@ -3989,7 +3989,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
 
             pfmp = &g_rgfmp[ ifmp ];
 
-            Assert( ( pfmp->PLogRedoMapZeroed() == NULL ) && ( pfmp->PLogRedoMapBadDbTime() == NULL ) );
+            Assert( ( pfmp->PLogRedoMapZeroed() == NULL ) && ( pfmp->PLogRedoMapBadDbTime() == NULL ) && ( pfmp->PLogRedoMapDbtimeRevert() == NULL ) );
 
             Assert( !pinst->FRecovering() );
             Assert( !pfmp->FReadOnlyAttach() && !g_fRepair );
@@ -4286,7 +4286,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     Call( ErrDBReadHeaderCheckConsistency( pfsapi, pfmp ) );
     pfmp->TraceDbfilehdrInfo( tsidrEngineFmpDbHdr1st );
 
-    Assert( ( pfmp->PLogRedoMapZeroed() == NULL ) && ( pfmp->PLogRedoMapBadDbTime() == NULL ) );
+    Assert( ( pfmp->PLogRedoMapZeroed() == NULL ) && ( pfmp->PLogRedoMapBadDbTime() == NULL ) && ( pfmp->PLogRedoMapDbtimeRevert() == NULL ) );
 
     if ( !plog->FLogDisabled()
         && 0 == memcmp( &pfmp->Pdbfilehdr()->signLog, &plog->SignLog(), sizeof(SIGNATURE) ) )
