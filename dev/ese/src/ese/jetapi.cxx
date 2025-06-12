@@ -22223,7 +22223,7 @@ JET_ERR JET_API JetStopServiceInstanceEx( __in JET_INSTANCE instance, _In_ JET_G
                     pfmpCurr = &g_rgfmp[ifmp];
                     pfmpCurr->RwlDetaching().EnterAsReader();
 
-                    pfmpCurr->ResetFDontRegisterOLD2Tasks();
+                    pfmpCurr->UnpauseOLD2Tasks();
 
                     pfmpCurr->RwlDetaching().LeaveAsReader();
                     pfmpCurr = NULL;
@@ -22308,7 +22308,9 @@ JET_ERR JET_API JetStopServiceInstanceEx( __in JET_INSTANCE instance, _In_ JET_G
                     pfmpCurr = &g_rgfmp[ifmp];
                     pfmpCurr->RwlDetaching().EnterAsReader();
 
-                    pfmpCurr->SetFDontRegisterOLD2Tasks();
+                    // Pauses execution of OLD tasks but allows
+                    // tasks to be registered for future processing
+                    pfmpCurr->PauseOLD2Tasks();
 
                     pfmpCurr->RwlDetaching().LeaveAsReader();
                     pfmpCurr = NULL;

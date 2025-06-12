@@ -861,6 +861,9 @@ public:
         BOOL FHardRecovery( const DBFILEHDR* const pdbfilehdr ) const;
         BOOL FHardRecovery() const;
 
+        VOID PauseOLD2Tasks();
+        VOID UnpauseOLD2Tasks();
+
 
     // =====================================================================
     // Physical File I/O Conversions

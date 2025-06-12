@@ -511,3 +511,6 @@ ERR     ErrOLDDefragment(
 ERR ErrOLDInit();
 VOID OLDTerm();
 
+VOID OLD2PauseTasks();
+VOID OLD2UnpauseTasks();
+

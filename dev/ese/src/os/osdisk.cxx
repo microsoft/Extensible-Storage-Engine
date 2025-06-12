@@ -2427,12 +2427,34 @@ ERR COSDisk::ErrDiskId( ULONG_PTR* const pulDiskId ) const
 
 BOOL COSDisk::FSeekPenalty() const
 {
-    BOOL fFakeNoSeekPenalty = ErrFaultInjection( 17353 );
+    // SeekPenalty is used to determine whether OLD should be
+    // enabled on the current database. If FSeekPenalty is true
+    // (i.e. this is on an HDD) then OLD is beneficial, but if
+    // it is not (i.e. on an SSD) then OLD is not beneficial.
+    // For testing, though, we need to deterministically run
+    // or not run OLD no matter what hardware we are on, so 
+    // the following FaultInjection will be used to make the 
+    // current hardware behave as an SSD (spNo) or an HDD (spYes).
+    // If unset (spAuto) it will make the determination based
+    // on the actual hardware.
+    // 0 = spAuto
+    // 1 = spNo
+    // 2 = spYes
+    const INT spMode = ErrFaultInjection( 17353 );
 
-    return !fFakeNoSeekPenalty &&
-        (   m_osdi.m_errorOsdspd != ERROR_SUCCESS ||
-            m_osdi.m_osdspd.Size < 12 /* offset + size of the .IncursSeekPenalty member*/ ||
-            m_osdi.m_osdspd.IncursSeekPenalty );
+    if ( spMode == 1 /* SSD Mode */ )
+    {
+        return fFalse;
+    }
+    else if ( spMode == 2 /* HDD Mode */ )
+    {
+        return fTrue;
+    }
+
+    Assert( spMode == 0 /* Auto Mode */ );
+    return m_osdi.m_errorOsdspd != ERROR_SUCCESS ||
+           m_osdi.m_osdspd.Size < 12 /* offset + size of the .IncursSeekPenalty member*/ ||
+           m_osdi.m_osdspd.IncursSeekPenalty;
 }
 
 ERR ErrValidateNotUsingIoContext( __in ULONG ichunk, __in ULONG iioreq, __in const IOREQ * pioreq, void * pvCtx )

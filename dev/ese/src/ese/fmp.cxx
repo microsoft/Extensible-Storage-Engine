@@ -2964,6 +2964,20 @@ ERR FMP::FPgnoInZeroedOrRevertedMaps( const PGNO pgno ) const
            ( PLogRedoMapDbtimeRevert() && PLogRedoMapDbtimeRevert()->FPgnoSet( pgno ) );
 }
 
+//  ================================================================
+VOID FMP::PauseOLD2Tasks()
+//  ================================================================
+{
+    OLD2PauseTasks();
+}
+
+//  ================================================================
+VOID FMP::UnpauseOLD2Tasks()
+//  ================================================================
+{
+    OLD2UnpauseTasks();
+}
+
 #ifdef ENABLE_JET_UNIT_TEST
 
 // these are used by testing routines that need a mock FMP
