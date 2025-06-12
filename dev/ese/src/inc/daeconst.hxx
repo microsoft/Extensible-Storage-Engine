@@ -325,6 +325,7 @@ const INT rankBFLgposModifyHist         = 65;
 const INT rankBFFMPContext              = 66;
 const INT rankBFLRUK                    = 70;
 const INT rankRBSWrite                  = 70;
+const INT rankDefragPauseManager        = 70;
 const INT rankFMPDetaching              = 75;
 const INT rankFMPGlobal                 = 80;
 const INT rankSysParamFixup             = 85;

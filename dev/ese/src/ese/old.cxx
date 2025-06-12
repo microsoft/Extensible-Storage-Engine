@@ -466,8 +466,9 @@ class CDefragManager
         static CDefragManager& Instance();
         // the maximum number of tasks to run concurrently
         // this is also the size of the m_rgtasks array
-        static const INT s_ctasksMax = 2;
-        static const char * const szCriticalSectionName;
+        static const INT s_ctasksMaxDefault = 2;
+        static const char * const szDefragManagerCriticalSectionName;
+        static const char * const szDefragPauseManagerCriticalSectionName;
         
     public:
         // start/stop the defrag manager
@@ -507,6 +508,14 @@ class CDefragManager
             _In_opt_z_ const CHAR * const szIndex,
             _In_ DEFRAGTYPE defragtype ) const;
 
+        VOID Pause();
+        VOID Unpause();
+
+        INT CTasksMax()
+        {
+            return m_ctasksMax;
+        }
+
     private:
         // add a scheduled task that runs FOsTimerTask_()
         VOID EnsureTimerScheduled_();
@@ -537,6 +546,9 @@ class CDefragManager
     private:
         // critical section for state changes
         CCriticalSection m_crit;
+
+        // critical section for pausing
+        CCriticalSection m_critPauseManager;
 
         // timer task handle
         POSTIMERTASK m_posttDispatchOsTimerTask;
@@ -574,6 +586,8 @@ class CDefragManager
         INT m_ctasksIssued;
         INT m_ctasksToIssue;
         INT m_ctasksToIssueNext;
+        
+        INT m_ctasksMax;
         
     private:
         CDefragManager();
@@ -1243,7 +1257,7 @@ ERR ErrOLD2Resume( __in PIB * const ppib, const IFMP ifmp )
         else
         {
             // Seems to be a valid table. Let's schedule it for defrag resume.
-            if ( cResumesAttempted <= CDefragManager::s_ctasksMax )
+            if ( cResumesAttempted <= CDefragManager::Instance().CTasksMax() )
             {
                 const ERR errNonfatal = ErrOLD2ResumeOneTree( ppib, ifmp, objidTable, objidFDP, fFalse );
 
@@ -1283,6 +1297,16 @@ HandleError:
 VOID OLD2TermFmp( const IFMP ifmp )
 {
     CDefragManager::Instance().DeregisterIfmp( ifmp );
+}
+
+VOID OLD2PauseTasks()
+{
+    CDefragManager::Instance().Pause();
+}
+
+VOID OLD2UnpauseTasks()
+{
+    CDefragManager::Instance().Unpause();
 }
 
 BOOL FOLDRunning( const IFMP ifmp )
@@ -5500,7 +5524,8 @@ VOID CDefragTask::SetPtabledefragment( CTableDefragment * const ptabledefragment
 }
 
 CDefragManager CDefragManager::s_instance;
-const char * const CDefragManager::szCriticalSectionName = "DefragManager";
+const char * const CDefragManager::szDefragManagerCriticalSectionName = "DefragManager";
+const char * const CDefragManager::szDefragPauseManagerCriticalSectionName = "DefragPauseManager";
 
 //  ================================================================
 CDefragManager& CDefragManager::Instance()
@@ -5512,7 +5537,8 @@ CDefragManager& CDefragManager::Instance()
 //  ================================================================
 CDefragManager::CDefragManager() :
 //  ================================================================
-    m_crit( CLockBasicInfo( CSyncBasicInfo( szCriticalSectionName ), rankDefragManager, 0 ) ),
+    m_crit( CLockBasicInfo( CSyncBasicInfo( szDefragManagerCriticalSectionName ), rankDefragManager, 0 ) ),
+    m_critPauseManager( CLockBasicInfo( CSyncBasicInfo( szDefragPauseManagerCriticalSectionName ), rankDefragPauseManager, 0 ) ),
     m_posttDispatchOsTimerTask( NULL ),
     m_fTimerScheduled( false ),
     m_cmsecPeriod( 0 /* real value set in ErrInit() */ ),
@@ -5521,7 +5547,8 @@ CDefragManager::CDefragManager() :
     m_ctasksIssued( 1 ),
     m_ctasksToIssueNext( 1 ),
     m_rgtasks( NULL ),
-    m_itaskLastIssued( 0 )
+    m_itaskLastIssued( 0 ),
+    m_ctasksMax( s_ctasksMaxDefault )
 {
     for( INT il = 0; il < m_clCompleted; ++il )
     {
@@ -5570,7 +5597,7 @@ VOID CDefragManager::Term()
 
     if( m_rgtasks )
     {
-        for( INT itask = 0; itask < s_ctasksMax; ++itask )
+        for( INT itask = 0; itask < s_ctasksMaxDefault; ++itask )
         {
             if( NULL != m_rgtasks[itask].Ptabledefragment() )
             {
@@ -5581,6 +5608,24 @@ VOID CDefragManager::Term()
 
     delete [] m_rgtasks;
     m_rgtasks = NULL;
+}
+
+//  ================================================================
+VOID CDefragManager::Pause()
+//  ================================================================
+{
+    ENTERCRITICALSECTION enterCrit( &m_critPauseManager );
+
+    m_ctasksMax = 0;
+}
+
+//  ================================================================
+VOID CDefragManager::Unpause()
+//  ================================================================
+{
+    ENTERCRITICALSECTION enterCrit( &m_critPauseManager );
+    
+    m_ctasksMax = s_ctasksMaxDefault;
 }
 
 typedef struct
@@ -5644,7 +5689,9 @@ ERR CDefragManager::ErrRegisterOneTreeOnly(
         {
             if( NULL == m_rgtasks )
             {
-                Alloc( m_rgtasks = new CDefragTask[s_ctasksMax] );
+                // Need to allocate enough for the maximum number of tasks instead
+                // of the dynamic m_ctasksMax
+                Alloc( m_rgtasks = new CDefragTask[s_ctasksMaxDefault] );
             }
             
             if( !FTableIsRegistered( ifmp, szTable, szIndex, defragtype ) )
@@ -5696,7 +5743,9 @@ ERR CDefragManager::ErrExplicitRegisterTableAndChildren(
         {
             if( NULL == m_rgtasks )
             {
-                Alloc( m_rgtasks = new CDefragTask[ s_ctasksMax ] );
+                // Need to allocate enough for the maximum number of tasks instead
+                // of the dynamic m_ctasksMax
+                Alloc( m_rgtasks = new CDefragTask[s_ctasksMaxDefault] );
             }
 
             if( !FTableIsRegistered( ifmp, szTable, NULL, defragtypeTable ) )
@@ -5731,7 +5780,7 @@ VOID CDefragManager::DeregisterInst( const INST * const pinst )
 
     if( m_rgtasks )
     {
-        for( INT itask = 0; itask < s_ctasksMax; ++itask )
+        for( INT itask = 0; itask < s_ctasksMaxDefault; ++itask )
         {
             if( NULL != m_rgtasks[itask].Ptabledefragment()
                 && pinst == PinstFromIfmp( m_rgtasks[itask].Ptabledefragment()->Ifmp() ) )
@@ -5751,7 +5800,7 @@ VOID CDefragManager::DeregisterIfmp( const IFMP ifmp )
 
     if( m_rgtasks )
     {
-        for( INT itask = 0; itask < s_ctasksMax; ++itask )
+        for( INT itask = 0; itask < s_ctasksMaxDefault; ++itask )
         {
             if( NULL != m_rgtasks[itask].Ptabledefragment()
                 && ifmp == m_rgtasks[itask].Ptabledefragment()->Ifmp() )
@@ -5795,17 +5844,29 @@ ERR CDefragManager::ErrTryAddTaskAtFreeSlot(
 
     Assert( defragtype != defragtypeLV );
 
-    for( INT itask = 0; itask < s_ctasksMax; ++itask )
+    m_critPauseManager.Enter();
+    
+    for( INT itask = 0; itask < m_ctasksMax; ++itask )
     {
         if( NULL == m_rgtasks[itask].Ptabledefragment() )
         {
             Assert( !fAdded );
-            Call( ErrAddTask_( ifmp, szTable, szIndex, defragtype, itask ) );
+            err = ErrAddTask_( ifmp, szTable, szIndex, defragtype, itask );
+
+            if ( err != JET_errSuccess )
+            {
+                break;
+            }
+
             EnsureTimerScheduled_();
             fAdded = fTrue;
             break;
         }
     }
+
+    m_critPauseManager.Leave();
+
+    Call( err );
 
     if( !fAdded )
     {
@@ -5814,7 +5875,7 @@ ERR CDefragManager::ErrTryAddTaskAtFreeSlot(
         Call( ErrPIBBeginSession( pinst, &ppib, procidNil, fFalse ) );
         Call( ErrDBOpenDatabaseByIfmp( ppib, ifmp ) );
         Call( OLD2_STATUS::ErrOpenOrCreateTable( ppib, ifmp, &pfucbDefragStatusState ) );
-        Call( ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szTable ) );
+        Call( ErrFILEOpenTable(ppib, ifmp, &pfucbTable, szTable) );
 
         if ( szIndex == NULL )
         {
@@ -5852,6 +5913,8 @@ ERR CDefragManager::ErrTryAddTaskAtFreeSlot(
         err = ErrERRCheck( wrnOLD2TaskSlotFull );
     }
 HandleError:
+    Assert( !m_critPauseManager.FOwner() );
+
     if ( pfucbNil != pfucbDefragStatusState )
     {
         CallS( ErrFILECloseTable( ppib, pfucbDefragStatusState ) );
@@ -5937,7 +6000,9 @@ bool CDefragManager::FTableIsRegistered(
     _In_ DEFRAGTYPE defragtype ) const
 //  ================================================================
 {
-    for( INT itask = 0; itask < s_ctasksMax; ++itask )
+    // Check all tasks, even ones that aren't currently running due
+    // to the pause, as they will resume once it is unpaused
+    for( INT itask = 0; itask < s_ctasksMaxDefault; ++itask )
     {
         if( NULL != m_rgtasks[itask].Ptabledefragment() )
         {
@@ -6022,7 +6087,6 @@ BOOL CDefragManager::FIssueTasks_( const INT ctasksToIssue )
     // the loop is structured this way so that all tasks will be run in a round-robin fashion
     // this is important because table deletion can be blocked until the task running against
     // that table executes
-    Assert( s_ctasksMax > 0 );
     const INT itaskStart = m_itaskLastIssued;
     INT itask = itaskStart;
     do
@@ -6062,7 +6126,7 @@ BOOL CDefragManager::FIssueTasks_( const INT ctasksToIssue )
                 }
             }
         }
-        itask = ( itask + 1 ) % s_ctasksMax;
+        itask = ( itask + 1 ) % s_ctasksMaxDefault;
     } while( itask != itaskStart );
 
     if ( !fInitTaskFound )
@@ -6133,14 +6197,18 @@ BOOL CDefragManager::FOsTimerTask_()
         m_ctasksToIssueNext = ctasksCompleted;
     }
 
-    // sanitize the variables   
-    ctasksToIssue = min( ctasksToIssue, s_ctasksMax );
+    m_critPauseManager.Enter();
+
+    // sanitize the variables
+    ctasksToIssue = min( ctasksToIssue, m_ctasksMax );
     ctasksToIssue = max( ctasksToIssue, 0 );
-    m_ctasksToIssueNext = min( m_ctasksToIssueNext, s_ctasksMax );
+    m_ctasksToIssueNext = min( m_ctasksToIssueNext, m_ctasksMax );
     m_ctasksToIssueNext = max( m_ctasksToIssueNext, 0 );
 
+    m_critPauseManager.Leave();
+
     const BOOL fRescheduleTask = FIssueTasks_( ctasksToIssue );
-    
+
     m_crit.Leave();
 
     return fRescheduleTask;
