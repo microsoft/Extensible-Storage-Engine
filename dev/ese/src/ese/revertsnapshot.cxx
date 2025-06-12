@@ -1373,6 +1373,12 @@ ERR CRevertSnapshot::ErrRBSRecordDbAttach( __in FMP* const pfmp )
 
     //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSRecordDbAttach(DBName - %ls, RBSEnabled - %d, m_fInitialized - %d, m_fInvalid - %d)\n", pfmp->WszDatabaseName(), BoolParam( m_pinst, JET_paramEnableRBS ), m_fInitialized, m_fInvalid ) );
 
+    // Skip capturing page preimages for temp db.
+    if ( pfmp->Dbid() == dbidTemp )
+    {
+        return JET_errSuccess;
+    }
+
     // If database doesn't support the revert snapshot format version, the revert snapshot shouldn't have been initialized to begin with.
     // TODO SOMEONE: Is it possible for a newly created db to not support even though existing databases support?
     if ( pfmp->ErrDBFormatFeatureEnabled( JET_efvRevertSnapshot ) < JET_errSuccess )
