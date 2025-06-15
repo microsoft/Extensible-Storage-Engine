@@ -751,4 +751,148 @@ ERR CSemaphorePerfTest::ErrTest()
     return JET_errSuccess;
 }
 
+//  Test fixture.
+
+class CSemaphoreFairnessTest : public UNITTEST
+{
+private:
+    static CSemaphoreFairnessTest s_instance;
+
+public:
+    const char * SzName() const;
+    const char * SzDescription() const;
+    bool FRunUnderESE98() const;
+    bool FRunUnderESENT() const;
+    bool FRunUnderESE97() const;
+    ERR ErrTest();
+    void TestCase( const LONG cThreads );
+};
+
+CSemaphoreFairnessTest CSemaphoreFairnessTest::s_instance;
+
+const char * CSemaphoreFairnessTest::SzName() const
+{
+    return "CSemaphoreFairnessTest";
+};
+
+const char * CSemaphoreFairnessTest::SzDescription() const
+{
+    return "Tests the CSemaphore for fairness.";
+}
+
+bool CSemaphoreFairnessTest::FRunUnderESE98() const
+{
+    return true;
+}
+
+bool CSemaphoreFairnessTest::FRunUnderESENT() const
+{
+    return true;
+}
+
+bool CSemaphoreFairnessTest::FRunUnderESE97() const
+{
+    return true;
+}
+
+struct CSemaphoreFairnessTestContext
+{
+    HANDLE hThread;
+    CSemaphore *pSemaphore;
+    BOOL bAggressive;
+    volatile ULONG *pulExit;
+    volatile ULONG ulAcquire;
+};
+
+static DWORD WINAPI FairnessTestThread( LPVOID pvContext )
+{
+    CSemaphoreFairnessTestContext *pContext = (CSemaphoreFairnessTestContext*)pvContext;
+
+    while ( !InterlockedCompareExchange( pContext->pulExit, 0, 0 ) )
+    {
+        if ( pContext->bAggressive )
+        {
+            pContext->pSemaphore->Acquire();
+            InterlockedIncrement( &pContext->ulAcquire );
+            Sleep(1);
+            pContext->pSemaphore->Release();
+        }
+        else
+        {
+            Sleep(1);
+            pContext->pSemaphore->Acquire();
+            InterlockedIncrement( &pContext->ulAcquire );
+            pContext->pSemaphore->Release();
+        }
+    }
+
+    return ERROR_SUCCESS;
+}
+
+ERR CSemaphoreFairnessTest::ErrTest()
+{
+    TestAssert( FOSSyncPreinit() );
+
+    TestCase( 2 );
+    TestCase( 3 );
+    TestCase( 4 );
+    TestCase( 6 );
+    TestCase( 8 );
+
+    OSSyncPostterm();
+
+    return JET_errSuccess;
+}
+
+void CSemaphoreFairnessTest::TestCase( const LONG cThreads )
+{
+    CSemaphore semaphore( CSyncBasicInfo( "CSemaphoreFairnessTest" ) );
+    volatile ULONG ulExit = 0;
+
+    CSemaphoreFairnessTestContext *pContexts = new CSemaphoreFairnessTestContext[cThreads];
+    for ( LONG i = 0; i < cThreads; i++ )
+    {
+        CSemaphoreFairnessTestContext *pContext = &pContexts[i];
+
+        memset( pContext, 0, sizeof(*pContext) );
+        pContext->pSemaphore = &semaphore;
+        pContext->pulExit = &ulExit;
+        pContext->bAggressive = i % 2;
+        pContext->hThread = CreateThread( NULL, 0, FairnessTestThread, pContext, 0, NULL );
+        TestAssert( pContext->hThread );
+    }
+
+    semaphore.Release( 1 );
+    Sleep( 3 * 1000 );
+    InterlockedExchange( &ulExit, 1 );
+
+    ULONG ulAcquireMin = ULONG_MAX;
+    ULONG ulAcquireMax = 0;
+    for ( LONG i = 0; i < cThreads; i++ )
+    {
+        CSemaphoreFairnessTestContext *pContext = &pContexts[i];
+
+        TestAssert( WaitForSingleObject( pContext->hThread, INFINITE ) == WAIT_OBJECT_0 );
+        TestAssert( CloseHandle( pContext->hThread ) );
+
+        if ( pContext->ulAcquire < ulAcquireMin )
+        {
+            ulAcquireMin = pContext->ulAcquire;
+        }
+
+        if ( pContext->ulAcquire > ulAcquireMax )
+        {
+            ulAcquireMax = pContext->ulAcquire;
+        }
+
+        wprintf( L"\t%lu", pContext->ulAcquire );
+    }
+
+    wprintf( L"\n" );
+
+    TestAssert( ulAcquireMax < ulAcquireMin * 4 );
+
+    delete[] pContexts;
+}
+
 
