@@ -316,6 +316,10 @@ extern const INT cbCacheLine;
 
 extern BOOL g_fSyncProcessAbort;
 
+//    system max spin count
+
+extern INT g_cSpinMax;
+
 
 //  Atomic Memory Manipulations
 
@@ -1974,40 +1978,28 @@ class CSemaphoreState
 
         //    ctors / dtors
 
-        CSemaphoreState( const CSyncStateInitNull& null ) : m_cAvail( 0 ) {}
-        CSemaphoreState( const INT cAvail );
-        CSemaphoreState( const INT cWait, const INT irksem );
-        CSemaphoreState( const CSemaphoreState& state )
-        {
-            // This copy constructor is required because the default copy constructor tries to copy all members of the union
-            // on top of each other, which is a problem because atomicity is a requirement when copying sync state objects.
-            C_ASSERT( OffsetOf( CSemaphoreState, m_irksem ) == OffsetOf( CSemaphoreState, m_cAvail ) );
-            C_ASSERT( OffsetOf( CSemaphoreState, m_cWaitNeg ) > OffsetOf( CSemaphoreState, m_cAvail ) );
-            C_ASSERT( ( OffsetOf( CSemaphoreState, m_cWaitNeg ) + sizeof ( m_cWaitNeg ) ) <= ( OffsetOf( CSemaphoreState, m_cAvail ) + sizeof ( m_cAvail ) ) );
-            m_cAvail = state.m_cAvail;
-        }
+        CSemaphoreState( const CSyncStateInitNull& null ) : m_cAvail( 0 ), m_cWait( 0 ) {}
+        CSemaphoreState( const INT cAvail, const INT cWait ) : m_cAvail( cAvail ), m_cWait( cWait ) {}
+        CSemaphoreState( const CSemaphoreState& state ) : m_qwState( AtomicRead( (QWORD*)&state.m_qwState ) ) {}
         ~CSemaphoreState() {}
 
         //    operators
 
-        CSemaphoreState& operator=( CSemaphoreState& state ) { m_cAvail = state.m_cAvail;  return *this; }
+        CSemaphoreState& operator=( CSemaphoreState& state ) { m_qwState = AtomicRead( (QWORD*)&state.m_qwState );  return *this; }
 
         //    manipulators
 
         const BOOL FChange( const CSemaphoreState& stateCur, const CSemaphoreState& stateNew );
-        const BOOL FIncAvail( const INT cToInc );
+        void IncAvail( const INT cToInc );
         const BOOL FDecAvail();
+        void IncWait();
+        void DecWait();
 
         //    accessors
 
-        const BOOL FNoWait() const { return m_cAvail >= 0; }
-        const BOOL FWait() const { return m_cAvail < 0; }
-        const BOOL FAvail() const { return m_cAvail > 0; }
-        const BOOL FNoWaitAndNoAvail() const { return m_cAvail == 0; }
-
-        const INT CAvail() const { OSSYNCAssert( FNoWait() ); return m_cAvail; }
-        const INT CWait() const { OSSYNCAssert( FWait() ); return -m_cWaitNeg; }
-        const CKernelSemaphorePool::IRKSEM Irksem() const { OSSYNCAssert( FWait() ); return CKernelSemaphorePool::IRKSEM( m_irksem ); }
+        const INT CAvail() const { return m_cAvail; }
+        const INT CWait() const { return m_cWait; }
+        volatile LONG * GetAvailAddress() { return &m_cAvail; }
 
         //    debugging support
 
@@ -2017,129 +2009,33 @@ class CSemaphoreState
 
         //  data members
 
-        //    transacted state representation (switched on bit 31)
+        //    transacted state representation
 
         union
         {
-            //  Mode 0:  no waiters
-
-            volatile LONG       m_cAvail;       //  0 <= m_cAvail <= ( 1 << 31 ) - 1
-
-            //  Mode 1:  waiters
+            volatile QWORD      m_qwState;
 
             struct
             {
-                volatile USHORT m_irksem;       //  0 <= m_irksem <= ( 1 << 16 ) - 2
-                volatile SHORT  m_cWaitNeg;     //  -( ( 1 << 15 ) - 1 ) <= m_cWaitNeg <= -1
+                volatile LONG   m_cAvail;
+                volatile LONG   m_cWait;
             };
         };
 };
-
-//  ctor
-
-inline CSemaphoreState::CSemaphoreState( const INT cAvail )
-{
-    //  validate IN args
-
-    OSSYNCAssert( cAvail >= 0 );
-    OSSYNCAssert( cAvail <= 0x7FFFFFFF );
-
-    //  set available count
-
-    m_cAvail = LONG( cAvail );
-}
-
-//  ctor
-
-inline CSemaphoreState::CSemaphoreState( const INT cWait, const INT irksem )
-{
-    //  validate IN args
-
-    OSSYNCAssert( cWait > 0 );
-    OSSYNCAssert( cWait <= 0x7FFF );
-    OSSYNCAssert( irksem >= 0 );
-    OSSYNCAssert( irksem <= 0xFFFE );
-
-    //  set waiter count
-
-    m_cWaitNeg = SHORT( -cWait );
-
-    //  set semaphore
-
-    m_irksem = (USHORT) irksem;
-}
 
 //  changes the transacted state of the semaphore using a transacted memory
 //  compare/exchange operation, returning fFalse on failure
 
 inline const BOOL CSemaphoreState::FChange( const CSemaphoreState& stateCur, const CSemaphoreState& stateNew )
 {
-    return AtomicCompareExchange( (LONG*)&m_cAvail, stateCur.m_cAvail, stateNew.m_cAvail ) == stateCur.m_cAvail;
+    return AtomicCompareExchange( (QWORD*)&m_qwState, stateCur.m_qwState, stateNew.m_qwState ) == stateCur.m_qwState;
 }
 
-//  tries to increase the available count on the semaphore by the count
-//  given using a transacted memory compare/exchange operation, returning fFalse
-//  on failure
+//  atomically increase the available count on the semaphore by the count given
 
-__forceinline const BOOL CSemaphoreState::FIncAvail( const INT cToInc )
+__forceinline void CSemaphoreState::IncAvail( const INT cToInc )
 {
-    //  try forever to change the state of the semaphore
-
-    OSSYNC_FOREVER
-    {
-        //  get current value
-
-        const LONG cAvail = m_cAvail;
-
-        //  munge start value such that the transaction will only work if we are in
-        //  mode 0 (we do this to save a branch)
-
-        const LONG cAvailStart = cAvail & 0x7FFFFFFF;
-
-        //  compute end value relative to munged start value
-
-        const LONG cAvailEnd = cAvailStart + cToInc;
-
-        //  validate transaction
-
-        OSSYNCAssert( cAvail < 0 || ( cAvailStart >= 0 && cAvailEnd <= 0x7FFFFFFF && cAvailEnd == cAvailStart + cToInc ) );
-
-        //  attempt the transaction
-
-        const LONG cAvailOld = AtomicCompareExchange( (LONG*)&m_cAvail, cAvailStart, cAvailEnd );
-
-        //  the transaction succeeded
-
-        if ( cAvailOld == cAvailStart )
-        {
-            //  return success
-
-            return fTrue;
-        }
-
-        //  the transaction failed
-
-        else
-        {
-            //  the transaction failed because of a collision with another context
-
-            if ( cAvailOld >= 0 )
-            {
-                //  try again
-
-                continue;
-            }
-
-            //  the transaction failed because there are waiters
-
-            else
-            {
-                //  return failure
-
-                return fFalse;
-            }
-        }
-    }
+    AtomicExchangeAdd( (LONG*)&m_cAvail, cToInc );
 }
 
 //  tries to decrease the available count on the semaphore by one using a
@@ -2155,61 +2051,38 @@ __forceinline const BOOL CSemaphoreState::FDecAvail()
 
         const LONG cAvail = m_cAvail;
 
-        //  this function has no effect on 0x80000000, so this MUST be an illegal
-        //  value!
+        //  see if we have an available count
 
-        OSSYNCAssert( cAvail != 0x80000000 );
-
-        //  munge end value such that the transaction will only work if we are in
-        //  mode 0 and we have at least one available count (we do this to save a
-        //  branch)
-
-        const LONG cAvailEnd = ( cAvail - 1 ) & 0x7FFFFFFF;
-
-        //  compute start value relative to munged end value
-
-        const LONG cAvailStart = cAvailEnd + 1;
-
-        //  validate transaction
-
-        OSSYNCAssert( cAvail <= 0 || ( cAvailStart > 0 && cAvailEnd >= 0 && cAvailEnd == cAvail - 1 ) );
-
-        //  attempt the transaction
-
-        const LONG cAvailOld = AtomicCompareExchange( (LONG*)&m_cAvail, cAvailStart, cAvailEnd );
-
-        //  the transaction succeeded
-
-        if ( cAvailOld == cAvailStart )
+        if ( cAvail == 0 )
         {
-            //  return success
+            //  we do not have an available count, return failure
+
+            return fFalse;
+        }
+
+        //  we have an available count, attempt the transaction
+
+        else if ( AtomicCompareExchange( (LONG*)&m_cAvail, cAvail, cAvail - 1 ) == cAvail )
+        {
+            //  the transaction succeeded, return success
 
             return fTrue;
         }
-
-        //  the transaction failed
-
-        else
-        {
-            //  the transaction failed because of a collision with another context
-
-            if ( cAvailOld > 0 )
-            {
-                //  try again
-
-                continue;
-            }
-
-            //  the transaction failed because there are no available counts
-
-            else
-            {
-                //  return failure
-
-                return fFalse;
-            }
-        }
     }
+}
+
+//  atomically increment the number of waiters
+
+__forceinline void CSemaphoreState::IncWait()
+{
+    AtomicIncrement( (LONG*)&m_cWait );
+}
+
+//  atomically decrement the number of waiters
+
+__forceinline void CSemaphoreState::DecWait()
+{
+    AtomicDecrement( (LONG*)&m_cWait );
 }
 
 
@@ -2257,9 +2130,15 @@ class CSemaphore
 
         //    manipulators
 
-        const BOOL _FAcquire( const INT cmsecTimeout );
-        const BOOL _FWait( const INT cmsecTimeout );
+        static const DWORD _DwOSTimeout( const INT cmsecTimeout );
+
+        //  NOTE:  all private methods use the OS level (DWORD) timeout values
+
+        const BOOL _FTryAcquire( const INT cSpin );
+        const BOOL _FAcquire( const DWORD dwTimeout );
         void _Release( const INT cToRelease );
+        const BOOL _FWait( const LONG cAvail, const DWORD dwTimeout );
+        const BOOL _FOSWait( const LONG cAvail, const DWORD dwTimeout );
 };
 
 //  acquire one count of the semaphore, waiting forever if necessary
@@ -2288,29 +2167,20 @@ inline void CSemaphore::Wait()
 
 inline const BOOL CSemaphore::FTryAcquire()
 {
-    //  only try to perform a simple decrement of the available count
-
-    const BOOL fAcquire = State().FDecAvail();
-
-    //  we did not acquire the semaphore
-
-    if ( !fAcquire )
+    if ( _FTryAcquire( 0 ) )
     {
-        //  this is a contention
-
-        State().SetContend();
-    }
-
-    //  we did acquire the semaphore
-
-    else
-    {
-        //  note that we acquired a count
+        //  we successfully acquired the semaphore
 
         State().SetAcquire();
+        return fTrue;
     }
+    else
+    {
+        //  we did not acquire the semaphore, this is a contention
 
-    return fAcquire;
+        State().SetContend();
+        return fFalse;
+    }
 }
 
 //  acquire one count of the semaphore, waiting only for the specified interval.
@@ -2321,7 +2191,20 @@ inline const BOOL CSemaphore::FAcquire( const INT cmsecTimeout )
     //  first try to quickly grab an available count.  if that doesn't work,
     //  retry acquiring using the full state machine
 
-    return FTryAcquire() || _FAcquire( cmsecTimeout );
+    if ( _FTryAcquire( g_cSpinMax ) || _FAcquire( _DwOSTimeout( cmsecTimeout ) ) )
+    {
+        //  we successfully acquired the semaphore
+
+        State().SetAcquire();
+        return fTrue;
+    }
+    else
+    {
+        //  we did not acquire the semaphore, this is a contention
+
+        State().SetContend();
+        return fFalse;
+    }
 }
 
 //  wait for the semaphore to become available without acquiring it, waiting only for the specified interval.
@@ -2330,10 +2213,32 @@ inline const BOOL CSemaphore::FAcquire( const INT cmsecTimeout )
 
 inline const BOOL CSemaphore::FWait( const INT cmsecTimeout )
 {
-    //  first try to quickly check for an available count.  if that doesn't work,
-    //  retry waiting using the full state machine
+    //  first try to quickly check for an available count
 
-    return ( CAvail() > 0 ) || _FWait( cmsecTimeout );
+    if ( State().CAvail() > 0 )
+    {
+        return fTrue;
+    }
+
+    //  if that doesn't work, try to grab an available count without spinning.
+    //  if that also doesn't work, attempt acquiring using the full state machine
+
+    if ( _FTryAcquire( 0 ) || _FAcquire( _DwOSTimeout( cmsecTimeout ) ) )
+    {
+        //  we successfully acquired the semaphore, release it
+
+        _Release( 1 );
+
+        State().SetAcquire();
+        return fTrue;
+    }
+    else
+    {
+        //  we did not acquire the semaphore, this is a contention
+
+        State().SetContend();
+        return fFalse;
+    }
 }
 
 //  releases the given number of counts to the semaphore, waking the appropriate
@@ -2341,40 +2246,91 @@ inline const BOOL CSemaphore::FWait( const INT cmsecTimeout )
 
 inline void CSemaphore::Release( const INT cToRelease )
 {
-    //  we failed to perform a simple increment of the available count
-
-    if ( !State().FIncAvail( cToRelease ) )
-    {
-        //  retry release using the full state machine
-
-        _Release( cToRelease );
-    }
+    _Release( cToRelease );
 }
 
 //  returns the number of execution contexts waiting on the semaphore
 
 inline const INT CSemaphore::CWait() const
 {
-    //  read the current state of the semaphore
+    //  try forever until we get a non-transitional state
 
-    const CSemaphoreState stateCur = (CSemaphoreState&) State();
+    OSSYNC_FOREVER
+    {
+        //  read the current state of the semaphore
 
-    //  return the waiter count
+        const CSemaphoreState stateCur = (CSemaphoreState&) State();
 
-    return stateCur.FWait() ? stateCur.CWait() : 0;
+        if ( stateCur.CAvail() > 0 && stateCur.CWait() > 0 )
+        {
+            //  the existing waiters are in transition, retry
+
+            continue;
+        }
+        else
+        {
+            //  return the waiter count
+
+            return stateCur.CWait();
+        }
+    }
 }
 
 //  returns the number of available counts on the semaphore
 
 inline const INT CSemaphore::CAvail() const
 {
-    //  read the current state of the semaphore
+    return State().CAvail();
+}
 
-    const CSemaphoreState stateCur = (CSemaphoreState&) State();
+//  try to acquire one count of the semaphore, entering a loop which iterates
+//  up to cSpin times.  returns fFalse if a count could not be acquired
 
-    //  return the available count
+inline const BOOL CSemaphore::_FTryAcquire( const INT cSpin )
+{
+    INT cSpinRemaining = cSpin;
 
-    return stateCur.FNoWait() ? stateCur.CAvail() : 0;
+    //  try forever to acquire the semaphore
+
+    OSSYNC_FOREVER
+    {
+        //  read the current state of the semaphore
+
+        const CSemaphoreState stateCur = (CSemaphoreState&) State();
+
+        //  see if we have an available count
+        //
+        //  NOTE:  we do not acquire the semaphore with waiting threads to
+        //  avoid stealing it from those waiting threads themselves
+
+        if ( stateCur.CAvail() == 0 || stateCur.CWait() > 0 )
+        {
+            if ( cSpinRemaining )
+            {
+                //  we do not have an available count, but can keep spinning
+
+                cSpinRemaining--;
+
+                continue;
+            }
+            else
+            {
+                //  we do not have an available count and have reached the
+                //  spin limit, return failure
+
+                return fFalse;
+            }
+        }
+
+        //  we have an available count, attempt the transaction
+
+        else if ( State().FDecAvail() )
+        {
+            //  the transaction succeeded, return success
+
+            return fTrue;
+        }
+    }
 }
 
 

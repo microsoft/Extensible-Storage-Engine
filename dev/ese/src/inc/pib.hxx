@@ -537,7 +537,7 @@ public:
 #ifdef _WIN64
 C_ASSERT( sizeof(PIB) == 608 );
 #else  //  !_WIN64
-C_ASSERT( sizeof(PIB) == 504 );
+C_ASSERT( sizeof(PIB) == 528 );
 #endif  //  _WIN64
 
 INLINE SIZE_T OffsetOfTrxOldestILE()    { return OffsetOf( PIB, m_ileTrxOldest ); }

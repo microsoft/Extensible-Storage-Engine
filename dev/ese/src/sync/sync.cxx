@@ -332,492 +332,6 @@ CSyncPerfAcquire::~CSyncPerfAcquire()
 }
 
 
-//  Semaphore
-
-//  ctor
-
-CSemaphore::CSemaphore( const CSyncBasicInfo& sbi )
-    :   CEnhancedStateContainer< CSemaphoreState, CSyncStateInitNull, CSemaphoreInfo, CSyncBasicInfo >( syncstateNull, sbi )
-{
-    //  further init of CSyncBasicInfo
-
-    State().SetTypeName( "CSemaphore" );
-    State().SetInstance( (CSyncObject*)this );
-}
-
-//  dtor
-
-CSemaphore::~CSemaphore()
-{
-#ifdef SYNC_ANALYZE_PERFORMANCE
-#ifdef SYNC_DUMP_PERF_DATA
-
-    //  dump performance data
-
-    OSSyncStatsDump(    State().SzTypeName(),
-                        State().SzInstanceName(),
-                        State().Instance(),
-                        (DWORD)-1,
-                        State().CWaitTotal(),
-                        State().CsecWaitElapsed(),
-                        State().CAcquireTotal(),
-                        State().CContendTotal(),
-                        0,
-                        0 );
-
-#endif  //  SYNC_DUMP_PERF_DATA
-#endif  //  SYNC_ANALYZE_PERFORMANCE
-}
-
-//  releases all waiters on the semaphore
-
-void CSemaphore::ReleaseAllWaiters()
-{
-    //  try forever until we successfully change the state of the semaphore
-
-    OSSYNC_FOREVER
-    {
-        //  read the current state of the semaphore
-
-        const CSemaphoreState stateCur = State();
-
-        //  there are no waiters
-
-        if ( stateCur.FNoWait() )
-        {
-            //  we're done
-
-            return;
-        }
-
-        //  there are waiters
-
-        else
-        {
-            OSSYNCAssert( stateCur.FWait() );
-
-            //  we successfully changed the semaphore to have an available count
-            //  of zero
-
-            if ( State().FChange( stateCur, CSemaphoreState( 0 ) ) )
-            {
-                //  release all waiters
-
-                g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Release( stateCur.CWait() );
-
-                //  we're done
-
-                return;
-            }
-        }
-    }
-}
-
-//  attempts to acquire a count from the semaphore, returning fFalse if unsuccessful
-//  in the time permitted.  Infinite and Test-Only timeouts are supported.
-
-const BOOL CSemaphore::_FAcquire( const INT cmsecTimeout )
-{
-    //  if we spin, we will spin for the full amount recommended by the OS
-
-    INT cSpin = g_cSpinMax;
-
-    //  we start with no kernel semaphore allocated
-
-    CKernelSemaphorePool::IRKSEM irksemAlloc = CKernelSemaphorePool::irksemNil;
-
-    //  try forever until we successfully change the state of the semaphore
-
-    OSSYNC_FOREVER
-    {
-        //  read the current state of the semaphore
-
-        const CSemaphoreState stateCur = (CSemaphoreState&) State();
-
-        //  there is an available count
-
-        if ( stateCur.FAvail() )
-        {
-            //  we successfully took a count
-
-            if ( State().FChange( stateCur, CSemaphoreState( stateCur.CAvail() - 1 ) ) )
-            {
-                //  if we allocated a kernel semaphore, release it
-
-                if ( irksemAlloc != CKernelSemaphorePool::irksemNil )
-                {
-                    g_ksempoolGlobal.Unreference( irksemAlloc );
-                }
-
-                //  return success
-
-                State().SetAcquire();
-                return fTrue;
-            }
-        }
-
-        //  there is no available count and we still have spins left
-
-        else if ( cSpin )
-        {
-            //  spin once and try again
-
-            cSpin--;
-            continue;
-        }
-
-        //  there are no waiters and no available counts
-
-        else if ( stateCur.FNoWaitAndNoAvail() )
-        {
-            //  allocate and reference a kernel semaphore if we haven't already
-
-            if ( irksemAlloc == CKernelSemaphorePool::irksemNil )
-            {
-                irksemAlloc = g_ksempoolGlobal.Allocate( this );
-            }
-
-            //  we successfully installed ourselves as the first waiter
-
-            if ( State().FChange( stateCur, CSemaphoreState( 1, irksemAlloc ) ) )
-            {
-                //  wait for next available count on semaphore
-
-                State().StartWait();
-                const BOOL fCompleted = g_ksempoolGlobal.Ksem( irksemAlloc, this ).FAcquire( cmsecTimeout );
-                State().StopWait();
-
-                //  our wait completed
-
-                if ( fCompleted )
-                {
-                    //  unreference the kernel semaphore
-
-                    g_ksempoolGlobal.Unreference( irksemAlloc );
-
-                    //  we successfully acquired a count
-
-                    State().SetAcquire();
-                    return fTrue;
-                }
-
-                //  our wait timed out
-
-                else
-                {
-                    //  try forever until we successfully change the state of the semaphore
-
-                    OSSYNC_INNER_FOREVER
-                    {
-                        //  read the current state of the semaphore
-
-                        const CSemaphoreState stateAfterWait = (CSemaphoreState&) State();
-
-                        //  there are no waiters or the kernel semaphore currently
-                        //  in the semaphore is not the same as the one we allocated
-
-                        if ( stateAfterWait.FNoWait() || stateAfterWait.Irksem() != irksemAlloc )
-                        {
-                            //  the kernel semaphore we allocated is no longer in
-                            //  use, so another context released it.  this means that
-                            //  there is a count on the kernel semaphore that we must
-                            //  absorb, so we will
-
-                            //  NOTE:  we could end up blocking because the releasing
-                            //  context may not have released the semaphore yet
-
-                            g_ksempoolGlobal.Ksem( irksemAlloc, this ).Acquire();
-
-                            //  unreference the kernel semaphore
-
-                            g_ksempoolGlobal.Unreference( irksemAlloc );
-
-                            //  we successfully acquired a count
-
-                            return fTrue;
-                        }
-
-                        //  there is one waiter and the kernel semaphore currently
-                        //  in the semaphore is the same as the one we allocated
-
-                        else if ( stateAfterWait.CWait() == 1 )
-                        {
-                            OSSYNCAssert( stateAfterWait.FWait() );
-                            OSSYNCAssert( stateAfterWait.Irksem() == irksemAlloc );
-
-                            //  we successfully changed the semaphore to have no
-                            //  available counts and no waiters
-
-                            if ( State().FChange( stateAfterWait, CSemaphoreState( 0 ) ) )
-                            {
-                                //  unreference the kernel semaphore
-
-                                g_ksempoolGlobal.Unreference( irksemAlloc );
-
-                                //  we did not successfully acquire a count
-
-                                return fFalse;
-                            }
-                        }
-
-                        //  there are many waiters and the kernel semaphore currently
-                        //  in the semaphore is the same as the one we allocated
-
-                        else
-                        {
-                            OSSYNCAssert( stateAfterWait.CWait() > 1 );
-                            OSSYNCAssert( stateAfterWait.FWait() );
-                            OSSYNCAssert( stateAfterWait.Irksem() == irksemAlloc );
-
-                            //  we successfully reduced the number of waiters on the
-                            //  semaphore by one
-
-                            if ( State().FChange( stateAfterWait, CSemaphoreState( stateAfterWait.CWait() - 1, stateAfterWait.Irksem() ) ) )
-                            {
-                                //  unreference the kernel semaphore
-
-                                g_ksempoolGlobal.Unreference( irksemAlloc );
-
-                                //  we did not successfully acquire a count
-
-                                return fFalse;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        //  there are waiters
-
-        else
-        {
-            OSSYNCAssert( stateCur.FWait() );
-
-            //  reference the kernel semaphore already in use
-
-            g_ksempoolGlobal.Reference( stateCur.Irksem() );
-
-            //  we successfully added ourself as another waiter
-
-            if ( State().FChange( stateCur, CSemaphoreState( stateCur.CWait() + 1, stateCur.Irksem() ) ) )
-            {
-                //  if we allocated a kernel semaphore, unreference it
-
-                if ( irksemAlloc != CKernelSemaphorePool::irksemNil )
-                {
-                    g_ksempoolGlobal.Unreference( irksemAlloc );
-                }
-
-                //  wait for next available count on semaphore
-
-                State().StartWait();
-                const BOOL fCompleted = g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).FAcquire( cmsecTimeout );
-                State().StopWait();
-
-                //  our wait completed
-
-                if ( fCompleted )
-                {
-                    //  unreference the kernel semaphore
-
-                    g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-
-                    //  we successfully acquired a count
-
-                    State().SetAcquire();
-                    return fTrue;
-                }
-
-                //  our wait timed out
-
-                else
-                {
-                    //  try forever until we successfully change the state of the semaphore
-
-                    OSSYNC_INNER_FOREVER
-                    {
-                        //  read the current state of the semaphore
-
-                        const CSemaphoreState stateAfterWait = (CSemaphoreState&) State();
-
-                        //  there are no waiters or the kernel semaphore currently
-                        //  in the semaphore is not the same as the one we waited on
-
-                        if ( stateAfterWait.FNoWait() || stateAfterWait.Irksem() != stateCur.Irksem() )
-                        {
-                            //  the kernel semaphore we waited on is no longer in
-                            //  use, so another context released it.  this means that
-                            //  there is a count on the kernel semaphore that we must
-                            //  absorb, so we will
-
-                            //  NOTE:  we could end up blocking because the releasing
-                            //  context may not have released the semaphore yet
-
-                            g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Acquire();
-
-                            //  unreference the kernel semaphore
-
-                            g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-
-                            //  we successfully acquired a count
-
-                            return fTrue;
-                        }
-
-                        //  there is one waiter and the kernel semaphore currently
-                        //  in the semaphore is the same as the one we waited on
-
-                        else if ( stateAfterWait.CWait() == 1 )
-                        {
-                            OSSYNCAssert( stateAfterWait.FWait() );
-                            OSSYNCAssert( stateAfterWait.Irksem() == stateCur.Irksem() );
-
-                            //  we successfully changed the semaphore to have no
-                            //  available counts and no waiters
-
-                            if ( State().FChange( stateAfterWait, CSemaphoreState( 0 ) ) )
-                            {
-                                //  unreference the kernel semaphore
-
-                                g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-
-                                //  we did not successfully acquire a count
-
-                                return fFalse;
-                            }
-                        }
-
-                        //  there are many waiters and the kernel semaphore currently
-                        //  in the semaphore is the same as the one we waited on
-
-                        else
-                        {
-                            OSSYNCAssert( stateAfterWait.CWait() > 1 );
-                            OSSYNCAssert( stateAfterWait.FWait() );
-                            OSSYNCAssert( stateAfterWait.Irksem() == stateCur.Irksem() );
-
-                            //  we successfully reduced the number of waiters on the
-                            //  semaphore by one
-
-                            if ( State().FChange( stateAfterWait, CSemaphoreState( stateAfterWait.CWait() - 1, stateAfterWait.Irksem() ) ) )
-                            {
-                                //  unreference the kernel semaphore
-
-                                g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-
-                                //  we did not successfully acquire a count
-
-                                return fFalse;
-                            }
-                        }
-                    }
-                }
-            }
-
-            //  unreference the kernel semaphore
-
-            g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-        }
-    }
-}
-
-//  attempts to wait for an available a count from the semaphore, returning
-//  fFalse if unsuccessful in the time permitted or fTrue if one is available.
-//  Infinite and Test-Only timeouts are supported. This method does not acquire
-//  a resource, just waits for an available one. CAvail() may decrease for short
-//  amount of time if we need to go for the full state machine to wait on a kernel
-//  semaphore.
-
-const BOOL CSemaphore::_FWait( const INT cmsecTimeout )
-{
-    if ( _FAcquire( cmsecTimeout ) )
-    {
-        Release();
-        return fTrue;
-    }
-
-    return fFalse;
-}
-
-//  releases the given number of counts to the semaphore, waking the appropriate
-//  number of waiters
-
-void CSemaphore::_Release( const INT cToRelease )
-{
-    //  try forever until we successfully change the state of the semaphore
-
-    OSSYNC_FOREVER
-    {
-        //  read the current state of the semaphore
-
-        const CSemaphoreState stateCur = State();
-
-        //  there are no waiters
-
-        if ( stateCur.FNoWait() )
-        {
-            //  we successfully added the count to the semaphore
-
-            if ( State().FChange( stateCur, CSemaphoreState( stateCur.CAvail() + cToRelease ) ) )
-            {
-                //  we're done
-
-                return;
-            }
-        }
-
-        //  there are waiters
-
-        else
-        {
-            OSSYNCAssert( stateCur.FWait() );
-
-            //  we are releasing more counts than waiters (or equal to)
-
-            if ( stateCur.CWait() <= cToRelease )
-            {
-                //  we successfully changed the semaphore to have an available count
-                //  that is equal to the specified release count minus the number of
-                //  waiters to release
-
-                if ( State().FChange( stateCur, CSemaphoreState( cToRelease - stateCur.CWait() ) ) )
-                {
-                    //  release all waiters
-
-                    g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Release( stateCur.CWait() );
-
-                    //  we're done
-
-                    return;
-                }
-            }
-
-            //  we are releasing less counts than waiters
-
-            else
-            {
-                OSSYNCAssert( stateCur.CWait() > cToRelease );
-
-                //  we successfully reduced the number of waiters on the semaphore by
-                //  the number specified
-
-                if ( State().FChange( stateCur, CSemaphoreState( stateCur.CWait() - cToRelease, stateCur.Irksem() ) ) )
-                {
-                    //  release the specified number of waiters
-
-                    g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Release( cToRelease );
-
-                    //  we're done
-
-                    return;
-                }
-            }
-        }
-    }
-}
-
-
 //  Auto-Reset Signal
 
 //  ctor
@@ -4303,6 +3817,325 @@ void CKernelSemaphore::Release( const INT cToRelease )
 }
 
 
+//  Semaphore
+
+//  ctor
+
+CSemaphore::CSemaphore( const CSyncBasicInfo& sbi )
+    :   CEnhancedStateContainer< CSemaphoreState, CSyncStateInitNull, CSemaphoreInfo, CSyncBasicInfo >( syncstateNull, sbi )
+{
+    //  further init of CSyncBasicInfo
+
+    State().SetTypeName( "CSemaphore" );
+    State().SetInstance( (CSyncObject*)this );
+}
+
+//  dtor
+
+CSemaphore::~CSemaphore()
+{
+#ifdef SYNC_ANALYZE_PERFORMANCE
+#ifdef SYNC_DUMP_PERF_DATA
+
+    //  dump performance data
+
+    OSSyncStatsDump(    State().SzTypeName(),
+                        State().SzInstanceName(),
+                        State().Instance(),
+                        (DWORD)-1,
+                        State().CWaitTotal(),
+                        State().CsecWaitElapsed(),
+                        State().CAcquireTotal(),
+                        State().CContendTotal(),
+                        0,
+                        0 );
+
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
+}
+
+//  converts the internal timeout value to an OS level timeout
+
+const DWORD CSemaphore::_DwOSTimeout( const INT cmsecTimeout )
+{
+    if ( cmsecTimeout == cmsecInfinite || cmsecTimeout == cmsecInfiniteNoDeadlock )
+    {
+        return INFINITE;
+    }
+    else if ( cmsecTimeout >= 0 )
+    {
+        return cmsecTimeout;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+//  attempts to acquire a count from the semaphore, returning fFalse if unsuccessful
+//  in the time permitted
+
+const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
+{
+    const DWORD dwStart = DwOSSyncITickTime();
+    DWORD dwRemaining = dwTimeout;
+
+    //  try forever until we successfully change the state of the semaphore
+
+    State().IncWait();
+    OSSYNC_FOREVER
+    {
+        //  read the current state of the semaphore
+
+        const CSemaphoreState stateCur = (CSemaphoreState&) State();
+
+        //  see if we have an available count
+
+        if ( stateCur.CAvail() > 0 )
+        {
+            //  we ourselves are waiting on the semaphore, so there had better be at least
+            //  one waiter in the state
+
+            OSSYNCAssert( stateCur.CWait() > 0 );
+
+            //  try to atomically acquire the semaphore and decrement the number of waiters
+
+            const CSemaphoreState stateNew( stateCur.CAvail() - 1, stateCur.CWait() - 1 );
+
+            if ( State().FChange( stateCur, stateNew ) )
+            {
+                //  the transaction succeeded, return success
+
+                return fTrue;
+            }
+        }
+        else if ( dwRemaining == 0 )
+        {
+            //  we were unable to acquire the semaphore in the time permitted
+
+            break;
+        }
+        else
+        {
+            //  check and update the remaining time
+
+            const DWORD dwElapsed = DwOSSyncITickTime() - dwStart;
+
+            if ( dwElapsed > dwTimeout )
+            {
+                //  we were unable to acquire the semaphore in the time permitted
+
+                break;
+            }
+
+            dwRemaining = dwTimeout - dwElapsed;
+
+            //  wait for the semaphore counter value to change
+            //
+            //  NOTE:  we may have exited the wait due to a spurious OS level wake up,
+            //  so the state machine ensures that the available count is re-checked on
+            //  each iteration
+
+            if ( !_FWait( stateCur.CAvail(), dwRemaining ) )
+            {
+                //  we were unable to acquire the semaphore in the time permitted
+
+                break;
+            }
+        }
+    }
+    State().DecWait();
+
+    return fFalse;
+}
+
+//  releases all waiters on the semaphore
+
+void CSemaphore::ReleaseAllWaiters()
+{
+    //  try forever until we successfully change the state of the semaphore
+
+    OSSYNC_FOREVER
+    {
+        //  read the current state of the semaphore
+
+        const CSemaphoreState stateCur = (CSemaphoreState&) State();
+
+        if ( stateCur.CAvail() > 0 && stateCur.CWait() > 0 )
+        {
+            //  the existing waiters are in transition, retry
+
+            continue;
+        }
+        else if ( stateCur.CWait() <= 0 )
+        {
+            //  there are no waiters, we're done
+
+            return;
+        }
+        else
+        {
+            //  attempt to change the semaphore to have an available count equal
+            //  to the number of waiters
+
+            const CSemaphoreState stateNew( stateCur.CWait(), stateCur.CWait() );
+
+            if ( State().FChange( stateCur, stateNew ) )
+            {
+                volatile LONG *pcAvail = State().GetAvailAddress();
+
+                //  wake all waiting threads
+
+                WakeByAddressAll( (void*)pcAvail );
+
+                //  we're done
+
+                return;
+            }
+        }
+    }
+}
+
+//  releases the given number of counts to the semaphore, waking the appropriate
+//  number of waiters
+
+void CSemaphore::_Release( const INT cToRelease )
+{
+    if ( cToRelease <= 0 )
+    {
+        return;
+    }
+
+    //  release the required number of counts
+
+    State().IncAvail( cToRelease );
+
+    //  check to see if we have any waiting threads to wake
+
+    const INT cWait = State().CWait();
+
+    if ( cWait == 0 )
+    {
+        //  no one is waiting
+    }
+    else if ( cWait <= cToRelease )
+    {
+        volatile LONG *pcAvail = State().GetAvailAddress();
+
+        //  no more waiting threads than cToRelease, wake everyone
+
+        WakeByAddressAll( (void*)pcAvail );
+    }
+    else
+    {
+        volatile LONG *pcAvail = State().GetAvailAddress();
+
+        //  wake at most cToRelease threads, as the benefit from not waking
+        //  unnecessary threads is expected to be greater than the loss on
+        //  extra calls below
+
+        for ( INT i = 0; i < cToRelease; i++ )
+        {
+            WakeByAddressSingle( (void*)pcAvail );
+        }
+    }
+}
+
+//  waits until the semaphore counter value changes.  this method has the same
+//  semantics as the WaitOnAddress() function and is guaranteed to return when
+//  the address is signaled, but it is also allowed to return for other reasons.
+//  the caller should compare the new value with the original
+
+const BOOL CSemaphore::_FWait( const LONG cAvail, const DWORD dwTimeout )
+{
+    PERFOpt( AtomicIncrement( (LONG*)&g_cOSSYNCThreadBlock ) );
+    State().StartWait();
+
+    //  wait for semaphore
+
+    BOOL fSuccess;
+
+#ifdef SYNC_DEADLOCK_DETECTION
+    if (dwTimeout > cmsecDeadlock )
+    {
+        fSuccess = _FOSWait( cAvail, cmsecDeadlock );
+        if ( !fSuccess )
+        {
+#ifdef DEBUG
+            SYNCDeadLockTimeOutState sdltosStatePre = sdltosEnabled;
+            OSSYNC_FOREVER  // spin until we get a non- check-in-progress state ...
+            {
+                C_ASSERT( sizeof(g_sdltosState) == sizeof(LONG) );
+                sdltosStatePre = (SYNCDeadLockTimeOutState)AtomicCompareExchange( (LONG*)&g_sdltosState, sdltosEnabled, sdltosCheckInProgress );
+                if ( sdltosStatePre != sdltosCheckInProgress )
+                {
+                    break;
+                }
+                Sleep( 16 );
+            }
+#else
+            SYNCDeadLockTimeOutState sdltosStatePre = sdltosEnabled;
+#endif
+
+            OSSYNCAssertSzRTL( fSuccess /* superflous */ || sdltosStatePre == sdltosDisabled, "Potential Deadlock Detected (Timeout);  FYI ed [dll]!OSSYNC::g_sdltosState to 0 to disable." );
+
+#ifdef DEBUG
+            if ( sdltosStatePre != sdltosDisabled )
+            {
+                //  needs re-enabling (if SOMEONE/debugger didn't play with state)
+                OSSYNCAssert( sdltosStatePre != sdltosCheckInProgress ); // that'd be wrong on convergence loop above.
+
+                //  while it seems really simple this should alwyas be reset, this is designed to allow the user to kill
+                //  timeout detection dynamically in the debugger by setting g_sdltosState = 0 (i.e. sdltosDisabled) via 
+                //  debugger, thus g_sdltosState won't == sdltosCheckInProgress and we won't reset it to sdltosEnabled / 
+                //  i.e. disabling deadlock detection for all subsequent hits.
+
+                const SYNCDeadLockTimeOutState sdltosCheck = (SYNCDeadLockTimeOutState)AtomicCompareExchange( (LONG*)&g_sdltosState, sdltosCheckInProgress, sdltosEnabled );
+                OSSYNCAssertSzRTL( sdltosCheck != sdltosDisabled, "Devs, the debugger used to set g_sdltosState to 0 and disables further timeout detection asserts!?  Just an FYI.  If you did not, then code is confused." );
+            }
+#endif
+
+            DWORD dwNewTimeout = dwTimeout;
+
+            if ( dwNewTimeout < INFINITE )
+            {
+                dwNewTimeout -= cmsecDeadlock;
+            }
+
+            fSuccess = _FOSWait( cAvail, dwNewTimeout );
+        }
+    }
+    else
+#endif  //  SYNC_DEADLOCK_DETECTION
+    {
+        fSuccess = _FOSWait( cAvail, dwTimeout );
+    }
+
+    State().StopWait();
+    PERFOpt( AtomicIncrement( (LONG*)&g_cOSSYNCThreadResume ) );
+
+    return fSuccess;
+}
+
+//  performs an OS level wait until the available count of the semaphore changes.
+//  this method is guaranteed to return when the corresponding address is signaled,
+//  but it is also allowed to return for other reasons.  the caller should compare
+//  the new value with the original
+
+const BOOL CSemaphore::_FOSWait( const LONG cAvail, const DWORD dwTimeout )
+{
+    volatile LONG *pcAvail = State().GetAvailAddress();
+
+    static_assert( sizeof(*pcAvail) == sizeof(cAvail), "Should be of the same size." );
+
+    OnThreadWaitBegin();
+    BOOL fSuccess = WaitOnAddress( pcAvail, (void*)&cAvail, sizeof(cAvail), dwTimeout );
+    OnThreadWaitEnd();
+
+    return fSuccess;
+}
+
+
 //  performance data dumping
 
 #include<stdarg.h>
@@ -5768,15 +5601,8 @@ void CKernelSemaphore::Dump( const CDumpContext& dc ) const
 
 void CSemaphoreState::Dump( const CDumpContext& dc ) const
 {
-    if ( FNoWait() )
-    {
-        DumpMember( dc, m_cAvail );
-    }
-    else
-    {
-        DumpMember( dc, m_irksem );
-        DumpMember( dc, m_cWaitNeg );
-    }
+    DumpMember( dc, m_cAvail );
+    DumpMember( dc, m_cWait );
 }
 
 void CSemaphoreInfo::Dump( const CDumpContext& dc ) const

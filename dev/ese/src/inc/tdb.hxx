@@ -483,8 +483,6 @@ class TDB
 
 #ifdef _AMD64_
         BYTE                m_bReserved2[8];     //  for alignment. fileopen.cxx: C_ASSERT( sizeof(TDB) % 16 == 0 );
-#else
-        BYTE                m_bReserved2[4];     //  for alignment. fileopen.cxx: C_ASSERT( sizeof(TDB) % 16 == 0 );
 #endif
 
 //  208 / 272 bytes (amd64)
