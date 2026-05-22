@@ -40,7 +40,7 @@ public:
     ERR ErrRetrieveAllocatedRegion( const QWORD     ibOffsetToQuery,
                                        _Out_ QWORD* const   pibStartTrimmedRegion,
                                        _Out_ QWORD* const   pcbTrimmed ) override { AssertSz( fFalse, "NYI!" ); return ErrERRCheck( JET_errNyi ); }
-    ERR ErrFlushFileBuffers( const IOFLUSHREASON iofr ) override { AssertSz( fFalse, "NYI!" ); return ErrERRCheck( JET_errNyi ); }
+    ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const IFileAPI::FileFlushMode ffm ) override { AssertSz( fFalse, "NYI!" ); return ErrERRCheck( JET_errNyi ); }
     void SetNoFlushNeeded() override { AssertSz( fFalse, "NYI!" ); }
     ERR ErrIOSize( DWORD* const pcbSize ) override { AssertSz( fFalse, "NYI!" ); return ErrERRCheck( JET_errNyi ); }
     ERR ErrSectorSize( DWORD* const pcbSize ) override { AssertSz( fFalse, "NYI!" ); return ErrERRCheck( JET_errNyi ); }

@@ -277,7 +277,7 @@ struct BF                                           //  BF  --  IFMP/PGNO buffer
 
     RCE*                prceUndoInfoNext;           //  Undo Info chain
 
-    void*               pvIOContext;                //  I/O context (in practice, an IOREQ)
+    void*               pvIOContext;                //  I/O context (in practice, an IOREQ, async IO only)
 
     //  144 B /////////////////////////////////////////////////////////////////////////////////////
 
@@ -314,7 +314,7 @@ struct BF                                           //  BF  --  IFMP/PGNO buffer
     CSXWLatch           sxwl;                       //  S/X/W Latch protecting this BF state and
                                                     //    its associated cached page
 
-    void*               pvIOContext;                //  I/O context (in practice, an IOREQ)
+    void*               pvIOContext;                //  I/O context (in practice, an IOREQ, async IO only)
 
     IFMP                ifmp;                       //  IFMP of this cached page
     PGNO                pgno;                       //  PGNO of this cached page
@@ -600,6 +600,8 @@ ERR ErrBFIFTLInit();
 void BFIFTLTerm();
 
 //  BF tracing
+
+void BFICacheTraceSamplingInit( const ULONG ulSamplingRatio );
 
 INLINE void BFITraceResMgrInit(
     const INT       K,
@@ -1532,6 +1534,12 @@ void BFIReleaseIOContext( PBF pbf, void* const pvIOContext );
 void BFISetIOContext( PBF pbf, void* const pvIOContextNew );
 void BFIResetIOContext( PBF pbf );
 
+void BFISetAsyncIOContext( _In_ const PBF pbf, _In_ void* const pvIOContextNew );
+void BFIResetAsyncIOContext( _In_ const PBF pbf );
+TICK TickBFISyncIOContextStartTime();
+void BFISetSyncIOContext( _In_ const PBF pbf );
+void BFIResetSyncIOContext( _In_ const PBF pbf );
+
 BOOL FBFIIsIOHung( PBF pbf );
 BYTE PctBFIIsIOHung( PBF pbf, void* const pvIOContext );
 ERR ErrBFIFlushPendingStatus( PBF pbf );
@@ -1540,15 +1548,6 @@ void BFIPrepareReadPage( PBF pbf );
 void BFIPrepareWritePage( PBF pbf );
 
 void BFISyncRead( PBF pbf, const OSFILEQOS qosIoPriorities, const TraceContext& tc );
-void BFISyncReadHandoff(    const ERR err,
-                            IFileAPI *const pfapi,
-                            const FullTraceContext& tc,
-                            const OSFILEQOS grbitQOS,
-                            const QWORD ibOffset,
-                            const DWORD cbData,
-                            const BYTE* const pbData,
-                            const PBF pbf,
-                            void* const pvIOContext );
 void BFISyncReadComplete(   const ERR err,
                             IFileAPI *const pfapi,
                             const OSFILEQOS grbitQOS,
@@ -1590,15 +1589,6 @@ void BFIAsyncReadTempComplete(  const ERR err,
                                 const IFMP ifmp);
 
 ERR ErrBFISyncWrite( PBF pbf, const BFLatchType bfltHave, OSFILEQOS qos, const TraceContext& tc );
-void BFISyncWriteHandoff(   const ERR err,
-                            IFileAPI *const pfapi,
-                            const FullTraceContext& tc,
-                            const OSFILEQOS     grbitQOS,
-                            const QWORD ibOffset,
-                            const DWORD cbData,
-                            const BYTE* const pbData,
-                            const PBF pbf,
-                            void* const pvIOContext );
 void BFISyncWriteComplete(  const ERR err,
                             IFileAPI *const pfapi,
                             const FullTraceContext& tc,

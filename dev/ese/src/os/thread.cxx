@@ -5,7 +5,6 @@
 
 #include <process.h>
 
-
 //  Thread Local Storage
 
 //  Internal TLS structure
@@ -378,7 +377,7 @@ struct _THREAD
 {
     PUTIL_THREAD_PROC   pfnStart;
     DWORD_PTR           dwParam;
-    const _TCHAR*       szStart;
+    const CHAR*         szStart;
     HANDLE              hThread;
     DWORD               idThread;
     BOOL                fFinish;
@@ -466,7 +465,7 @@ const ERR ErrUtilThreadICreate(
     const EThreadPriority       priority,
     THREAD* const               pThread,
     const DWORD_PTR             dwParam,
-    const _TCHAR* const         szStart )
+    const CHAR* const           szStart )
 {
     ERR err = JET_errSuccess;
 

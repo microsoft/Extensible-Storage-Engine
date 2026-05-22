@@ -3711,7 +3711,7 @@ ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr, DBMObjectCache*
                 }
                 LvId lid;
                 LidFromKey( &lid, kdf.key );
-                CArray<LvId>::ERR errT = arrLid.ErrSetEntry( arrLid.Size(), lid );
+                CArray<LvId>::ERR errT = arrLid.ErrAppendEntry( lid );
                 Assert( errT == CArray<LvId>::ERR::errSuccess );
             }
         }
@@ -3965,7 +3965,8 @@ ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr, DBMObjectC
                 //    In ErrBTISinglePageCleanup, ErrBTISPCDeleteNodes will nullify the node's data (replace with
                 //    a single byte NULL chSCRUBDBMaintEmptyPageLastNodeFill) but it can't remove the only node in 
                 //    the page (b-tree pages can't be empty), and return MultipageOLC. Then ErrBTIMultipageCleanup will 
-                //    return wrnBTShallowTree without doing anything.
+                //    return JET_errSuccess without doing anything (errBTShallowTree is returned from ErrBTICreateMergePath
+                //    and translated into JET_errSuccess by ErrBTIMultipageCleanup).
                 //
 
                 // Avoid repeated replacing/scrubbing of case 1 pages 
@@ -4652,9 +4653,9 @@ DBMScan::DBMScan(
     m_ppib( ppib ),
     m_cscanobservers( 0 ),
     m_threadDBMScan( 0 ),
-    m_critSignalControl( CLockBasicInfo( CSyncBasicInfo( _T("DBMScan::m_critSignalControl" ) ), rankDBMScanSignalControl, 0 ) ),
-    m_msigDBScanStop( CSyncBasicInfo( _T("DBMScan::m_msigDBScanStop" ) ) ),
-    m_msigDBScanGo( CSyncBasicInfo( _T("DBMScan::m_msigDBScanGo" ) ) ),
+    m_critSignalControl( CLockBasicInfo( CSyncBasicInfo( "DBMScan::m_critSignalControl" ), rankDBMScanSignalControl, 0 ) ),
+    m_msigDBScanStop( CSyncBasicInfo( "DBMScan::m_msigDBScanStop" ) ),
+    m_msigDBScanGo( CSyncBasicInfo( "DBMScan::m_msigDBScanGo" ) ),
     m_pidbmScanSerializationObj( NULL ),
     m_cscansFinished( 0 ),
     m_fNeedToSuspendPass( false ),
@@ -5326,7 +5327,7 @@ DWORD DBMScanSerializer::DwTimeSlice() const
 
 DBMScanSerializer::DBMScanSerializer( const ULONG_PTR ulKey ) :
     IDBMScanSerializer( ulKey, IDBMScanSerializer::idbmstypReal ),
-    m_critSerializer( CLockBasicInfo( CSyncBasicInfo( _T("DBMScanSerializer::m_critSerializer" ) ), rankDBMScanSerializer, 0 ) ),
+    m_critSerializer( CLockBasicInfo( CSyncBasicInfo( "DBMScanSerializer::m_critSerializer" ), rankDBMScanSerializer, 0 ) ),
     m_ilDbmScans()
 {
 }
@@ -5541,7 +5542,7 @@ bool DBMScanSerializerFactory::FSerializerFactoryEmpty()
 }
 
 DBMScanSerializerFactory::DBMScanSerializerFactory() :
-    m_critSerializer( CLockBasicInfo( CSyncBasicInfo( _T("DBMScanSerializerFactory::m_critSerializer" ) ), rankDBMScanSerializerFactory, 0 ) ),
+    m_critSerializer( CLockBasicInfo( CSyncBasicInfo( "DBMScanSerializerFactory::m_critSerializer" ), rankDBMScanSerializerFactory, 0 ) ),
     m_ilSerializers(),
     m_cDummySerializers( 0 )
 {
@@ -6773,7 +6774,7 @@ TestDBMScanObserver::TestDBMScanObserver() :
     m_fPrepareToTermCalled( false ),
     m_cpgRead( 0 ),
     m_pgnoBadChecksum( pgnoNull ),
-    m_asigFinishedPass( CSyncBasicInfo( _T("TestDBMScanObserver::asigFinishedPass" ) ) )
+    m_asigFinishedPass( CSyncBasicInfo( "TestDBMScanObserver::asigFinishedPass" ) )
 {
 }
 
@@ -7166,7 +7167,7 @@ TestDBMScanReader::TestDBMScanReader( const PGNO pgnoLast, const PGNO pgnoBadChe
     m_fInError( fFalse ),
     m_pgnoLast( pgnoLast ),
     m_pgnoBadChecksum( pgnoBadChecksum ),
-    m_msigReadPageCalled( CSyncBasicInfo( _T("TestDBMScanReader::msigReadPageCalled" ) ) )
+    m_msigReadPageCalled( CSyncBasicInfo( "TestDBMScanReader::msigReadPageCalled" ) )
 {
 }
 

@@ -6,6 +6,7 @@
 
 #include <type_traits>
 #include <guiddef.h>
+#include <type_traits>
 
 //  build options
 
@@ -13,6 +14,11 @@
 
 #define INLINE      inline
 #define NOINLINE    __declspec(noinline)
+
+// Required to prevent MSVC from adding extra bytes in class layout when using multiple empty base classes.
+// Note: this is the default behavior on other compilers.
+// Used primarily by Unaligned Little/BigEndian template classes.
+#define EMPTY_BASES __declspec(empty_bases)
 
 #define PUBLIC      extern
 #define LOCAL_BROKEN
@@ -129,8 +135,6 @@ typedef WORD LANGID;
 typedef DWORD LCID;
 typedef GUID SORTID;
 #define SORTIDNil { 0, 0, 0, { 0, 0, 0, 0, 0, 0, 0, 0 } }
-
-typedef wchar_t WCHAR;
 
 typedef struct
 {
@@ -294,7 +298,7 @@ inline T1& operator>>=( T1& t1, const T2& t2 )
 
 //  host endian-ness
 
-const BOOL  fHostIsLittleEndian     = fTrue;
+constexpr BOOL  fHostIsLittleEndian = fTrue;
 inline constexpr BOOL FHostIsLittleEndian()
 {
     return fHostIsLittleEndian;
@@ -422,18 +426,6 @@ inline unsigned __int32 ReverseBytes< unsigned __int32 >( const unsigned __int32
 }
 
 template<>
-inline LONG ReverseBytes< LONG >( const LONG dw )
-{
-    return ReverseFourBytes( (const unsigned __int32) dw );
-}
-
-template<>
-inline ULONG ReverseBytes< ULONG >( const ULONG dw )
-{
-    return ReverseFourBytes( (const unsigned __int32) dw );
-}
-
-template<>
 inline __int64 ReverseBytes< __int64 >( const __int64 qw )
 {
     return ReverseEightBytes( (const unsigned __int64) qw );
@@ -473,13 +465,13 @@ struct extract_typearg< X<T> >
     using TArg = T;
 };
 
-// A base class providing operator overloads for aligned data.
+// A base class providing arithmetic operator overloads for types that handle aligned/unaligned LittlEndian/BigEndian data.
 // Requires the use of CRTP pattern to invoke static polymorphism for selecting the right conversion functions.
 // Requires the derived class to provide conversion functions to/from an integral type.
 //
-// Note that we don't need to worry about whether the data is aligned or not.  The line:
+// Note that we don't need to worry about whether the data is aligned or not, little or big endian.  The line:
 //   TArg converted = (TArg) static_cast<TDerived&>( *this );
-// makes an aligned copy on the stack of the underlying T datatype, regardless of whether
+// makes a platform endian aligned copy on the stack of the underlying T datatype, regardless of whether
 // this OperatorOverload template is being used as the base for aligned OR unaligned data.
 template <class TDerived>
 class COperatorOverloads
@@ -557,14 +549,36 @@ public:
 
 };
 
+// A helper class to create stack copies of aligned and endian-corrected data.
+// Provides pointer semantics on the object to allow calling const functions,
+// if the underlying type is a struct/class.
+template <class T>
+struct AlignedPlatformEndian
+{
+    T   m_t;
+    const T* operator->() const         { return &m_t; }
+};
+
+// Provides struct/class deref operator overload to use with unaligned, endian types encapsulating structs/classes.
+// Works similarly to COperatorOverloads above.
+template <class TDerived>
+class DerefOverload
+{
+    using TArg = typename extract_typearg<TDerived>::TArg;
+
+public:
+    auto operator->() const             { return AlignedPlatformEndian<TArg>{ ( TArg ) static_cast<const TDerived&>( *this ) }; }
+};
+
+
 //  big endian type template
 
 
 template< class T >
-class BigEndian : public COperatorOverloads< BigEndian<T> >
+class EMPTY_BASES BigEndian : public COperatorOverloads< BigEndian<T> >, public DerefOverload< BigEndian<T> >
 {
     public:
-        BigEndian< T >() {};
+        BigEndian< T >() = default;
         BigEndian< T >( const BigEndian< T >& be_t );
         BigEndian< T >( const T& t );
 
@@ -619,10 +633,10 @@ inline BigEndian< T >& BigEndian< T >::operator=( const T& t )
 //  little endian type template
 
 template< class T >
-class LittleEndian : public COperatorOverloads< LittleEndian<T> >
+class EMPTY_BASES LittleEndian : public COperatorOverloads< LittleEndian<T> >, public DerefOverload< LittleEndian<T> >
 {
     public:
-        LittleEndian< T >() {};
+        LittleEndian< T >() = default;
         LittleEndian< T >( const LittleEndian< T >& le_t );
         LittleEndian< T >( const T& t );
 
@@ -687,10 +701,10 @@ inline LittleEndian< T >& LittleEndian< T >::operator=( const T& t )
 #define UCAST(T) *(T PERMIT_UNALIGNED_ACCESS *)
 
 template< class T >
-class Unaligned : public COperatorOverloads< Unaligned<T> >
+class EMPTY_BASES Unaligned : public COperatorOverloads< Unaligned<T> >, public DerefOverload< Unaligned<T> >
 {
     public:
-        Unaligned< T >() PERMIT_UNALIGNED_ACCESS {};
+        Unaligned< T >() PERMIT_UNALIGNED_ACCESS = default;
         Unaligned< T >( const Unaligned< T >& u_t ) PERMIT_UNALIGNED_ACCESS;
         Unaligned< T >( const T& t ) PERMIT_UNALIGNED_ACCESS;
 
@@ -744,10 +758,10 @@ inline Unaligned< T >& Unaligned< T >::operator=( const T& t ) PERMIT_UNALIGNED_
 //  unaligned big endian type template
 
 template< class T >
-class UnalignedBigEndian : public COperatorOverloads< UnalignedBigEndian<T> >
+class EMPTY_BASES UnalignedBigEndian : public COperatorOverloads< UnalignedBigEndian<T> >, public DerefOverload< UnalignedBigEndian<T> >
 {
     public:
-        UnalignedBigEndian< T >() PERMIT_UNALIGNED_ACCESS {};
+        UnalignedBigEndian< T >() PERMIT_UNALIGNED_ACCESS = default;
         UnalignedBigEndian< T >( const UnalignedBigEndian< T >& ube_t ) PERMIT_UNALIGNED_ACCESS;
         UnalignedBigEndian< T >( const T& t ) PERMIT_UNALIGNED_ACCESS;
 
@@ -802,10 +816,10 @@ inline UnalignedBigEndian< T >& UnalignedBigEndian< T >::operator=( const T& t )
 //  unaligned little endian type template
 
 template< class T >
-class UnalignedLittleEndian : public COperatorOverloads< UnalignedLittleEndian<T> >
+class EMPTY_BASES UnalignedLittleEndian : public COperatorOverloads< UnalignedLittleEndian<T> >, public DerefOverload< UnalignedLittleEndian<T> >
 {
     public:
-        UnalignedLittleEndian< T >() PERMIT_UNALIGNED_ACCESS {};
+        UnalignedLittleEndian< T >() PERMIT_UNALIGNED_ACCESS = default;
         UnalignedLittleEndian< T >( const UnalignedLittleEndian< T >& ule_t ) PERMIT_UNALIGNED_ACCESS;
         UnalignedLittleEndian< T >( const T& t ) PERMIT_UNALIGNED_ACCESS;
 
@@ -855,6 +869,89 @@ inline UnalignedLittleEndian< T >& UnalignedLittleEndian< T >::operator=( const 
 
     return *this;
 }
+
+// Wraps a pointer to UnalignedLittleEndian data.
+// The pointer itself is aligned and platform endian. The data it points to is unaligned little endian.
+// Used to manipulate arrays of unaligned little endian data.
+template <typename T>
+class UnalignedLittleEndianPtr
+{
+public:
+    // A reference to data pointed by UnalignedLittleEndianPtr<T>
+    // Returned as a result of derefing UnalignedLittleEndianPtr<T>
+    class Ref
+    {
+    public:
+        Ref( T PERMIT_UNALIGNED_ACCESS* ptr ) : m_pT( ptr ) {}
+
+        operator T() const
+        {
+            // Dereference needs unaligned memory access
+            T t = UCAST( T )m_pT;
+            return ReverseBytesOnBE( t );
+        }
+
+        // Asignment operator is marked const because it doesn't modify this object, only modifies referenced data.
+        const Ref& operator=( const T& t ) const
+        {
+            static_assert( !std::is_const<T>::value, "Assignment to a pointer to const is not allowed" );
+            UCAST( T )m_pT = ReverseBytesOnBE( t );
+            return *this;
+        }
+
+    private:
+        T PERMIT_UNALIGNED_ACCESS* m_pT;    // this member itself is aligned
+    };
+
+    UnalignedLittleEndianPtr() = default;
+    UnalignedLittleEndianPtr( const UnalignedLittleEndianPtr& ule_t )       { m_pT = ule_t.m_pT; }
+    UnalignedLittleEndianPtr( T PERMIT_UNALIGNED_ACCESS* ptr ) : m_pT( ptr ){}
+
+    Ref operator[]( int index )                                             { return Ref( m_pT + index ); }
+    Ref operator*()                                                         { return Ref( m_pT ); }
+    UnalignedLittleEndianPtr operator+( int index ) const                   { return UnalignedLittleEndianPtr( m_pT + index ); }
+    bool operator==( const UnalignedLittleEndianPtr& rhs ) const            { return m_pT == rhs.m_pT; }
+    bool operator!=( const UnalignedLittleEndianPtr& rhs ) const            { return m_pT != rhs.m_pT; }
+
+    T operator[]( int index ) const
+    {
+        T t = UCAST( T )( m_pT + index );
+        return ReverseBytesOnBE( t );
+    }
+
+    T operator*() const
+    {
+        // Dereference operator needs unaligned memory access.
+        T t = UCAST( T )m_pT;
+        return ReverseBytesOnBE( t );
+    }
+
+    UnalignedLittleEndianPtr& operator=( const UnalignedLittleEndianPtr& ule_t )
+    {
+        m_pT = ule_t.m_pT;
+        return *this;
+    }
+
+    UnalignedLittleEndianPtr& operator=( T PERMIT_UNALIGNED_ACCESS* ptr )
+    {
+        m_pT = ptr;
+        return *this;
+    }
+
+    UnalignedLittleEndianPtr& operator++()
+    {
+        ++m_pT;
+        return *this;
+    }
+
+    UnalignedLittleEndianPtr operator++( int )
+    {
+        return UnalignedLittleEndianPtr( m_pT++ );
+    }
+
+private:
+    T PERMIT_UNALIGNED_ACCESS* m_pT;    // this member itself is aligned
+};
 
 
 //  special type qualifier to allow unaligned access to variables

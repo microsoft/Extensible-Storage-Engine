@@ -114,6 +114,11 @@ namespace Internal
                             return this->target->IsDirty();
                         }
 
+                        virtual int InvalidSlotCount()
+                        {
+                            return this->target->InvalidSlotCount();
+                        }
+
                         virtual void Save( ICachedBlockSlab::SlabSaved^ slabSaved )
                         {
                             return this->target->Save( slabSaved );

@@ -107,6 +107,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               http://msdn.microsoft.com/en-us/library/aa382786(VS.85).aspx
           -->
         <keywords>
+          <!--ESE_ETW_AUTOGEN_KEYWORD_LIST_BEGIN-->
           <!-- Keywords 1 and 2 are defined by WinPhone best practices. -->
           <keyword
               mask="0x0000000000000001"
@@ -200,6 +201,11 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               message="$(string.Keyword.SubstrateTelemetry)"
               name="SubstrateTelemetry"
               />
+          <keyword
+              mask="0x0000000000040000"
+              message="$(string.Keyword.BFRESMGRSUBSAMPLED)"
+              name="BFRESMGRSUBSAMPLED"
+              />
 
           <!-- Temporary trace for collecting data for a compression experiment -->
           <keyword
@@ -207,6 +213,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               message="$(string.Keyword.CompressExp)"
               name="CompressExp"
               />
+          <!--ESE_ETW_AUTOGEN_KEYWORD_LIST_END-->
         </keywords>
 
         <!-- ==========================================================================================================
@@ -1310,7 +1317,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="105"
               />
           <event
-              keywords="BF BFRESMGR Performance DataWorkingSet"
+              keywords="BF BFRESMGR BFRESMGRSUBSAMPLED Performance DataWorkingSet"
               level="win:Informational"
               message="$(string.Event.ESE_CacheWritePage_Trace)"
               symbol="ESE_CacheWritePage_Trace"
@@ -1319,7 +1326,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="106"
               />
           <event
-              keywords="BF BFRESMGR DataWorkingSet"
+              keywords="BF BFRESMGR BFRESMGRSUBSAMPLED DataWorkingSet"
               level="win:Informational"
               message="$(string.Event.ESE_CacheEvictPage_Trace)"
               symbol="ESE_CacheEvictPage_Trace"
@@ -1328,7 +1335,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="107"
               />
           <event
-              keywords="BF BFRESMGR"
+              keywords="BF BFRESMGR BFRESMGRSUBSAMPLED"
               level="win:Verbose"
               message="$(string.Event.ESE_CacheRequestPage_Trace)"
               symbol="ESE_CacheRequestPage_Trace"
@@ -1337,7 +1344,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="108"
               />
           <event
-              keywords="BF BFRESMGR Performance"
+              keywords="BF BFRESMGR BFRESMGRSUBSAMPLED Performance"
               level="win:Informational"
               message="$(string.Event.ESE_LatchPageDeprecated_Trace)"
               symbol="ESE_LatchPageDeprecated_Trace"
@@ -1345,7 +1352,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="109"
               />
           <event
-              keywords="BF BFRESMGR Performance"
+              keywords="BF BFRESMGR BFRESMGRSUBSAMPLED Performance"
               level="win:Verbose"
               message="$(string.Event.ESE_CacheDirtyPage_Trace)"
               symbol="ESE_CacheDirtyPage_Trace"
@@ -1673,7 +1680,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="145"
               />
           <event
-              keywords="BFRESMGR"
+              keywords="BFRESMGR BFRESMGRSUBSAMPLED"
               level="win:Informational"
               message="$(string.Event.ESE_ResMgrInit_Trace)"
               symbol="ESE_ResMgrInit_Trace"
@@ -1682,7 +1689,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="146"
               />
           <event
-              keywords="BFRESMGR"
+              keywords="BFRESMGR BFRESMGRSUBSAMPLED"
               level="win:Informational"
               message="$(string.Event.ESE_ResMgrTerm_Trace)"
               symbol="ESE_ResMgrTerm_Trace"
@@ -1691,7 +1698,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="147"
               />
           <event
-              keywords="BF BFRESMGR"
+              keywords="BF BFRESMGR BFRESMGRSUBSAMPLED"
               level="win:Verbose"
               message="$(string.Event.ESE_CacheCachePage_Trace)"
               symbol="ESE_CacheCachePage_Trace"
@@ -1700,7 +1707,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="148"
               />
           <event
-              keywords="BF BFRESMGR"
+              keywords="BF BFRESMGR BFRESMGRSUBSAMPLED"
               level="win:Verbose"
               message="$(string.Event.ESE_MarkPageAsSuperCold_Trace)"
               symbol="ESE_MarkPageAsSuperCold_Trace"
@@ -1941,7 +1948,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
               value="175"
               />
           <event
-              keywords="BF BFRESMGR"
+              keywords="BF BFRESMGR BFRESMGRSUBSAMPLED"
               level="win:Verbose"
               message="$(string.Event.ESE_CacheSetLgposModify_Trace)"
               symbol="ESE_CacheSetLgposModify_Trace"
@@ -2057,6 +2064,10 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
         <string
             id="Keyword.SubstrateTelemetry"
             value="SubstrateTelemetry"
+            />
+        <string
+            id="Keyword.BFRESMGRSUBSAMPLED"
+            value="BFRESMGRSUBSAMPLED"
             />
         <string
             id="Keyword.CompressExp"

@@ -31,9 +31,14 @@ namespace Internal
                             return this->target->FileModeFlags();
                         }
 
-                        virtual void FlushFileBuffers()
+                        virtual void FlushFileBuffers( FileFlushMode fileFlushMode )
                         {
-                            this->target->FlushFileBuffers();
+                            this->target->FlushFileBuffers( fileFlushMode );
+                        }
+
+                        virtual Int64 CountIoNonFlushed()
+                        {
+                            return this->target->CountIoNonFlushed();
                         }
 
                         virtual void SetNoFlushNeeded()
@@ -132,11 +137,6 @@ namespace Internal
                         virtual IntPtr DiskId()
                         {
                             return this->target->DiskId();
-                        }
-
-                        virtual Int64 CountIoNonFlushed()
-                        {
-                            return this->target->CountIoNonFlushed();
                         }
 
                         virtual bool SeekPenalty()

@@ -17,17 +17,15 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
             :   CCacheThreadLocalStorageBase( ctid ),
                 m_pc( NULL ),
                 m_ptpwIssue( NULL ),
-                m_semAsyncIOWorkerRequest( CSyncBasicInfo( "CHashedLRUKCacheThreadLocalStorage::m_semAsyncIOWorkerRequest" ) ),
-                m_semAsyncIOWorkerExecute( CSyncBasicInfo( "CHashedLRUKCacheThreadLocalStorage::m_semAsyncIOWorkerExecute" ) ),
+                m_cwAsyncIOWorkerState( ControlWord::cwNone ),
                 m_ctidAsyncIOWorker( ctidInvalid ),
                 m_critAsyncIOWorkerState( CLockBasicInfo( CSyncBasicInfo( "CHashedLRUKCacheThreadLocalStorage::m_critAsyncIOWorkerState" ), rankIssued, 0 ) ),
                 m_rgibSlab { 0 },
                 m_rgpcbsSlab { NULL },
-                m_ibSlabWait( 0 )
+                m_ibSlabWait( 0 ),
+                m_cIORangeLocked( 0 ),
+                m_cbIORangeLocked( 0 )
         {
-            m_semAsyncIOWorkerRequest.Release();
-            m_semAsyncIOWorkerRequest.Release();
-            m_semAsyncIOWorkerExecute.Release();
         }
 
         void Initialize( _In_ THashedLRUKCache<I>* const pc, _Inout_ TP_WORK** const pptpwIssue )
@@ -52,6 +50,8 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
         CCountedInvasiveList<CRequest, CRequest::OffsetOfIOs>& IlFinalizeIOPending() { return m_ilFinalizeIOPending; }
         CCountedInvasiveList<CRequest, CRequest::OffsetOfIOs>& IlFinalizeIOCompleted() { return m_ilFinalizeIOCompleted; }
         QWORD IbSlabWait() const { return AtomicRead( (__int64*)&m_ibSlabWait ); }
+        volatile DWORD& CIORangeLocked() { return m_cIORangeLocked; }
+        volatile QWORD& CbIORangeLocked() { return m_cbIORangeLocked; }
 
         void AddRequest( _Inout_ CRequest** const pprequest )
         {
@@ -62,8 +62,6 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
             CritAsyncIOWorkerState().Enter();
             m_ilRequests.InsertAsNextMost( prequest );
             CritAsyncIOWorkerState().Leave();
-
-            AddRef();
         }
 
         void RemoveRequest( _In_ CRequest* const prequest )
@@ -71,9 +69,6 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
             CritAsyncIOWorkerState().Enter();
             m_ilRequests.Remove( prequest );
             CritAsyncIOWorkerState().Leave();
-
-            CHashedLRUKCacheThreadLocalStorage<I>* pctlsT = this;
-            Release( &pctlsT );
 
             CRequest* prequestT = prequest;
             (void)CRequest::ErrRelease( &prequestT, JET_errSuccess );
@@ -118,9 +113,13 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
         {
             if ( pcbs )
             {
+                QWORD ibSlab = 0;
+                CallS( pcbs->ErrGetPhysicalId( &ibSlab ) );
+                Assert( ibSlab );
+
                 for ( size_t iibSlab = 0; iibSlab < s_cibSlab; iibSlab++ )
                 {
-                    if ( pcbs == m_rgpcbsSlab[ iibSlab ] )
+                    if ( m_rgibSlab[ iibSlab ] == ibSlab )
                     {
                         return fTrue;
                     }
@@ -134,7 +133,7 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
         {
             for ( size_t iibSlab = 0; iibSlab < s_cibSlab; iibSlab++ )
             {
-                if ( m_rgpcbsSlab[ iibSlab ] )
+                if ( m_rgibSlab[ iibSlab ] )
                 {
                     return fTrue;
                 }
@@ -182,36 +181,73 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
 
         void BeginAsyncIOWorker()
         {
-            //  serialize execution of the async IO worker because more than one can be requested and executing concurrently
-
-            m_semAsyncIOWorkerExecute.Acquire();
             m_ctidAsyncIOWorker = CtidCurrentThread();
+
+            OSTrace(    JET_tracetagBlockCacheOperations,
+                        OSFormat(   "C=%s BeginAsyncIOWorker .%x",
+                                    OSFormatFileId( Pc() ),
+                                    Ctid() ) );
         }
 
-        void EndAsyncIOWorker()
+        BOOL FTryEndAsyncIOWorker()
         {
-            //  enable another async IO worker task to execute
+            BOOL fNewRequest = fFalse;
 
-            m_ctidAsyncIOWorker = ctidInvalid;
-            m_semAsyncIOWorkerExecute.Release();
+            //  if the worker is requested and running then clear the requested state
+            //  if the worker is not requested and running then clear the running state
 
-            //  allow another async IO worker request to be made
+            OSSYNC_FOREVER
+            {
+                const ControlWord cwAsyncIOWorkerStateBIExpected    = (ControlWord)AtomicRead( (LONG*)&m_cwAsyncIOWorkerState );
+                const ControlWord cwAsyncIOWorkerStateAI            = cwAsyncIOWorkerStateBIExpected == ControlWord::cwRunning ?
+                                                                        ControlWord::cwNone :
+                                                                        ControlWord::cwRunning;
+                const ControlWord cwAsyncIOWorkerStateBI            = (ControlWord)AtomicCompareExchange(   (LONG*)&m_cwAsyncIOWorkerState,
+                                                                                                            (LONG)cwAsyncIOWorkerStateBIExpected,
+                                                                                                            (LONG)cwAsyncIOWorkerStateAI );
 
-            m_semAsyncIOWorkerRequest.Release();
+                if ( cwAsyncIOWorkerStateBI == cwAsyncIOWorkerStateBIExpected )
+                {
+                    fNewRequest = cwAsyncIOWorkerStateBI == ControlWord::cwRequestedAndRunning;
+                    break;
+                }
+            }
 
-            //  release the ref count for this request
+            OSTrace(    JET_tracetagBlockCacheOperations,
+                        OSFormat(   "C=%s FTryEndAsyncIOWorker .%x = %s",
+                                    OSFormatFileId( Pc() ),
+                                    Ctid(),
+                                    OSFormatBoolean( !fNewRequest ) ) );
 
-            CHashedLRUKCacheThreadLocalStorage<I>* pctlsT = this;
-            Release( &pctlsT );
+            //  if we are no longer running then release the ref count for the async IO worker
+
+            if ( !fNewRequest )
+            {
+                CHashedLRUKCacheThreadLocalStorage<I>* pctlsT = this;
+                Release( &pctlsT );
+            }
+
+            //  we have succeeded in ending if there is no new request
+
+            return !fNewRequest;
         }
 
         void CueAsyncIOWorker()
         {
-            //  try to get a token to request the async IO worker
+            //  request the async IO worker
 
-            if ( m_semAsyncIOWorkerRequest.FTryAcquire() )
+            const ControlWord   cwAsyncIOWorkerStateBI  = (ControlWord)AtomicExchange(  (LONG*)&m_cwAsyncIOWorkerState,
+                                                                                        (LONG)ControlWord::cwRequestedAndRunning );
+
+            const BOOL          fNewRequest             = ( cwAsyncIOWorkerStateBI == ControlWord::cwNone ||
+                                                            cwAsyncIOWorkerStateBI == ControlWord::cwRunning );
+            const BOOL          fSignalNeeded           = cwAsyncIOWorkerStateBI == ControlWord::cwNone;
+
+            //  signal the async IO worker if necessary
+
+            if ( fSignalNeeded )
             {
-                //  add a ref count for this request
+                //  add a ref count for the async IO worker
 
                 AddRef();
 
@@ -219,13 +255,13 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
 
                 SubmitThreadpoolWork( PtpwIssue() );
             }
-        }
 
-        static void CueAsyncIOWorker( _In_ const DWORD_PTR keyIOComplete )
-        {
-            CHashedLRUKCacheThreadLocalStorage<I>* const pctls = (CHashedLRUKCacheThreadLocalStorage<I>*)keyIOComplete;
-
-            pctls->CueAsyncIOWorker();
+            OSTrace(    JET_tracetagBlockCacheOperations,
+                        OSFormat(   "C=%s CueAsyncIOWorker .%x fNewRequest = %s fSignalNeeded = %s",
+                                    OSFormatFileId( Pc() ),
+                                    Ctid(),
+                                    OSFormatBoolean( fNewRequest ),
+                                    OSFormatBoolean( fSignalNeeded ) ) );
         }
 
         static void Release( _Inout_ CHashedLRUKCacheThreadLocalStorage<I>** const ppctls )
@@ -237,12 +273,18 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
 
         ~CHashedLRUKCacheThreadLocalStorage()
         {
-            m_semAsyncIOWorkerRequest.Acquire();
-            m_semAsyncIOWorkerRequest.Acquire();
-            m_semAsyncIOWorkerExecute.Acquire();
-
             m_pc->ReleaseThreadpoolState( &m_ptpwIssue );
         }
+
+    private:
+
+        enum class ControlWord : LONG
+        {
+            cwNone = 0,
+            cwRequested = 1,
+            cwRunning = 2,
+            cwRequestedAndRunning = 3,
+        };
 
     private:
 
@@ -250,8 +292,7 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
         TP_WORK*                                                            m_ptpwIssue;
 
         CCountedInvasiveList<CRequest, CRequest::OffsetOfIOs>               m_ilIORequested;
-        CSemaphore                                                          m_semAsyncIOWorkerRequest;
-        CSemaphore                                                          m_semAsyncIOWorkerExecute;
+        volatile ControlWord                                                m_cwAsyncIOWorkerState;
         CacheThreadId                                                       m_ctidAsyncIOWorker;
         CCountedInvasiveList<CRequest, CRequest::OffsetOfIOs>               m_ilIORangeLockPending;
         CCountedInvasiveList<CRequest, CRequest::OffsetOfIOs>               m_ilIORangeLocked;
@@ -271,4 +312,7 @@ class CHashedLRUKCacheThreadLocalStorage  //  ctls
         QWORD                                                               m_rgibSlab[ s_cibSlab ];
         ICachedBlockSlab*                                                   m_rgpcbsSlab[ s_cibSlab ];
         volatile QWORD                                                      m_ibSlabWait;
+
+        volatile DWORD                                                      m_cIORangeLocked;
+        volatile QWORD                                                      m_cbIORangeLocked;
 };

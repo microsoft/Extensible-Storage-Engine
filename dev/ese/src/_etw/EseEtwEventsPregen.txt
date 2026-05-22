@@ -40,11 +40,11 @@ START_TRACE_LIST:
     CacheNewPage,                103,  win:Informational,  "BF Performance DataWorkingSet",
     CacheReadPage,               104,  win:Informational,  "BF Performance DataWorkingSet",
     CachePrereadPage,            105,  win:Informational,  "BF Performance DataWorkingSet",
-    CacheWritePage,              106,  win:Informational,  "BF BFRESMGR Performance DataWorkingSet",
-    CacheEvictPage,              107,  win:Informational,  "BF BFRESMGR DataWorkingSet",
-    CacheRequestPage,            108,  win:Verbose,        "BF BFRESMGR"
-    LatchPageDeprecated,         109,  win:Informational,  "BF BFRESMGR Performance",     fDeprecated
-    CacheDirtyPage,              110,  win:Verbose,        "BF BFRESMGR Performance"
+    CacheWritePage,              106,  win:Informational,  "BF BFRESMGR BFRESMGRSUBSAMPLED Performance DataWorkingSet",
+    CacheEvictPage,              107,  win:Informational,  "BF BFRESMGR BFRESMGRSUBSAMPLED DataWorkingSet",
+    CacheRequestPage,            108,  win:Verbose,        "BF BFRESMGR BFRESMGRSUBSAMPLED"
+    LatchPageDeprecated,         109,  win:Informational,  "BF BFRESMGR BFRESMGRSUBSAMPLED Performance",     fDeprecated
+    CacheDirtyPage,              110,  win:Verbose,        "BF BFRESMGR BFRESMGRSUBSAMPLED Performance"
     TransactionBegin,            111,  win:Verbose,        "Transaction"
     TransactionCommit,           112,  win:Verbose,        "Transaction"
     TransactionRollback,         113,  win:Verbose,        "Transaction"
@@ -80,10 +80,10 @@ START_TRACE_LIST:
     CacheScavengeProgress,       143,  win:Informational,  "BF Performance",
     ApiCall_Start,               144,  win:Informational,  "Performance",
     ApiCall_Stop,                145,  win:Informational,  "Performance",                fStopCodeNoTask
-    ResMgrInit,                  146,  win:Informational,  "BFRESMGR",
-    ResMgrTerm,                  147,  win:Informational,  "BFRESMGR",
-    CacheCachePage,              148,  win:Verbose,        "BF BFRESMGR",
-    MarkPageAsSuperCold,         149,  win:Verbose,        "BF BFRESMGR",
+    ResMgrInit,                  146,  win:Informational,  "BFRESMGR BFRESMGRSUBSAMPLED",
+    ResMgrTerm,                  147,  win:Informational,  "BFRESMGR BFRESMGRSUBSAMPLED",
+    CacheCachePage,              148,  win:Verbose,        "BF BFRESMGR BFRESMGRSUBSAMPLED",
+    MarkPageAsSuperCold,         149,  win:Verbose,        "BF BFRESMGR BFRESMGRSUBSAMPLED",
     CacheMissLatency,            150,  win:Informational,  "BF StallLatencies",
     BTreePrereadPageRequest,     151,  win:Informational,  "Performance",
     DiskFlushFileBuffers,        152,  win:Informational,  "IO",
@@ -110,7 +110,7 @@ START_TRACE_LIST:
     IOThreadIssueProcessedIO,    173,  win:Informational,  "IO"
     IOIoreqCompletion,           174,  win:Informational,  "IO StallLatencies"
     CacheMemoryUsage,            175,  win:Informational,  "SubstrateTelemetry"
-    CacheSetLgposModify,         176,  win:Verbose,        "BF BFRESMGR"
+    CacheSetLgposModify,         176,  win:Verbose,        "BF BFRESMGR BFRESMGRSUBSAMPLED"
 
 START_TRACE_DEFNS:
 

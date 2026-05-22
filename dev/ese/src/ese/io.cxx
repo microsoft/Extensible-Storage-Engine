@@ -1286,9 +1286,8 @@ ERR ErrIOResizeUpdateDbHdrLgposLast( const IFMP ifmp, const LGPOS& lgposLastResi
         }
         else if ( icmpLgposLastVsCurrent < 0 )
         {
-            Assert( !pfmp->FShrinkDatabaseEofOnAttach() &&
-                    ( PinstFromIfmp( ifmp )->m_plog->FRecoveringMode() == fRecoveringRedo ) );
-
+            // we don't expect to ever go back under normal resize conditions.
+            Assert( fFalse );
         }
     }
 
@@ -4194,7 +4193,7 @@ ERR FMP::ErrDBReadPages(
         // If we got an unexpected lost flush error, loop for a while to see if the page fixes itself.
         if ( ( err == JET_errReadLostFlushVerifyFailure ) && !FNegTest( fCorruptingWithLostFlush ) )
         {
-            DWORD cRetriesMax = 0;
+            DWORD cRetriesMax = 0, cRetriesToAssert = 0;
             
 #ifdef DEBUG
             const CPG cpgActual = pgnoEnd - pgnoStart + 1;
@@ -4205,10 +4204,14 @@ ERR FMP::ErrDBReadPages(
             }
 
             cRetriesMax = 100;
+            
+            // Unfortunately, there seems to be hardware which loses writes in our test pass pool of machines.
+            cRetriesToAssert = 2;
 #else // !DEBUG
             // FNegTest() always returns fFalse in RETAIL, so do not run the retry loop when running tests, otherwise
             // they will get confused with multiple events and take too long with 1 sec per lost flush detected.
             cRetriesMax = ( _wcsicmp( WszUtilProcessName(), L"Microsoft.Exchange.Store.Worker" ) == 0 ) ? 10 : 0;
+            cRetriesToAssert = 1;
 #endif // DEBUG
 
             if ( cRetriesMax > 0 )
@@ -4231,7 +4234,7 @@ ERR FMP::ErrDBReadPages(
                     UtilSleep( 100 );
                 }
 
-                AssertTrack( fFalse, OSFormat( "UnexpectedLostFlush:%I32u:%d:%d", cRetries, err, errRetry ) );
+                AssertTrack( cRetries < cRetriesToAssert, OSFormat( "UnexpectedLostFlush:%I32u:%d:%d", cRetries, err, errRetry ) );
             }
         }
 
@@ -4604,7 +4607,7 @@ ERR ErrBeginDatabaseIncReseedTracing_( _In_ IFileSystemAPI * pfsapi, _In_ JET_PC
 
     //  create the tracing file
 
-    CPRINTF * const pcprintfAlloc = new CPRINTFFILE( wszIrsRawFile );
+    CPRINTF * const pcprintfAlloc = new CPRINTFFILE( wszIrsRawFile, CPRINTFFILE::FILEENCODING::ASCII );
     Alloc( pcprintfAlloc ); // avoid clobbering the default / NULL tracer
 
     //  set tracing to goto the tracing file
@@ -4765,6 +4768,7 @@ ERR CIrsOpContext::ErrCheckAttachedIrsContext( const INST * const pinst, PCWSTR 
     err = ErrUtilReadShadowedHeader(    pinst,
                                         pinst->m_pfsapi,
                                         m_pfapiDb,
+                                        JET_filetypeDatabase,
                                         (BYTE*)pdbfilehdrCheck,
                                         g_cbPage,
                                         OffsetOf( DBFILEHDR, le_cbPageSize ) );
@@ -4991,6 +4995,7 @@ ERR ErrIRSAttachDatabaseForIrsV2( _Inout_ INST * const pinst, _In_ PCWSTR wszDat
     err = ErrUtilReadShadowedHeader(    pinst,
                                         pinst->m_pfsapi,
                                         pfapiDb,
+                                        JET_filetypeDatabase,
                                         (BYTE*)pdbfilehdr,
                                         g_cbPage,
                                         OffsetOf( DBFILEHDR, le_cbPageSize ) );
@@ -5853,6 +5858,7 @@ RestartFromLowerLogGeneration:
     err = ErrUtilReadShadowedHeader(    pinst,
                                         pfsapi,
                                         pfapiCheckpoint,
+                                        JET_filetypeCheckpoint,
                                         (BYTE*)pcheckpoint,
                                         sizeof( CHECKPOINT ),
                                         -1,
@@ -6487,6 +6493,7 @@ ERR ErrIsamRemoveLogfile(
             pinstNil,
             pfsapi,
             wszDatabase,
+            JET_filetypeDatabase,
             reinterpret_cast<BYTE *>( pdbfilehdr ),
             g_cbPage,
             OffsetOf( DBFILEHDR_FIX, le_cbPageSize ),
@@ -6896,7 +6903,7 @@ ERR ErrIOReadDbPages(
     PGNO pgnoMaxDb = pgnoEnd + 1;
 
     volatile LONG acRead = 0;
-    CAutoResetSignal asigDone( CSyncBasicInfo( _T( "ErrIOReadDbPages::asigDone" ) ) );
+    CAutoResetSignal asigDone( CSyncBasicInfo( "ErrIOReadDbPages::asigDone" ) );
 
     READPAGE_DATA readdata;
     readdata.err = JET_errSuccess;

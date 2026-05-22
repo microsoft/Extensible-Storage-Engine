@@ -64,6 +64,7 @@ class ResMgrEmulatorBasicTest : public UNITTEST
         ERR ErrFixedChkptDepthModeMediumDepth_( const bool fUseSetLgposModifyTrace );
         ERR ErrFixedChkptDepthModeBigDepth_( const bool fUseSetLgposModifyTrace );
         ERR ErrFixedChkptDepthModeBigDepthSmallCache_( const bool fUseSetLgposModifyTrace );
+        ERR ErrSubSampling_();
 };
 
 ResMgrEmulatorBasicTest ResMgrEmulatorBasicTest::s_instance;
@@ -132,6 +133,9 @@ ERR ResMgrEmulatorBasicTest::ErrTest()
     TestCall( ErrFixedChkptDepthModeMediumDepth_( true /* fUseSetLgposModifyTrace */ ) );
     TestCall( ErrFixedChkptDepthModeBigDepth_( true /* fUseSetLgposModifyTrace */ ) );
     TestCall( ErrFixedChkptDepthModeBigDepthSmallCache_( true /* fUseSetLgposModifyTrace */ ) );
+
+    // SubSampling
+    TestCall( ErrSubSampling_() );
 
 HandleError:
     return err;
@@ -3947,6 +3951,213 @@ ERR ResMgrEmulatorBasicTest::ErrFixedChkptDepthModeBigDepthSmallCache_( const bo
     const PageEvictionEmulator::STATS& statsIfmp = emulator.GetStats( 0 );
     TestCheck( statsIfmp.lgenMin == 1 );
     TestCheck( statsIfmp.lgenMax == 20 );
+
+HandleError:
+
+    emulator.Term();
+    BFFTLTerm( pbfftlc );
+    delete[] rgbftrace;
+
+    return err;
+}
+
+//  ================================================================
+ERR ResMgrEmulatorBasicTest::ErrSubSampling_()
+//  ================================================================
+{
+    ERR err = JET_errSuccess;
+
+    printf( "\t%s\r\n", __FUNCTION__ );
+
+    PageEvictionEmulator& emulator = PageEvictionEmulator::GetEmulatorObj();
+    BFFTLContext* pbfftlc = NULL;
+    PageEvictionAlgorithmLRUTest algorithm;
+
+    //  Scenario:
+    //  - Init; (1)
+    //  - Cache 100 pages; (101)
+    //  - Evict/scavenge first 95 pages (LRU-1 behavior); (196)
+    //  - Cache pages 91-95; (201)
+    //  - Touch pages 96-100; (206)
+    //  - Term; (207)
+    //  - Sentinel. (208)
+
+    BFTRACE* const rgbftrace = new BFTRACE[208];
+
+    if ( rgbftrace == NULL )
+    {
+        return NULL;
+    }
+
+    memset( rgbftrace, 0, 208 * sizeof( BFTRACE ) );
+    size_t iTrace = 0;
+    TICK tick = 0;
+
+    // Initialize the sampling in the emulator to be able to count the events that will be sampled.
+    TestCall( emulator.ErrSetSamplingParameters( 5, 0 ) );
+    // Count sampled events in each of the phases of the scenario
+    int cSampledCache = 0;
+    int cSampledEvict = 0;
+    int cSampledCacheB = 0;
+    int cSampledTouch = 0;
+
+    //  - Init; (1)
+
+    tick += 200;
+    rgbftrace[iTrace].tick = tick;
+    rgbftrace[iTrace].traceid = bftidSysResMgrInit;
+    rgbftrace[iTrace].bfinit.K = 1;
+    rgbftrace[iTrace].bfinit.csecCorrelatedTouch = 0.128;
+    rgbftrace[iTrace].bfinit.csecTimeout = 100.0;
+    rgbftrace[iTrace].bfinit.csecUncertainty = 0.1;
+    rgbftrace[iTrace].bfinit.dblHashLoadFactor = 5.0;
+    rgbftrace[iTrace].bfinit.dblHashUniformity = 1.0;
+    rgbftrace[iTrace].bfinit.dblSpeedSizeTradeoff = 0.0;
+
+    iTrace++;
+
+    //  - Cache 100 pages; (101)
+
+    for ( PGNO pgno = 1; iTrace < 101; iTrace++ )
+    {
+        tick += 200;
+        rgbftrace[iTrace].tick = tick;
+        rgbftrace[iTrace].traceid = bftidCache;
+        BFTRACE::BFCache_* pbfcache = &rgbftrace[iTrace].bfcache;
+        pbfcache->ifmp = 0;
+        pbfcache->pgno = pgno;
+        pbfcache->pctPri = 100;
+        pbfcache->fUseHistory = true;
+        pbfcache->fNewPage = false;
+        if ( emulator.FSamplePage( IFMPPGNO( 0, pgno ) ) )
+        {
+            cSampledCache++;
+        }
+        pgno++;
+    }
+
+    //  - Evict/scavenge first 95 pages (LRU-1 behavior); (196)
+
+    for ( PGNO pgno = 1; iTrace < 196; iTrace++ )
+    {
+        tick += 200;
+        rgbftrace[iTrace].tick = tick;
+        rgbftrace[iTrace].traceid = bftidEvict;
+        BFTRACE::BFEvict_* pbfevict = &rgbftrace[iTrace].bfevict;
+        pbfevict->ifmp = 0;
+        pbfevict->pgno = pgno;
+        pbfevict->fCurrentVersion = fTrue;
+        pbfevict->pctPri = 100;
+        pbfevict->bfef = bfefReasonAvailPool;
+        if ( emulator.FSamplePage( IFMPPGNO( 0, pgno ) ) )
+        {
+            cSampledEvict++;
+        }
+        pgno++;
+    }
+
+    //  - Cache pages 91-95; (201)
+
+    for ( PGNO pgno = 91; iTrace < 201; iTrace++ )
+    {
+        tick += 200;
+        rgbftrace[iTrace].tick = tick;
+        rgbftrace[iTrace].traceid = bftidCache;
+        BFTRACE::BFCache_* pbfcache = &rgbftrace[iTrace].bfcache;
+        pbfcache->ifmp = 0;
+        pbfcache->pgno = pgno;
+        pbfcache->pctPri = 100;
+        pbfcache->fUseHistory = true;
+        pbfcache->fNewPage = false;
+        if ( emulator.FSamplePage( IFMPPGNO( 0, pgno ) ) )
+        {
+            cSampledCacheB++;
+        }
+        pgno++;
+    }
+
+    //  - Touch pages 96-100; (206)
+
+    for ( PGNO pgno = 96; iTrace < 206; iTrace++ )
+    {
+        tick += 200;
+        rgbftrace[iTrace].tick = tick;
+        rgbftrace[iTrace].traceid = bftidTouch;
+        BFTRACE::BFTouch_* pbftouch = &rgbftrace[iTrace].bftouch;
+        pbftouch->ifmp = 0;
+        pbftouch->pgno = pgno;
+        pbftouch->pctPri = 100;
+        pbftouch->fUseHistory = true;
+        if ( emulator.FSamplePage( IFMPPGNO( 0, pgno ) ) )
+        {
+            cSampledTouch++;
+        }
+        pgno++;
+    }
+
+    //  - Term; (207)
+
+    tick += 200;
+    rgbftrace[iTrace].tick = tick;
+    rgbftrace[iTrace].traceid = bftidSysResMgrTerm;
+    iTrace++;
+
+    //  - Sentinel. (208)
+
+    rgbftrace[iTrace].traceid = bftidInvalid;
+    // End creation of trace
+
+    TestCheck( rgbftrace != NULL );
+
+    //  Init driver.
+
+    TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
+
+    //  Fill in database info.
+
+    pbfftlc->cIFMP = 1;
+    pbfftlc->rgpgnoMax[0] = 100;
+
+    //  Init./run.
+
+    TestCall( emulator.ErrSetCacheSize( PageEvictionEmulator::peecspVariable ) );
+    TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
+    TestCall( emulator.ErrExecute() );
+
+    //  Validation.
+
+    const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
+    TestCall( emulator.ErrDumpStats( false ) );
+
+    TestCheck( stats.cpgCachedMax == cSampledCache );
+    TestCheck( stats.cRequestedUnique == cSampledCache );
+    TestCheck( stats.cRequested == ( cSampledCache + cSampledCacheB + cSampledTouch ) );
+    TestCheck( stats.cResMgrCycles == 1 );
+    TestCheck( stats.cResMgrAbruptCycles == 0 );
+    TestCheck( stats.cDiscardedTraces == 0 );
+    TestCheck( stats.cOutOfRangeTraces == 0 );
+    TestCheck( stats.cFaultsReal == ( cSampledCache + cSampledCacheB ) );
+    TestCheck( stats.cFaultsSim == ( cSampledCache + cSampledCacheB ) );
+    TestCheck( stats.cFaultsRealAvoidable == cSampledCacheB );
+    TestCheck( stats.cFaultsSimAvoidable == cSampledCacheB );
+    TestCheck( stats.cTouchesReal == cSampledTouch );
+    TestCheck( stats.cTouchesSim == cSampledTouch );
+    TestCheck( stats.cCaches == ( cSampledCacheB + cSampledCache ) );
+    TestCheck( stats.cTouches == cSampledTouch );
+    TestCheck( stats.cCachesTurnedTouch == 0 );
+    TestCheck( stats.cTouchesTurnedCache == 0 );
+    TestCheck( stats.cEvictionsReal == cSampledEvict );
+    TestCheck( stats.cEvictionsSim == ( cSampledEvict + cSampledCacheB + cSampledTouch ) );
+    TestCheck( stats.cEvictionsFailed == 0 );
+    TestCheck( stats.cEvictionsCacheTooBig == 0 );
+    TestCheck( stats.cEvictionsCacheTooOld == 0 );
+    TestCheck( stats.cEvictionsPurge == ( cSampledCacheB + cSampledTouch ) );
+
+    TestCheck( stats.pctCacheFaultRateReal == 100.0 * ( cSampledCache + cSampledCacheB ) / ( cSampledCache + cSampledCacheB + cSampledTouch ) );
+    TestCheck( stats.pctCacheFaultRateSim == 100.0 * ( cSampledCache + cSampledCacheB ) / ( cSampledCache + cSampledCacheB + cSampledTouch ) );
+    TestCheck( stats.pctCacheFaultRateRealAvoidable == 100.0 * cSampledCacheB / ( cSampledCache + cSampledCacheB + cSampledTouch ) );
+    TestCheck( stats.pctCacheFaultRateSimAvoidable == 100.0 * cSampledCacheB / ( cSampledCache + cSampledCacheB + cSampledTouch ) );
+    TestCheck( stats.pctCacheSizeRatioSim == -1.0 );
 
 HandleError:
 

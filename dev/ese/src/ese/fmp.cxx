@@ -321,16 +321,16 @@ FMP::FMP()
     :   CZeroInit( sizeof( FMP ) ),
         m_critLatch( CLockBasicInfo( CSyncBasicInfo( szFMP ), rankFMP, 0 ) ),
         m_critDbtime( CLockBasicInfo( CSyncBasicInfo( szDbtime ), rankDbtime, 0 ) ),
-        m_gateWriteLatch( CSyncBasicInfo( _T( "FMP::m_gateWriteLatch" ) ) ),
+        m_gateWriteLatch( CSyncBasicInfo( "FMP::m_gateWriteLatch" ) ),
         m_semRangeLock( CSyncBasicInfo( "FMP::m_semRangeLock" ) ),
         m_dbid( dbidMax ),
         m_rwlDetaching( CLockBasicInfo( CSyncBasicInfo( szFMPDetaching ), rankFMPDetaching, 0 ) ),
         m_rwlBFContext( CLockBasicInfo( CSyncBasicInfo( szBFFMPContext ), rankBFFMPContext, 0 ) ),
         m_sxwlRedoMaps( CLockBasicInfo( CSyncBasicInfo( szFMPRedoMaps ), rankFMPRedoMaps, 0 ) ),
-        m_semIOSizeChange( CSyncBasicInfo( _T( "FMP::m_semIOSizeChange" ) ) ),
+        m_semIOSizeChange( CSyncBasicInfo( "FMP::m_semIOSizeChange" ) ),
         m_cAsyncIOForViewCachePending( 0 ),
-        m_semTrimmingDB( CSyncBasicInfo( _T( "FMP::m_semTrimmingDB" ) ) ),
-        m_semDBM( CSyncBasicInfo( _T( "FMP::m_semDBM" ) ) ),
+        m_semTrimmingDB( CSyncBasicInfo( "FMP::m_semTrimmingDB" ) ),
+        m_semDBM( CSyncBasicInfo( "FMP::m_semDBM" ) ),
         m_isdlCreate( isdltypeCreate ),
         m_isdlAttach( isdltypeAttach ),
         m_isdlDetach( isdltypeDetach ),
@@ -1311,7 +1311,7 @@ ERR FMP::ErrNewAndWriteLatch(
                         memset( pdbfilehdr, 0, g_cbPage );
                         // read in db header
                         // note: read will fail from the newly created database path (when createdatabase() calls us)
-                        const ERR errRH = ErrUtilReadShadowedHeader( pinst, pfsapi, wszDatabaseName, (BYTE*)pdbfilehdr, g_cbPage, -1, UtilReadHeaderFlags( urhfReadOnly | urhfNoEventLogging ) );
+                        const ERR errRH = ErrUtilReadShadowedHeader( pinst, pfsapi, wszDatabaseName, JET_filetypeDatabase, (BYTE*)pdbfilehdr, g_cbPage, -1, UtilReadHeaderFlags( urhfReadOnly | urhfNoEventLogging ) );
                         if ( errRH >= JET_errSuccess )
                         {
                             AssertDatabaseHeaderConsistent( pdbfilehdr, g_cbPage, g_cbPage );

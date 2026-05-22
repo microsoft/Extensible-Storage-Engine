@@ -28,7 +28,9 @@ namespace Internal
 
                         virtual FileModeFlags FileModeFlags();
 
-                        virtual void FlushFileBuffers();
+                        virtual void FlushFileBuffers( FileFlushMode fileFlushMode );
+
+                        virtual Int64 CountIoNonFlushed();
 
                         virtual void SetNoFlushNeeded();
 
@@ -77,8 +79,6 @@ namespace Internal
 
                         virtual IntPtr DiskId();
 
-                        virtual Int64 CountIoNonFlushed();
-
                         virtual bool SeekPenalty();
                 };
 
@@ -89,16 +89,22 @@ namespace Internal
                 }
 
                 template< class TM, class TN, class TW >
-                inline void FileBase<TM,TN,TW>::FlushFileBuffers()
+                inline void FileBase<TM,TN,TW>::FlushFileBuffers( FileFlushMode fileFlushMode )
                 {
                     ERR err = JET_errSuccess;
 
-                    Call( Pi->ErrFlushFileBuffers( (IOFLUSHREASON)0 ) );
+                    Call( Pi->ErrFlushFileBuffers( (IOFLUSHREASON)0, (IFileAPI::FileFlushMode)fileFlushMode ) );
 
                     return;
 
                 HandleError:
                     throw EseException( err );
+                }
+
+                template< class TM, class TN, class TW >
+                inline Int64 FileBase<TM, TN, TW>::CountIoNonFlushed()
+                {
+                    return Pi->CioNonFlushed();
                 }
 
                 template< class TM, class TN, class TW >
@@ -413,12 +419,6 @@ namespace Internal
 
                 HandleError:
                     throw EseException( err );
-                }
-
-                template< class TM, class TN, class TW >
-                inline Int64 FileBase<TM,TN,TW>::CountIoNonFlushed()
-                {
-                    return Pi->CioNonFlushed();
                 }
 
                 template< class TM, class TN, class TW >

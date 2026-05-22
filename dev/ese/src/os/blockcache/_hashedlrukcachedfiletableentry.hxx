@@ -294,7 +294,7 @@ ERR CHashedLRUKCachedFileTableEntry<I>::ErrUpdateSparseMapForTrim( _In_ const CO
 
     for ( i = 0; i < m_arraysparseseg.Size() && m_arraysparseseg[ i ].ibLast < invalidate.IbStart(); i++ )
     {
-        Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), m_arraysparseseg[ i ] ) ) );
+        Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( m_arraysparseseg[ i ] ) ) );
     }
 
     sparsesegNew.ibFirst = (    i < m_arraysparseseg.Size() &&
@@ -313,13 +313,13 @@ ERR CHashedLRUKCachedFileTableEntry<I>::ErrUpdateSparseMapForTrim( _In_ const CO
                             m_arraysparseseg[ i ].ibLast :
                             invalidate.IbEnd();
 
-    Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), sparsesegNew ) ) );
+    Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( sparsesegNew ) ) );
 
     for ( ; i < m_arraysparseseg.Size(); i++ )
     {
         if ( invalidate.IbEnd() < m_arraysparseseg[ i ].ibFirst )
         {
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), m_arraysparseseg[ i ] ) ) );
+            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( m_arraysparseseg[ i ] ) ) );
         }
     }
 
@@ -350,11 +350,11 @@ ERR CHashedLRUKCachedFileTableEntry<I>::ErrUpdateSparseMapForWrite( _In_ const C
 
         if ( sparseseg.ibLast < write.IbStart() )
         {
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), sparseseg ) ) );
+            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( sparseseg ) ) );
         }
         else if ( write.IbEnd() < sparseseg.ibFirst )
         {
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), sparseseg ) ) );
+            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( sparseseg ) ) );
         }
         else if ( write.IbStart() <= sparseseg.ibFirst && sparseseg.ibLast <= write.IbEnd() )
         {
@@ -363,23 +363,23 @@ ERR CHashedLRUKCachedFileTableEntry<I>::ErrUpdateSparseMapForWrite( _In_ const C
         {
             sparsesegNew.ibFirst = sparseseg.ibFirst;
             sparsesegNew.ibLast = write.IbStart() - 1;
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), sparsesegNew ) ) );
+            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( sparsesegNew ) ) );
 
             sparsesegNew.ibFirst = write.IbEnd() + 1;
             sparsesegNew.ibLast = sparseseg.ibLast;
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), sparsesegNew ) ) );
+            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( sparsesegNew ) ) );
         }
         else if ( write.IbStart() < sparseseg.ibLast && write.IbEnd() >= sparseseg.ibLast )
         {
             sparsesegNew.ibFirst = sparseseg.ibFirst;
             sparsesegNew.ibLast = write.IbStart() - 1;
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), sparsesegNew ) ) );
+            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( sparsesegNew ) ) );
         }
         else if ( write.IbStart() < sparseseg.ibFirst && write.IbEnd() >= sparseseg.ibFirst )
         {
             sparsesegNew.ibFirst = write.IbEnd() + 1;
             sparsesegNew.ibLast = sparseseg.ibLast;
-            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrSetEntry( arraysparseseg.Size(), sparsesegNew ) ) );
+            Call( ErrToErr<CArray<SparseFileSegment>>( arraysparseseg.ErrAppendEntry( sparsesegNew ) ) );
         }
     }
 

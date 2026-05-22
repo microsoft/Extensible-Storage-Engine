@@ -1466,8 +1466,7 @@ JET_ERR ErrPrintField(
             if ( pBTStats->pBasicCatalog->pSpaceHints )
             {
                 WCHAR wszSpaceHintsGrbits[12];
-                const JET_ERR err = ErrOSStrCbFormatW( wszSpaceHintsGrbits, sizeof(wszSpaceHintsGrbits), L"0x%x", pBTStats->pBasicCatalog->pSpaceHints->grbit );
-                assert( JET_errSuccess == err );
+                OSStrCbFormatW( wszSpaceHintsGrbits, sizeof(wszSpaceHintsGrbits), L"0x%x", pBTStats->pBasicCatalog->pSpaceHints->grbit );
                 assert( rgSpaceFields[eField].cchFieldSize >= (ULONG)LOSStrLengthW( wszSpaceHintsGrbits ) );
                 wprintf( L"%ws%ws", WszFillBuffer( L' ', rgSpaceFields[eField].cchFieldSize - LOSStrLengthW( wszSpaceHintsGrbits ) ), wszSpaceHintsGrbits );
             }
@@ -1784,10 +1783,8 @@ JET_ERR ErrSpaceDumpCtxSetFields(
         wszTemp[0] = L'\0';
         for( ULONG eField = 1; eField < sizeof(rgSpaceFields)/sizeof(rgSpaceFields[0]); eField++ )
         {
-            ULONG ret = StringCbCatW( (WCHAR*)wszTemp, cb, rgSpaceFields[eField].wszField );
-            assert( 0 == ret );
-            ret = StringCbCatW( (WCHAR*)wszTemp, cb, L"," );
-            assert( 0 == ret );
+            OSStrCbAppendW( wszTemp, cb, rgSpaceFields[eField].wszField );
+            OSStrCbAppendW( wszTemp, cb, L"," );
         }
         wszFields = wszTemp;
     }
@@ -1924,7 +1921,7 @@ JET_ERR ErrSpaceDumpCtxSetOptions(
         //  We only allow 1 char + NUL separators, likely it was wrong.
         assert( wszSeparator[0] != L'\0' );
         assert( wszSeparator[1] == L'\0' );
-        if ( S_OK != StringCbCopyW( pespCtx->rgwchSep, sizeof(pespCtx->rgwchSep), wszSeparator ) )
+        if ( JET_errSuccess > ErrOSStrCbCopyW( pespCtx->rgwchSep, sizeof(pespCtx->rgwchSep), wszSeparator ) )
         {
             assertSz( fFalse, "Huh?" );
             return ErrERRCheck( JET_errInvalidParameter );

@@ -41,7 +41,7 @@ namespace Internal
                 {
                     String^ absPath = I()->CachingFilePath();
                     pin_ptr<const Char> wszAbsPathT = PtrToStringChars( absPath );
-                    OSStrCbCopyW( wszAbsPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszAbsPathT );
+                    OSStrCbCopyW( wszAbsPath, cbOSFSAPI_MAX_PATHW, wszAbsPathT );
                 }
 
                 template< class TM, class TN >

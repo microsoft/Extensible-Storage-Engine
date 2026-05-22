@@ -165,6 +165,16 @@ TICK TickOSTimeCurrent()
     return tickCurrent;
 }
 
+//  returns the current timer tick count (1000 Hz) factoring out time the computer was hibernating or asleep
+
+TICK TickOSTimeInterruptCurrent()
+{
+    QWORD qwUnbiasedTime = 0;
+    QueryUnbiasedInterruptTime( &qwUnbiasedTime );
+
+    return TICK( qwUnbiasedTime / 10000 );
+}
+
 
 //  High Resolution Timer
 

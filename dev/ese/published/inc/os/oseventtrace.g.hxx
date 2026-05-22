@@ -90,3 +90,27 @@ enum OSEventTraceGUID
     etguidOsTraceBase   // general tags autogen'd before this one
 };
 
+enum OSEventTraceKeywordGUID : ULONGLONG
+{
+    _etguidKeywordError = 0x0000000000000001,
+    _etguidKeywordPerformance = 0x0000000000000002,
+    _etguidKeywordTrace = 0x0000000000000004,
+    _etguidKeywordTransaction = 0x0000000000000008,
+    _etguidKeywordSpace = 0x0000000000000010,
+    _etguidKeywordBF = 0x0000000000000020,
+    _etguidKeywordIO = 0x0000000000000040,
+    _etguidKeywordLOG = 0x0000000000000080,
+    _etguidKeywordTask = 0x0000000000000100,
+    _etguidKeywordTest = 0x0000000000000200,
+    _etguidKeywordBFRESMGR = 0x0000000000000400,
+    _etguidKeywordStationId = 0x0000000000000800,
+    _etguidKeywordJETTraceTag = 0x0000000000001000,
+    _etguidKeywordStallLatencies = 0x0000000000002000,
+    _etguidKeywordDataWorkingSet = 0x0000000000004000,
+    _etguidKeywordIOEX = 0x0000000000008000,
+    _etguidKeywordIOSESS = 0x0000000000010000,
+    _etguidKeywordSubstrateTelemetry = 0x0000000000020000,
+    _etguidKeywordBFRESMGRSUBSAMPLED = 0x0000000000040000,
+    _etguidKeywordCompressExp = 0x0000000100000000,
+};
+

@@ -356,45 +356,15 @@ JETUNITTEST( FMP, NewAndWriteLatch )
         // Verify shrink options.
         CHECK( !pfmp->FShrinkDatabaseEofOnAttach() );
         CHECK( !pfmp->FRunShrinkDatabaseFullCatOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontMoveRootsOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateLeakedPagesOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateIndeterminatePagesOnAttach() );
         pfmp->SetShrinkDatabaseOptions( JET_bitShrinkDatabaseEofOnAttach );
         CHECK( pfmp->FShrinkDatabaseEofOnAttach() );
         CHECK( !pfmp->FRunShrinkDatabaseFullCatOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontMoveRootsOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateLeakedPagesOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateIndeterminatePagesOnAttach() );
         pfmp->SetShrinkDatabaseOptions( JET_bitShrinkDatabaseFullCategorizationOnAttach );
         CHECK( !pfmp->FShrinkDatabaseEofOnAttach() );
         CHECK( pfmp->FRunShrinkDatabaseFullCatOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontMoveRootsOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateLeakedPagesOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateIndeterminatePagesOnAttach() );
-        pfmp->SetShrinkDatabaseOptions( JET_bitShrinkDatabaseDontMoveRootsOnAttach );
-        CHECK( !pfmp->FShrinkDatabaseEofOnAttach() );
-        CHECK( !pfmp->FRunShrinkDatabaseFullCatOnAttach() );
-        CHECK( pfmp->FShrinkDatabaseDontMoveRootsOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateLeakedPagesOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateIndeterminatePagesOnAttach() );
-        pfmp->SetShrinkDatabaseOptions( JET_bitShrinkDatabaseDontTruncateLeakedPagesOnAttach );
-        CHECK( !pfmp->FShrinkDatabaseEofOnAttach() );
-        CHECK( !pfmp->FRunShrinkDatabaseFullCatOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontMoveRootsOnAttach() );
-        CHECK( pfmp->FShrinkDatabaseDontTruncateLeakedPagesOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateIndeterminatePagesOnAttach() );
-        pfmp->SetShrinkDatabaseOptions( JET_bitShrinkDatabaseDontTruncateIndeterminatePagesOnAttach );
-        CHECK( !pfmp->FShrinkDatabaseEofOnAttach() );
-        CHECK( !pfmp->FRunShrinkDatabaseFullCatOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontMoveRootsOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateLeakedPagesOnAttach() );
-        CHECK( pfmp->FShrinkDatabaseDontTruncateIndeterminatePagesOnAttach() );
         pfmp->SetShrinkDatabaseOptions( NO_GRBIT );
         CHECK( !pfmp->FShrinkDatabaseEofOnAttach() );
         CHECK( !pfmp->FRunShrinkDatabaseFullCatOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontMoveRootsOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateLeakedPagesOnAttach() );
-        CHECK( !pfmp->FShrinkDatabaseDontTruncateIndeterminatePagesOnAttach() );
 
         // Verify shrink time quota.
         CHECK( -1 == pfmp->DtickShrinkDatabaseTimeQuota() );
@@ -439,6 +409,7 @@ JETUNITTEST( FMP, NewAndWriteLatch )
         pfmp->SetPgnoShrinkTarget( 10 );
         CHECK( pfmp->FShrinkIsActive() );
         CHECK( pfmp->FPgnoShrinkTargetIsSet() );
+        CHECK( 10 == pfmp->PgnoShrinkTarget() );
         CHECK( !pfmp->FBeyondPgnoShrinkTarget( pgnoNull ) );
         CHECK( !pfmp->FBeyondPgnoShrinkTarget( pgnoNull, 0 ) );
         CHECK( !pfmp->FBeyondPgnoShrinkTarget( pgnoNull, 1 ) );

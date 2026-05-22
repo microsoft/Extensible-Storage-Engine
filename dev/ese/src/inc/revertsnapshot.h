@@ -13,6 +13,7 @@
 #define csecSpaceUsagePeriodicLog       3600
 #define cbMaxRBSSizeAllowed             100LL*1024*1024*1024
 #define cbRBSIOSize                     512*1024
+#define cbMaxRBSDiskSpace               300LL*1024*1024*1024
 
 C_ASSERT( cbRBSSegmentSizeMask == cbRBSSegmentSize - 1 );
 
@@ -200,7 +201,7 @@ INLINE ULONG IbRBSSegmentOffsetFromFullOffset( DWORD ib )   { return ib & cbRBSS
 #include "revertsnapshotrecords.h"
 
 const ULONG ulRBSVersionMajor         = 1;
-const ULONG ulRBSVersionMinor         = 5;
+const ULONG ulRBSVersionMinor         = 6;
 
 class CRevertSnapshot;
 
@@ -474,6 +475,9 @@ public:
     // Max alloted space for revert snapshots when the disk space is low.
     virtual QWORD CbMaxSpaceForRBSWhenLowDiskSpace() = 0;
 
+    // Max alloted space for revert snapshots under normal conditions.
+    virtual QWORD CbMaxSpaceForRBS() = 0;
+
     // Time since when we need revert snapshots relative to current time.
     virtual INT CSecRBSMaxTimeSpan() = 0;
     
@@ -503,6 +507,7 @@ public:
     QWORD CbLowDiskSpaceThreshold();
     QWORD CbLowDiskSpaceDisableRBSThreshold();
     QWORD CbMaxSpaceForRBSWhenLowDiskSpace();
+    QWORD CbMaxSpaceForRBS();
     INT CSecRBSMaxTimeSpan();
     INT CSecMinCleanupIntervalTime();
     LONG LFirstValidRBSGen() { return 1; }
@@ -530,6 +535,11 @@ INLINE QWORD RBSCleanerConfig::CbLowDiskSpaceDisableRBSThreshold()
 INLINE QWORD RBSCleanerConfig::CbMaxSpaceForRBSWhenLowDiskSpace()
 {
     return ( (QWORD) UlParam( m_pinst, JET_paramFlight_RBSMaxSpaceWhenLowDiskSpaceGb ) ) * 1024 * 1024 * 1024;
+}
+
+INLINE QWORD RBSCleanerConfig::CbMaxSpaceForRBS()
+{
+    return cbMaxRBSDiskSpace;
 }
 
 INLINE INT RBSCleanerConfig::CSecMinCleanupIntervalTime()
@@ -713,7 +723,8 @@ class CRevertSnapshot
     ERR ErrCaptureRootPageMove(
         const DBID dbid,
         const PGNO pgnoSrc,
-        const PGNO pgnoDest );
+        const PGNO pgnoDest,
+        const DBTIME dbtime );
 
     ERR ErrCaptureEmptyPages(
             DBID dbid,
@@ -732,7 +743,7 @@ class CRevertSnapshot
     VOID AssertAllFlushed()
     {
         Assert( m_cNextFlushSegment == m_cNextWriteSegment &&
-                ( m_pActiveBuffer == NULL || m_pActiveBuffer->m_ibNextRecord <= sizeof(RBSSEGHDR) ) );
+                ( m_pActiveBuffer == NULL || m_pActiveBuffer->m_ibNextRecord == 0 || m_pActiveBuffer->m_ibNextRecord == sizeof(RBSSEGHDR) ) );
     }
 
     ERR ErrSetReadBuffer( ULONG iStartSegment );
@@ -1024,14 +1035,17 @@ private:
             PGNO m_pgnoSrc;
             PGNO m_pgnoDest;
 
+            DBTIME m_dbtime;
+
         public:
 
-            CRootPageRecord( BOOL fDeleteOperation, PGNO pgnoSrc, PGNO pgnoDest ) :
+            CRootPageRecord( BOOL fDeleteOperation, PGNO pgnoSrc, PGNO pgnoDest, DBTIME dbtime ) :
                 m_fDeleteOperation( fDeleteOperation ),
                 m_pgnoSrc( pgnoSrc ),
-                m_pgnoDest( pgnoDest ) {}
+                m_pgnoDest( pgnoDest ),
+                m_dbtime( dbtime ) {}
 
-            CRootPageRecord() : CRootPageRecord( fFalse, 0, 0 ) {}
+            CRootPageRecord() : CRootPageRecord( fFalse, 0, 0, dbtimeNil ) {}
 
             ~CRootPageRecord() {}
 
@@ -1040,12 +1054,14 @@ private:
                 m_fDeleteOperation  = rootpagerec.m_fDeleteOperation;
                 m_pgnoSrc           = rootpagerec.m_pgnoSrc;
                 m_pgnoDest          = rootpagerec.m_pgnoDest;
+                m_dbtime            = rootpagerec.m_dbtime;
                 return *this;
             }
 
             PGNO PgnoSrc()  const           { return m_pgnoSrc; }
             PGNO PgnoDest() const           { return m_pgnoDest; }
             BOOL FDeleteOperation() const   { return m_fDeleteOperation; }
+            DBTIME Dbtime() const           { return m_dbtime; }
     };
 
     class CPageFDPDeleteState
@@ -1121,6 +1137,7 @@ private:
     ERR ErrDBDiskPageFDPRootDelete( void* pvPage, PGNO pgno, BOOL fCheckDiskPageFDPRootDelete, BOOL fOverrideDiskPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPgnoFDPRootDelete );
     static INT __cdecl ICRBSDatabaseRevertContextCmpPgRec( const CPagePointer* pppg1, const CPagePointer* pppg2 );
     static INT __cdecl ICRBSDatabaseRevertContextPgEquals( const CPagePointer* pppg1, const CPagePointer* pppg2 );
+    static INT __cdecl ICRBSDatabaseRootPageRecordEquals( const CRootPageRecord* prootpagerecord1, const CRootPageRecord* prootpagerecord2 );
     static void OsWriteIoComplete(
         const ERR errIo,
         IFileAPI* const pfapi,
@@ -1139,7 +1156,7 @@ public:
     ERR ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrFlush );
     ERR ErrRBSCaptureDbHdrFromRBS( RBSDbHdrRecord* prbsdbhdrrec, BOOL* pfGivenDbfilehdrCaptured );
     ERR ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplaceCached, BOOL fCheckDiskPageFDPRootDelete, BOOL fOverrideExistingPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPageAddedToCache );
-    ERR ErrAddRootPageRecord( BOOL fDeleteOperation, PGNO pgnoSrc, PGNO pgnoDest );
+    ERR ErrAddRootPageRecord( const BOOL fDeleteOperation, const PGNO pgnoSrc, const PGNO pgnoDest, const DBTIME dbtime );
     ERR ErrApplyRootPageRecords();
     ERR ErrCapturePageFDPDeleteState( const LONG lRBSGen, const USHORT cbDbPageSize, _In_ PCWSTR wszDirPath, _In_ PCWSTR wszRBSBaseName );
     ERR ErrRBSInitRootPageDeleteState( const LONG lRBSGen, const USHORT cbDbPageSize, _In_ PCWSTR wszDirPath, _In_ PCWSTR wszRBSBaseName, _Out_ CPG* pcpgCached );
@@ -1221,7 +1238,7 @@ private:
     ERR ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDBHdrFromRBS, BOOL fDbHeaderOnly, BOOL fRevertStateRootPageRecords, BOOL* pfGivenDbfilehdrCaptured );
     ERR ErrCheckApplyRBSContinuation();
     ERR ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew, const BOOL fPageFDPNonRevertableDelete );
-    ERR ErrAddRootPageRecord( DBID dbid, BOOL fDeleteOperation, PGNO pgnoSrc, PGNO pgnoDest );
+    ERR ErrAddRootPageRecord( const DBID dbid, const BOOL fDeleteOperation, const PGNO pgnoSrc, const PGNO pgnoDest, const DBTIME dbtime );
 
     ERR ErrRevertCheckpointInit();
     ERR ErrRevertCheckpointCleanup();
@@ -1271,4 +1288,4 @@ public:
 
 VOID UtilLoadRBSinfomiscFromRBSfilehdr( JET_RBSINFOMISC* prbsinfomisc, const ULONG cbrbsinfomisc, const RBSFILEHDR* prbsfilehdr );
 VOID RBSResourcesCleanUpFromInst( _In_ INST * const pinst );
-ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno, _In_ const DBTIME dbtimeLast, ULONG fPreImageFlags, _In_ const BFPriority bfpri, _In_ const TraceContext& tc );
+ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno, _In_ const DBTIME dbtimeLast, ULONG fPreImageFlags, _In_ const BOOL fPageFDPDeleteFlagExpected, _In_ const BFPriority bfpri, _In_ const TraceContext& tc );

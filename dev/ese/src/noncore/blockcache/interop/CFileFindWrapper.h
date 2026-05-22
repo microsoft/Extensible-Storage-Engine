@@ -76,7 +76,7 @@ namespace Internal
                     ExCall( foundPath = I()->Path() );
 
                     pin_ptr<const Char> wszFoundPath = PtrToStringChars( foundPath );
-                    Call( ErrOSStrCbCopyW( wszAbsFoundPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszFoundPath ) );
+                    Call( ErrOSStrCbCopyW( wszAbsFoundPath, cbOSFSAPI_MAX_PATHW, wszFoundPath ) );
 
                 HandleError:
                     if ( err < JET_errSuccess )

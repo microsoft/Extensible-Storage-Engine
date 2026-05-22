@@ -1549,6 +1549,92 @@ VOID PERFSetDatabaseNames( IFileSystemAPI* const pfsapi )
 }
 
 
+#ifdef ENABLE_MICROSOFT_MANAGED_DATACENTER_LEVEL_OPTICS
+
+//
+//      Trace to an IRS.RAW the init failure.
+//
+
+void DumpFailedInitToIrsRaw(
+    _In_ INST * pinst,
+    _In_ PCWSTR wszInstDisplayName,
+    _In_ PCWSTR wszErrorState, 
+    _In_ PCWSTR wszSeconds, 
+    _In_ PCWSTR wszFailingMode, 
+    _In_ PCWSTR wszFailingAddress, 
+    _In_ PCWSTR wszHaPublishingFacts )
+{
+    __int64  fileTime;
+    WCHAR    wszDate[32];
+    WCHAR    wszTime[32];
+    size_t   cchRequired;
+    WCHAR    wszInstIrsFile[ 5 /* Inst- */ + 3 /* inst log base name */ + 1 ];
+    WCHAR    wszInstIrsPathBase[ OSFSAPI_MAX_PATH ];
+    CPRINTF * pcprintfPageTrace = NULL;
+
+    if ( pinst == NULL || pinst->m_pfsapi == NULL )
+    {
+        FireWall( "InstIrsUnexpectedInitExitBeforeInstOrPfsapiAlloc" );
+        return;
+    }
+
+    if ( ( SzParam( pinst, JET_paramLogFilePath ) == NULL ) ||
+         ( SzParam( pinst, JET_paramLogFilePath )[0] == L'\0' ) )
+    {
+        FireWall( "InstIrsLogPathNotSet" );
+        return;
+    }
+
+    if ( ( SzParam( pinst, JET_paramBaseName ) == NULL ) ||
+         ( SzParam( pinst, JET_paramBaseName )[0] == L'\0' ) )
+    {
+        FireWall( "InstIrsBaseNameNotSet" );
+        return;
+    }
+
+    //  make path
+    //
+    OSStrCbFormatW( wszInstIrsFile, sizeof( wszInstIrsFile ), L"Inst-%ws", SzParam( pinst, JET_paramBaseName ) );
+    ERR errT = pinst->m_pfsapi->ErrPathBuild( 
+            SzParam( pinst, JET_paramLogFilePath ), 
+            wszInstIrsFile, 
+            L"", // ext filled by IRS func / ErrBeginDatabaseIncReseedTracing()
+            wszInstIrsPathBase,
+            sizeof( wszInstIrsPathBase ) );
+    if ( errT < JET_errSuccess )
+    {
+        FireWall( "InstIrsPathBuildFail" );
+        return;
+    }
+
+    //  start tracing (before anything else)
+    //
+    errT = ErrBeginDatabaseIncReseedTracing( pinst->m_pfsapi, wszInstIrsPathBase, &pcprintfPageTrace );
+    if ( errT < JET_errSuccess )
+    {
+        AssertSzRTL( FRFSAnyFailureDetected(), "InstIrsFailedIrsOpen" );
+        return;
+    }
+
+    fileTime = UtilGetCurrentFileTime();
+    ErrUtilFormatFileTimeAsTimeWithSeconds( fileTime, wszTime, _countof(wszTime), &cchRequired);
+    ErrUtilFormatFileTimeAsDate( fileTime, wszDate, _countof(wszDate), &cchRequired);
+    (*pcprintfPageTrace)( "Begin " __FUNCTION__ "() @ Time %ws %ws\r\n", wszTime, wszDate );
+
+    // Consider adding ERRFormatIssueSource() to get last error information and Server Version.
+    (*pcprintfPageTrace)( "JetInit (%ws) Failed with %ws in %ws seconds.\r\n", wszInstDisplayName, wszErrorState, wszSeconds );
+    (*pcprintfPageTrace)( "Failing Mode: %ws\r\n", wszFailingMode );
+    (*pcprintfPageTrace)( "Failing Address: %ws\r\n", wszFailingAddress );
+    (*pcprintfPageTrace)( "HA Pub Facts: %ws\r\n", wszHaPublishingFacts );
+
+    EndDatabaseIncReseedTracing( &pcprintfPageTrace );
+
+    return;
+}
+
+#endif // ENABLE_MICROSOFT_MANAGED_DATACENTER_LEVEL_OPTICS
+
+
 //
 //      CIsamSequenceDiagLog
 //
@@ -1778,6 +1864,9 @@ __int64 CIsamSequenceDiagLog::UsecTimer( _In_ INT seqBegin, _In_ const INT seqEn
         return 0;
     }
     
+    Expected( FTriggeredSequence_( 0 ) );  // be odd to have not started sequence and ask for timings
+    Expected( seqEnd + 1 != m_cseqMax || FTriggeredSequence_( seqEnd ) );
+
     if ( !FValidSequence_( seqBegin ) ||
         !FValidSequence_( seqEnd ) ||
         seqBegin >= seqEnd ||
@@ -1793,9 +1882,10 @@ __int64 CIsamSequenceDiagLog::UsecTimer( _In_ INT seqBegin, _In_ const INT seqEn
     {
         seqBegin--;
     }
-    
+    Expected( seqBegin < seqEnd );  // this should be true unless we had a failure before the 2nd sequence (seq = 1).  Let us see if it happens.
+
     if ( !FTriggeredSequence_( seqBegin ) ||
-        !FTriggeredSequence_( seqEnd ) )
+         !FTriggeredSequence_( seqEnd ) )
     {
         return 0;
     }
@@ -2622,14 +2712,17 @@ LOCAL const BYTE bProcFriendlyNameAggregationID = 1;
 
 LONG LProcFriendlyNameICFLPwszPpb( _In_ LONG icf, _Inout_opt_ void* const pvParam1, _Inout_opt_ void* const pvParam2 )
 {
+    ERR err;
+    
     switch ( icf )
     {
         case ICFInit:
         {
             // Even though we'll truncate the string at cchPerfmonInstanceNameMax,
-            // the OSStrCbFormatW() will assert if it truncates the string.
-            (void) ErrOSStrCbFormatW( g_wszProcName, sizeof(g_wszProcName), L"%ws\0" , WszUtilProcessFriendlyName() );
-
+            // OSStrCbFormatW() will Assert on anything but JET_errSuccess, and
+            // truncation is not JET_errSuccess.
+            err = ErrOSStrCbFormatW( g_wszProcName, sizeof(g_wszProcName), L"%ws\0" , WszUtilProcessFriendlyName() );
+            Assert( err == JET_errSuccess || err == JET_errBufferTooSmall );
             AtomicExchange( &g_lRefreshPerfInstanceList, 1 );
             
             return 1;
@@ -3135,22 +3228,11 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
             //  initialize this setting
             if ( m_permillageSmoothIo == dwMax )
             {
-                // Exs: 999‰ = 99.9% Smooth, 990‰ = 99.0% Smooth, 900‰ = 90.0% Smooth.  Debug default = 0.2%
-                ULONG permillageSmoothIo = OnDebugOrRetail( 2, CDefaultFileSystemConfiguration::PermillageSmoothIo() ); 
-
-                if ( m_pinst )
-                {
-                    if ( !FDefaultParam( m_pinst, JET_paramFlight_SmoothIoTestPermillage ) )
-                    {
-                        permillageSmoothIo = (ULONG)UlParam( m_pinst, JET_paramFlight_SmoothIoTestPermillage );
-                    }
-                }
-                Assert( permillageSmoothIo != dwMax );
-
-                m_permillageSmoothIo = permillageSmoothIo;
+                // Exs: 999� = 99.9% Smooth, 990� = 99.0% Smooth, 900� = 90.0% Smooth.  Debug default = 0.2%
+                m_permillageSmoothIo = OnDebugOrRetail( 2, CDefaultFileSystemConfiguration::PermillageSmoothIo() ); 
+                Assert( m_permillageSmoothIo != dwMax );
             }
 
-            Assert( m_permillageSmoothIo != dwMax );
             return m_permillageSmoothIo;
         }
 
@@ -6217,9 +6299,25 @@ SetCacheSizeRange(  CJetParam* const    pjetparam,
                     PCWSTR      wszParam )
 {
     ERR err = JET_errSuccess;
-    
+
     Call( CJetParam::SetInteger( pjetparam, pinst, ppib, ulParam, wszParam ) );
     Call( ErrBFConsumeSettings( bfcsCacheSize, ifmpNil ) );
+
+HandleError:
+    return err;
+}
+
+ERR
+SetCacheTraceSamplingRatio( CJetParam* const    pjetparam,
+                            INST* const         pinst,
+                            PIB* const          ppib,
+                            const ULONG_PTR     ulParam,
+                            PCWSTR      wszParam )
+{
+    ERR err = JET_errSuccess;
+
+    Call( CJetParam::SetInteger( pjetparam, pinst, ppib, ulParam, wszParam ) );
+    BFICacheTraceSamplingInit( (ULONG)ulParam );
 
 HandleError:
     return err;
@@ -7506,6 +7604,10 @@ const
 #endif
 
 #define JET_paramFlight_RBSCleanupEnabledDEFAULT                OnDebugOrRetail( fTrue, fFalse )
+
+#define JET_paramFlight_ContiguousExtentMoveShrinkEnabledDEFAULT    OnDebugOrRetail( fTrue, fFalse )
+
+#define JET_paramFlight_UseCngAes256ImplementationDEFAULT       OnDebugOrRetail( fTrue, fFalse )
 
 //  ================================================================
 // The following file is auto-generated from sysparam.xml.
@@ -9511,7 +9613,15 @@ LOCAL JET_ERR JET_API JetCreateEncryptionKeyEx(
         return ErrERRCheck( JET_errInvalidParameter );
     }
     *pcbActual = cbKey;
-    return ErrOSCreateAes256Key( (BYTE*)pvKey, pcbActual );
+    ERR err = ErrOSCreateAes256Key( PARAM_AES256_IMPLEMENTATION, (BYTE*)pvKey, pcbActual );
+#ifdef DEBUG
+    // On debug, verify that key works with the other implementation
+    if ( err >= JET_errSuccess )
+    {
+        CallS( ErrOSEncryptionVerifyKey( OTHER_AES256_IMPLEMENTATION, (BYTE*)pvKey, *pcbActual ) );
+    }
+#endif
+    return err;
 }
 
 JET_ERR JET_API JetCreateEncryptionKey(
@@ -12500,7 +12610,7 @@ JET_ERR JET_API JetBeginSessionW(
     JET_TRY( opBeginSession, JetBeginSessionExW( instance, psesid, wszUserName, wszPassword ) );
 }
 
-LOCAL JET_ERR JetDupSessionEx( _In_ JET_SESID sesid, _Out_ JET_SESID *psesid )
+LOCAL JET_ERR JetDupSessionEx( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit, _Out_ JET_SESID *psesid )
 {
     APICALL_SESID   apicall( opDupSession );
 
@@ -12514,17 +12624,50 @@ LOCAL JET_ERR JetDupSessionEx( _In_ JET_SESID sesid, _Out_ JET_SESID *psesid )
 
     if ( apicall.FEnter( sesid ) )
     {
-        apicall.LeaveAfterCall( ErrIsamBeginSession(
-                                        (JET_INSTANCE)PinstFromSesid( sesid ),
-                                        psesid ) );
+        ERR err;
+        PIB *ppib = (PIB *)sesid;
+        if ( grbit & ~JET_bitDupReadOnlySnapshot )
+        {
+            err = ErrERRCheck( JET_errInvalidGrbit );
+        }
+        else if ( grbit == JET_bitDupReadOnlySnapshot && ppib->Level() == 0 )
+        {
+            err = ErrERRCheck( JET_errNotInTransaction );
+        }
+        else if ( grbit == JET_bitDupReadOnlySnapshot && ( !ppib->FReadOnlyTrx() || ppib->Level() != 1 ) )
+        {
+            err = ErrERRCheck( JET_errIllegalOperation );
+        }
+        else
+        {
+            err = ErrIsamBeginSession( (JET_INSTANCE)PinstFromSesid( sesid ), psesid );
+            if ( err >= JET_errSuccess && grbit == JET_bitDupReadOnlySnapshot )
+            {
+                err = ((PIB *)*psesid)->ErrDupReadOnlyTransaction( ppib );
+                if ( err < 0 )
+                {
+                    CallS( ErrIsamEndSession( *psesid, 0 ) );
+                    *psesid = JET_sesidNil;
+                }
+            }
+        }
+
+        apicall.LeaveAfterCall( err );
     }
 
     return apicall.ErrResult();
 }
+
 JET_ERR JET_API JetDupSession( _In_ JET_SESID sesid, _Out_ JET_SESID *psesid )
 {
     JET_VALIDATE_SESID( sesid );
-    JET_TRY( opDupSession, JetDupSessionEx( sesid, psesid ) );
+    JET_TRY( opDupSession, JetDupSessionEx( sesid, 0, psesid ) );
+}
+
+JET_ERR JET_API JetDupSession2( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit, _Out_ JET_SESID *psesid )
+{
+    JET_VALIDATE_SESID( sesid );
+    JET_TRY( opDupSession, JetDupSessionEx( sesid, grbit, psesid ) );
 }
 
 /*=================================================================
@@ -13016,6 +13159,7 @@ LOCAL JET_ERR JetGetDatabaseFileInfoEx(
                         pinstNil,
                         pfsapi,
                         wszFullDbName,
+                        JET_filetypeDatabase,
                         (BYTE*)pdbfilehdr,
                         g_cbPage,
                         OffsetOf( DBFILEHDR_FIX, le_cbPageSize ),
@@ -13142,6 +13286,7 @@ LOCAL JET_ERR JetGetDatabaseFileInfoEx(
                 Call( ErrUtilReadShadowedHeader(    pinstNil,
                                                     pfsapi,
                                                     wszFullDbName,
+                                                    InfoLevel == JET_DbInfoFileType ? JET_filetypeUnknown : JET_filetypeDatabase,
                                                     (BYTE *)pdbfilehdr,
                                                     sizeof( DBFILEHDR ),
                                                     OffsetOf( DBFILEHDR_FIX, le_cbPageSize ),
@@ -21459,10 +21604,10 @@ LOCAL JET_ERR JetInitEx(
     const ULONG cbTimingResourceDataSequence = pinst->m_isdlInit.CbSprintTimings();
     WCHAR * wszTimingResourceDataSequence = (WCHAR *)_alloca( cbTimingResourceDataSequence );
     pinst->m_isdlInit.SprintTimings( wszTimingResourceDataSequence, cbTimingResourceDataSequence );
-    const __int64 secsInit = pinst->m_isdlInit.UsecTimer( eSequenceStart, eInitDone ) / 1000000;    // convert to seconds
-    WCHAR wszSeconds[16];
+    const double secsInit = (double)pinst->m_isdlInit.UsecTimer( eSequenceStart, eInitDone ) / 1000000.0;    // convert to seconds
+    WCHAR wszSeconds[30];
     WCHAR wszInstId[16];
-    OSStrCbFormatW( wszSeconds, sizeof(wszSeconds), L"%I64d", secsInit );
+    OSStrCbFormatW( wszSeconds, sizeof(wszSeconds), L"%.3f", secsInit );
     OSStrCbFormatW( wszInstId, sizeof(wszInstId), L"%d", IpinstFromPinst( pinst ) );
     const WCHAR * rgszT[4] = { wszInstId, wszSeconds, wszTimingResourceDataSequence, wszAdditionalFixedData };
 
@@ -21499,6 +21644,77 @@ TermAlloc:
     {
         const WCHAR* wszInstDisplayName = ( pinst != NULL && pinst->m_wszDisplayName != NULL ? pinst->m_wszDisplayName : L"_unknown_" );
         OSDiagTrackInit( wszInstDisplayName, pinst->m_plog->QwSignLogHash(), err );
+
+        // avoiding quick and dirty non-localized insert text on windows
+#ifdef ENABLE_MICROSOFT_MANAGED_DATACENTER_LEVEL_OPTICS
+
+        pinst->m_isdlInit.Trigger( eInitDone );
+        const double secsInit2 = (double)pinst->m_isdlInit.UsecTimer( eSequenceStart, eInitDone ) / 1000000.0;    // convert to seconds
+        WCHAR wszSeconds2[30];
+        OSStrCbFormatW( wszSeconds2, sizeof(wszSeconds2), L"%.3f", secsInit2 );
+
+        WCHAR wszErrorState[120];
+        JET_ERRCAT errcatMostSpecific = JET_errcatUnknown;
+        (void)ErrERRLookupErrorCategory( err, &errcatMostSpecific );
+        if ( PefLastThrow() && err == PefLastThrow()->Err() )
+        {
+            PERSISTED // for optics "(JET_errcat: 10)", etc.  see Exch \ EseEventCategorized.cs.
+            OSStrCbFormatW( wszErrorState, sizeof(wszErrorState), L"%d (JET_errcat: %d) (src: %hs:%d)", err, errcatMostSpecific, SzSourceFileName( PefLastThrow()->SzFile() ), PefLastThrow()->UlLine() );
+        }
+        else
+        {
+            PERSISTED // for optics "(JET_errcat: 10)", etc.  see Exch \ EseEventCategorized.cs.
+            OSStrCbFormatW( wszErrorState, sizeof(wszErrorState), L"%d (JET_errcat: %d)", err, errcatMostSpecific );
+        }
+
+        WCHAR wszFailingMode[2] = { WchReportInstState( pinst ), L'\0' };
+
+        WCHAR wszFailingAddress[60];
+        //  The normal way of detecting recovery \ redo via:
+        //      plog->FRecovering() && plog->FRecoveringMode() == fRecoveringRedo
+        //  is controlled and cleaned up by this point even on an error.  However, fortunately 
+        //  the pinst->m_perfstatusEvent mode is one way during init, and not reset until next
+        //  call to JetInit() so we use this method for determining what mode we reached.
+        const BOOL fRedo = pinst->m_perfstatusEvent == perfStatusRecoveryRedo;
+        const BOOL fUndo = pinst->m_perfstatusEvent == perfStatusRecoveryUndo;
+        const BOOL fDo   = pinst->m_perfstatusEvent == perfStatusRuntime;
+        //  Normal method of getting lpgosRedo (plog->LgposLGLogTipNoLock()) won't work for
+        //  the same reason the regular mode computation, computes it wrong above.  But the
+        //  actual lgpos we want is in m_lgposRedo, so use special function to fetch it.
+        LGPOS lgposFailed = !fUndo ?  // just in case, we treat everything besides undo as redo.
+                      pinst->m_plog->LgposDiagnosticRedoFailedAddress() :
+                      pinst->m_plog->LgposLGLogTipNoLock(); // undo address comes from live lgpos tip.
+        //  Can imagine actually sticking other pieces of address in here, like the pgno the LR was
+        //  referencing, or even logical descriptions like "DbfilehdrReadErr" or something.
+        OSStrCbFormatW( wszFailingAddress, sizeof( wszFailingAddress ),
+                   L"lgpos%hs:%08x:%04x:%04x",
+                   fRedo ? "Redo" :
+                       ( fUndo ? "Undo" :
+                       ( fDo ? "RedoOld" :
+                       "Redo-Unconfirmed" ) ),
+                   lgposFailed.lGeneration, lgposFailed.isec, lgposFailed.ib );
+
+        WCHAR wszHaPublishingFacts[300];
+        PERSISTED // for optics "Verbose: 1", "FI Tags Published: 0x", and "FiCorruptionTag " / "FiLogLogicallyInconsistent ".  see Exch \ EseEventCategorized.cs, Exch \ EseDatabaseMonitoringContext.cs
+        (void)ErrOSStrCbFormatW( wszHaPublishingFacts, sizeof( wszHaPublishingFacts ), L"Verbose: %d, FI Tags Published: 0x%x ( %hs%hs%hs)", 
+                        !!pinst->m_isdlInit.FTriggeredStep( eInitLogRecoverySilentRedoDone ),
+                        pinst->m_grbitHaFailureTags,
+#if defined( USE_HAPUBLISH_API )
+                        ( pinst->m_grbitHaFailureTags & bitHaPublishedCorruptionTag ) ? "FiCorruptionTag " : "",
+                        ( pinst->m_grbitHaFailureTags & bitHaPublishedIoHardTag ) ? "FiIoHardTag " : "", 
+                        ( pinst->m_grbitHaFailureTags & bitHaPublishedLogLogicallyInconsistentTag ) ? "FiLogLogicallyInconsistent " : ""
+#else
+                        "", "", ""
+#endif
+                        );
+
+        const WCHAR * rgszFailT[6] = { wszInstDisplayName, wszErrorState, wszSeconds2, wszFailingMode, wszFailingAddress, wszHaPublishingFacts };
+
+        UtilReportEvent( eventError, GENERAL_CATEGORY, START_INSTANCE_FAILED_ID, _countof( rgszFailT ), rgszFailT, 0, NULL, pinst );
+
+        //  Also to avoid event wrap, report failures in JetInit() to .IRS.RAW
+        DumpFailedInitToIrsRaw( pinst, wszInstDisplayName, wszErrorState, wszSeconds2, wszFailingMode, wszFailingAddress, wszHaPublishingFacts );
+#endif
     }
 
     // if instance allocated in this function call
@@ -23296,7 +23512,7 @@ JET_ERR ErrTestHookCorruptOfflineFile( const JET_TESTHOOKCORRUPT * const pcorrup
                                     IFileAPI::fmfNone ),
                                 &pfapi ) );
 
-    Call( ErrUtilReadShadowedHeader( pinstNil, pfsapi, pfapi, pbPageImage, g_cbPageMax, OffsetOf( DBFILEHDR_FIX, le_cbPageSize ), urhfNoFailOnPageMismatch ) );
+    Call( ErrUtilReadShadowedHeader( pinstNil, pfsapi, pfapi, JET_filetypeDatabase, pbPageImage, g_cbPageMax, OffsetOf( DBFILEHDR_FIX, le_cbPageSize ), urhfNoFailOnPageMismatch ) );
     cbPageSize = ((DBFILEHDR*)pbPageImage)->le_cbPageSize;
 
     Call( pfapi->ErrIORead( *TraceContextScope( iorpDirectAccessUtil ),
@@ -23353,7 +23569,7 @@ JET_ERR ErrTESTHOOKAlterDatabaseFileHeader( const JET_TESTHOOKALTERDBFILEHDR * c
     Call( ErrOSFSCreate( g_pfsconfigGlobal, &pfsapi ) );
 
     Call( pfsapi->ErrFileOpen( palterdbfilehdr->szDatabase, IFileAPI::fmfNone, &pfapiDatabase ) );
-    Call( ErrUtilReadShadowedHeader( pinstNil, pfsapi, pfapiDatabase, (BYTE*)pdbfilehdr, (DWORD)g_cbPageMax, (LONG)OffsetOf( DBFILEHDR_FIX, le_cbPageSize ), urhfReadOnly|urhfNoFailOnPageMismatch, &cbPageSize, &shs ) );
+    Call( ErrUtilReadShadowedHeader( pinstNil, pfsapi, pfapiDatabase, JET_filetypeDatabase, (BYTE*)pdbfilehdr, (DWORD)g_cbPageMax, (LONG)OffsetOf( DBFILEHDR_FIX, le_cbPageSize ), urhfReadOnly|urhfNoFailOnPageMismatch, &cbPageSize, &shs ) );
     Call( CFlushMapForUnattachedDb::ErrGetPersistedFlushMapOrNullObjectIfRuntime( palterdbfilehdr->szDatabase, pdbfilehdr, pinstNil, &pfm ) );
 
 
@@ -24456,7 +24672,7 @@ LOCAL JET_ERR JetGetRBSFileInfoEx(
 
             Alloc( prbsfilehdr = (RBSFILEHDR * )PvOSMemoryPageAlloc( sizeof( RBSFILEHDR ), NULL ) );
 
-            Call( ErrUtilReadShadowedHeader( pinstNil, pfsapi, pfapi, (BYTE*) prbsfilehdr, sizeof( RBSFILEHDR ), -1, urhfNoAutoDetectPageSize | urhfReadOnly | urhfNoEventLogging ) );
+            Call( ErrUtilReadShadowedHeader( pinstNil, pfsapi, pfapi, JET_filetypeSnapshot, (BYTE*) prbsfilehdr, sizeof( RBSFILEHDR ), -1, urhfNoAutoDetectPageSize | urhfReadOnly | urhfNoEventLogging ) );
             UtilLoadRBSinfomiscFromRBSfilehdr( ( JET_RBSINFOMISC* )pvResult, cbMax, ( RBSFILEHDR* )prbsfilehdr );
             break;
             

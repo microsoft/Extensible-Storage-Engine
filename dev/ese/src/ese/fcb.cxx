@@ -734,11 +734,12 @@ VOID FCB::UnlinkIDB( FCB *pfcbTable )
 //  NOTE: this is the proper channel for accessing an FCB; it uses the locking
 //      protocol setup by the FCB hash-table and FCB latch
 
-FCB *FCB::PfcbFCBGet( const IFMP ifmp, const PGNO pgnoFDP, FCBStateFlags* const pfcbsf, const BOOL fIncrementRefCount, const BOOL fInitForRecovery )
+FCB *FCB::PfcbFCBGet( const IFMP ifmp, const PGNO pgnoFDP, FCBStateFlags* const pfcbsf, const BOOL fIncrementRefCount, const BOOL fInitForRecovery, OBJID* const pobjid )
 {
     FCBStateFlags   fcbsf = fcbsfNone;
     INST            *pinst = PinstFromIfmp( ifmp );
     FCB             *pfcbT;
+    OBJID           objid = objidNil;
     FCBHash::ERR    errFCBHash;
     FCBHash::CLock  lockFCBHash;
     FCBHashKey      keyFCBHash( ifmp, pgnoFDP );
@@ -881,7 +882,7 @@ RetrieveFCB:
     Assert( fcbsf == fcbsfNone );
     fcbsf |= fcbsfInitialized;
     fcbsf |= ( pfcbT->FDeletePending() ? fcbsfDeletePending : fcbsfNone );
-
+    objid = pfcbT->ObjidFDP();
 
     // If this is the dummy FCB created by recovery, we need to fully populate
     // it, make sure that the others wait while the first person finishes doing it
@@ -910,6 +911,7 @@ RetrieveFCB:
             //  try to get the FCB again
 
             fcbsf = fcbsfNone;
+            objid = objidNil;
 
             cRetries++;
             goto RetrieveFCB;
@@ -929,10 +931,15 @@ RetrieveFCB:
 SetStateAndReturn:
     //  set the state
     Assert( ( pfcbT == pfcbNil ) == ( fcbsf == fcbsfNone ) );           // Pointer and flag must agree.
+    Assert( ( pfcbT == pfcbNil ) == ( objid == objidNil ) );            // Pointer and OBJID must agree.
     Assert( ( fcbsf == fcbsfNone ) || ( fcbsf & fcbsfInitialized ) );   // Can't have any flags set if it's not initialized.
     if ( pfcbsf )
     {
         *pfcbsf = fcbsf;
+    }
+    if ( pobjid )
+    {
+        *pobjid = objid;
     }
 
     //  return the FCB

@@ -42,9 +42,16 @@ enum EThreadPriority
 
 //  creates a thread with the specified attributes
 
-const ERR ErrUtilThreadICreate( const PUTIL_THREAD_PROC pfnStart, const DWORD cbStack, const EThreadPriority priority, THREAD* const pThread, const DWORD_PTR dwParam, const _TCHAR* const szStart );
+const ERR ErrUtilThreadICreate(
+    const PUTIL_THREAD_PROC pfnStart,
+    const DWORD cbStack,
+    const EThreadPriority priority,
+    THREAD* const pThread,
+    const DWORD_PTR dwParam,
+    const CHAR* const szStart );
+
 #define ErrUtilThreadCreate( pfnStart, cbStack, priority, phThread, dwParam )   \
-    ( ErrUtilThreadICreate( pfnStart, cbStack, priority, phThread, dwParam, _T( #pfnStart ) ) )
+    ( ErrUtilThreadICreate( pfnStart, cbStack, priority, phThread, dwParam, #pfnStart ) )
 
 //  waits for the specified thread to exit and returns its return value
 

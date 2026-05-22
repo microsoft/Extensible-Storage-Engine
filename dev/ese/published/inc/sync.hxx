@@ -344,7 +344,7 @@ inline LONG AtomicExchange( LONG* const plTarget, const LONG lValue )
 {
     OSSYNCAssert( IsAtomicallyModifiable( plTarget ) );
 
-    return _InterlockedExchange( plTarget, lValue );
+    return _InterlockedExchange( ( OS_WIN_LONG * )plTarget, lValue );
 }
 
 //  atomically sets the target to the specified value, returning the target's
@@ -437,7 +437,7 @@ inline LONG AtomicExchangeAdd( LONG * const plTarget, const LONG lValue )
 {
     OSSYNCAssert( IsAtomicallyModifiable( plTarget ) );
 
-    return _InterlockedExchangeAdd( plTarget, lValue );
+    return _InterlockedExchangeAdd( ( OS_WIN_LONG * )plTarget, lValue );
 }
 
 //  atomically adds the specified value to the target, returning the target's
@@ -460,7 +460,7 @@ inline LONG AtomicCompareExchange( LONG * const plTarget, const LONG lInitial, c
 {
     OSSYNCAssert( IsAtomicallyModifiable( plTarget ) );
 
-    return _InterlockedCompareExchange( plTarget, lFinal, lInitial );
+    return _InterlockedCompareExchange( ( OS_WIN_LONG * )plTarget, lFinal, lInitial );
 }
 
 inline ULONG AtomicCompareExchange( ULONG * const pulTarget, const ULONG ulInitial, const ULONG ulFinal )

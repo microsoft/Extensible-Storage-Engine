@@ -46,9 +46,9 @@ PAGECHECKSUM    ComputePageChecksum(
     const UINT cb,
     const PAGETYPE pagetype,
     const ULONG pgno,
-    // set fNew to compute new ECC for a page (R/W wrt the large page!!)
-    // reset fNew to computer ECC for verification purpose (R/O wrt the page)
-    const BOOL fNew = fFalse );
+    // set fWriteChecksum to compute new ECC for a page (R/W wrt the large page!!)
+    // reset fWriteChecksum to computer ECC for verification purpose (R/O wrt the page)
+    const BOOL fWriteChecksum = fFalse );
 
 //  
 
@@ -436,6 +436,7 @@ static void TestSetAndChecksum( unsigned char * const pb )
     TestFixOnePage( pb, 8192, databasePage, 129 );
     TestFixOnePage( pb, 8192, databasePage, 3097 );
     TestFixOnePage( pb, 8192, databasePage, ( 8192 * 8 ) - 1 );
+    TestFixOnePage( pb, 8192, databasePage, IbitNewChecksumFormatFlag( databasePage ) );
 
     //  we can't deal with a corruption in the first checksum or the format 
     //  flag. to  avoid that, don't corrupt the v1 header at all (the v1 header 
@@ -464,6 +465,7 @@ static void TestSetAndChecksum( unsigned char * const pb )
     TestFixOnePage( pb, 4096, databasePage, 29000 );
     TestFixOnePage( pb, 4096, databasePage, 30009 );
     TestFixOnePage( pb, 4096, databasePage, ( 4096 * 8 ) - 1 );
+    TestFixOnePage( pb, 4096, databasePage, IbitNewChecksumFormatFlag( databasePage ) );
 
     //  we can't deal with a corruption in the checksum or the format flag. to 
     //  avoid that, don't corrupt the header at all (the header is 40 bytes)
@@ -473,11 +475,8 @@ static void TestSetAndChecksum( unsigned char * const pb )
     //  single-bit corruptions ECC can't fix
 
     TestFailToFixOnePage( pb, 8192, databasePage, 0 );
-    TestFailToFixOnePage( pb, 8192, databasePage, IbitNewChecksumFormatFlag( databasePage ) );
-
     TestFailToFixOnePage( pb, 4096, databasePage, 1 );
-    TestFailToFixOnePage( pb, 4096, databasePage, IbitNewChecksumFormatFlag( databasePage ) );
-    
+
     //  single-bit corruptions on pages without ECC
 
     TestFailToFixOnePage( pb, 8192, databaseHeader, 100 );
@@ -886,12 +885,10 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
             {
                 cbit++;
 
-                //  we currently cannot fix bit flips on the checksum format flag
                 //  we currently cannot fix bit flips on the first block's checksum
 
                 const INT fBitBelongsToFirstChecksum = ( ibit / 8 ) < sizeof( XECHECKSUM );
-                const INT fBitIsChecksumFormatFlag = ibit == (INT)IbitNewChecksumFormatFlag( databasePage );
-                const INT fBitFixableSingleBitError = !( fBitBelongsToFirstChecksum || fBitIsChecksumFormatFlag );
+                const INT fBitFixableSingleBitError = !fBitBelongsToFirstChecksum;
 
                 //  flip one bit
 
@@ -971,15 +968,12 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
                 {
                     cbit++;
 
-                    //  we currently cannot fix bit flips on the checksum format flag
                     //  we currently cannot fix bit flips on the first block's checksum
 
                     const INT fBit1BelongsToFirstChecksum = ( ibit1 / 8 ) < sizeof( XECHECKSUM );
-                    const INT fBit1IsChecksumFormatFlag = ibit1 == (INT)IbitNewChecksumFormatFlag( databasePage );
-                    const INT fBit1FixableSingleBitError = !( fBit1BelongsToFirstChecksum || fBit1IsChecksumFormatFlag );
+                    const INT fBit1FixableSingleBitError = !fBit1BelongsToFirstChecksum;
                     const INT fBit2BelongsToFirstChecksum = ( ibit2 / 8 ) < sizeof( XECHECKSUM );
-                    const INT fBit2IsChecksumFormatFlag = ibit2 == (INT)IbitNewChecksumFormatFlag( databasePage );
-                    const INT fBit2FixableSingleBitError = !( fBit2BelongsToFirstChecksum || fBit2IsChecksumFormatFlag );
+                    const INT fBit2FixableSingleBitError = !fBit2BelongsToFirstChecksum;
 
                     //  flip bits
 

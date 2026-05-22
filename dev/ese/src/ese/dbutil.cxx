@@ -73,7 +73,7 @@ VOID DBUTLSprintHex(
         
         if ( cbAddress )
         {
-            StringCbPrintfA( szDestCurrent, szDestMax - szDestCurrent + 1, "%*.*lx    ", cbAddress, cbAddress, (INT)(pb - rgbSrc + cbStart) );
+            OSStrCbFormatA( szDestCurrent, szDestMax - szDestCurrent + 1, "%*.*lx    ", cbAddress, cbAddress, (INT)(pb - rgbSrc + cbStart) );
             (*szDestMax) = 0;
             szDestCurrent += strlen(szDestCurrent);
 
@@ -5155,6 +5155,7 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
     const ULONG cUncachedPrimary,
     const ULONG cEnumerationConflictsSucceeded,
     const ULONG cEnumerationConflictsFailed,
+    const double dblSecTotalRetry,
     const JET_THREADSTATS& jts,
     const ULONG ulMinElapsed,
     const double dblSecElapsed )
@@ -5193,7 +5194,8 @@ LOCAL VOID DBUTLIReportSpaceLeakEstimationSucceeded(
         OSFormatW( L"%u", ulMinElapsed ), OSFormatW( L"%.3f", dblSecElapsed ),
         OSFormatW( L"%d", cpgOwnedPrimaryCorrection ), OSFormatW( L"%I64d", pfmp->CbOfCpgSigned( cpgOwnedPrimaryCorrection ) ), ( ( cpgOwnedPrimaryOriginal != 0 ) ? OSFormatW( L"%.3f", ( 100.0 * (double)cpgOwnedPrimaryCorrection ) / (double)cpgOwnedPrimaryOriginal ) : L"-" ),
         OSFormatW( L"%u", cEnumerationConflictsSucceeded ),
-        OSFormatW( L"%u", cEnumerationConflictsFailed )
+        OSFormatW( L"%u", cEnumerationConflictsFailed ),
+        OSFormatW( L"%.3f", dblSecTotalRetry )
     };
     UtilReportEvent(
         eventInformation,
@@ -5251,6 +5253,7 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
     OBJID objidLast = objidNil;
     PGNO pgnoFDPLast = pgnoNull;
     ULONG cEnumerationConflictsFailed = 0, cEnumerationConflictsSucceeded = 0;
+    HRT dhrtEnumerationConflictsDuration = 0;
     CPG cpgOwnedPrimary = 0, cpgOwnedPrimaryCorrection = 0;
     ULONG cCachedPrimary = 0, cUncachedPrimary = 0;
     CPG cpgUsedRoot = 0, cpgUsedOe = 0, cpgUsedAe = 0;
@@ -5304,7 +5307,7 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
         }
         else
         {
-            if ( ( err == JET_errRecordNotFound ) || ( err == JET_errNotInitialized ) )
+            if ( ( err == JET_errRecordNotFound ) || ( err == JET_errNotInitialized ) || ( err == JET_errRecordDeleted ) )
             {
                 err = JET_errSuccess;
             }
@@ -5313,17 +5316,26 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
             // Test injection.
             OnDebug( while ( objidLast >= (OBJID)UlConfigOverrideInjection( 48550, objidFDPOverMax ) ) );
 
-            BOOL fRetried = fFalse, fRetry = fFalse;
+            double dblSecLeakReportRetryMax = 60.0;
+            const TICK dtickLeakReportRetrySleep = 10;
+            HRT hrtRetryStart = 0;
             const BOOL fInfiniteRetries = OnDebugOrRetail( fTrue, fFalse );
+            BOOL fRetry = fFalse, fRetried = fFalse;
             ERR errRetry = JET_errSuccess;
             const CHAR* wszRetryReason = "";
             do
             {
-                fRetried = fRetry;
                 if ( fRetry )
                 {
-                    UtilSleep( 10 );
                     fRetry = fFalse;
+
+                    if ( !fRetried )
+                    {
+                        fRetried = fTrue;
+                        hrtRetryStart = HrtHRTCount();
+                    }
+
+                    UtilSleep( dtickLeakReportRetrySleep );
                 }
 
                 err = ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szObjectName, JET_bitTableReadOnly | JET_bitTableTryPurgeOnClose );
@@ -5331,28 +5343,38 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
                 {
                     // We are probably racing with table deletion.
                     FCBStateFlags fcbsf = fcbsfNone;
-                    const BOOL fFoundFcb = ( FCB::PfcbFCBGet( ifmp, pgnoFDPLast, &fcbsf, fFalse /* fIncrementRefCount */, fTrue /* fInitForRecovery */ ) != pfcbNil );
-                    const BOOL fDeletePending = fFoundFcb && ( fcbsf & fcbsfDeletePending );
+                    OBJID objidFcb = objidNil;
+                    const BOOL fFoundFcb = ( FCB::PfcbFCBGet(
+                                                ifmp,
+                                                pgnoFDPLast,
+                                                &fcbsf,
+                                                fFalse,  // fIncrementRefCount
+                                                fTrue,   // fInitForRecovery
+                                                &objidFcb ) != pfcbNil ) &&
+                                            ( objidFcb == objidLast );
+                    const BOOL fDeletePending = fFoundFcb && ( ( fcbsf & fcbsfDeletePending ) != 0 );
 
-                    if ( fFoundFcb && !fDeletePending )
+                    if ( fFoundFcb )
                     {
-                        // This is unexpected if we know the table is actually getting deleted.
-                        Assert( err != JET_errObjectNotFound );
-                        fRetry = fTrue;
-                        wszRetryReason = "DelNotPending";
-                    }
-                    else if ( fFoundFcb && fDeletePending )
-                    {
-                        // Table deletion is still pending.
-                        fRetry = fTrue;
-                        wszRetryReason = "DelPending";
+                        if ( !fDeletePending )
+                        {
+                            // This is unexpected if we know the table is actually getting deleted.
+                            Assert( err != JET_errObjectNotFound );
+                            fRetry = fTrue;
+                            wszRetryReason = "DelNotPending";
+                        }
+                        else
+                        {
+                            // Table deletion is still pending.
+                            fRetry = fTrue;
+                            wszRetryReason = "DelPending";
 
-                        // Perform cleanup.
-                        (void)PverFromPpib( ppib )->ErrVERRCEClean( ifmp );
+                            // Perform cleanup: it may not help if an open transaction is holding us up.
+                            (void)PverFromPpib( ppib )->ErrVERRCEClean( ifmp );
+                        }
                     }
                     else
                     {
-                        Assert( !fFoundFcb );
                         if ( err == JET_errTableLocked )
                         {
                             // Either the version store entry for the table deletion has cleared,
@@ -5396,26 +5418,43 @@ LOCAL ERR ErrDBUTLIEstimateRootSpaceLeak( PIB* const ppib, const IFMP ifmp )
                     pfucbTable = pfucbNil;
                 }
 
-                if ( fRetried )
+                if ( fRetry )
                 {
-                    if ( fRetry )
+                    if ( !fInfiniteRetries )
                     {
-                        cEnumerationConflictsFailed++;
-                        if ( !fInfiniteRetries )
+                        if ( fRetried )
                         {
-                            FireWall( OSFormat( "LeakReportConflict:%s:%d", wszRetryReason, errRetry ) );
+                            // If we've previously failed, there's no point in trying hard to resolve conflicts, as the
+                            // data will be unreliable anwyways, so reduce the retry timeout.
+                            if ( cEnumerationConflictsFailed > 0 )
+                            {
+                                dblSecLeakReportRetryMax = 0.010;
+                            }
+
+                            if ( DblHRTSecondsElapsed( DhrtHRTElapsedFromHrtStart( hrtRetryStart ) ) >= dblSecLeakReportRetryMax )
+                            {
+                                fRetry = fFalse;
+                                dhrtEnumerationConflictsDuration += DhrtHRTElapsedFromHrtStart( hrtRetryStart );
+                                cEnumerationConflictsFailed++;
+                                FireWall( OSFormat( "LeakReportConflict:%s:%d", wszRetryReason, errRetry ) );
+                            }
                         }
                     }
                     else
                     {
-                        cEnumerationConflictsSucceeded++;
+                        cEnumerationConflictsFailed++;
                     }
+                }
+                else if ( fRetried )
+                {
+                    dhrtEnumerationConflictsDuration += DhrtHRTElapsedFromHrtStart( hrtRetryStart );
+                    cEnumerationConflictsSucceeded++;
                 }
 
                 Assert( pfucbTable == pfucbNil );
                 Assert( err >= JET_errSuccess );
             }
-            while ( fRetry && ( !fRetried || fInfiniteRetries ) );
+            while ( fRetry );
         }
 
         pfmp->SetOjidLeakEstimation( objidLast );
@@ -5562,6 +5601,7 @@ HandleError:
     ppib->ResetFSessionLeakReport();
 
     const double dblSecTotalElapsed = DblHRTSecondsElapsed( DhrtHRTElapsedFromHrtStart( hrtStart ) );
+    const double dblSecTotalRetry = DblHRTSecondsElapsed( dhrtEnumerationConflictsDuration );
     const ULONG ulMinElapsed = (ULONG)( dblSecTotalElapsed / 60.0 );
     const double dblSecElapsed = dblSecTotalElapsed - (double)ulMinElapsed * 60.0;
     if ( err >= JET_errSuccess )
@@ -5588,6 +5628,7 @@ HandleError:
             cUncachedPrimary,
             cEnumerationConflictsSucceeded,
             cEnumerationConflictsFailed,
+            dblSecTotalRetry,
             jts,
             ulMinElapsed,
             dblSecElapsed );
@@ -5775,6 +5816,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
                     err = ErrUtilReadShadowedHeader(    pinst,
                                                         pinst->m_pfsapi,
                                                         pfapi,
+                                                        JET_filetypeDatabase,
                                                         (BYTE*)pdbfilehdr,
                                                         g_cbPage,
                                                         OffsetOf( DBFILEHDR, le_cbPageSize ),

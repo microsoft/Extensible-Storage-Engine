@@ -2664,7 +2664,7 @@ INT INDIGetReservedTag( _In_ CPAGE& cpage, _In_ NodeResvTagId resvTagId, _Out_ D
 INT INDGetReservedTag( _In_ FUCB* pfucb, _In_ CSR* pcsr, _In_ NodeResvTagId resvTagId, _Out_ DATA* pdata )
 //  ================================================================
 {
-    Assert( g_rgfmp[ pfucb->ifmp ].ErrDBFormatFeatureEnabled( JET_efvReservedTags ) );
+    Assert( JET_errSuccess == g_rgfmp[ pfucb->ifmp ].ErrDBFormatFeatureEnabled( JET_efvReservedTags ) );
     Assert( resvTagId <= rtidMax );
     return INDIGetReservedTag( pcsr->Cpage(), resvTagId, pdata );
 }
@@ -2699,7 +2699,7 @@ INT INDAddReservedTag( _In_ FUCB* pfucb, _In_ CSR* pcsr, _In_ NodeResvTagId resv
 //  Caller should log this operation before calling this API.
 {
     Assert( pcsr->FDirty() );
-    Assert( g_rgfmp[ pfucb->ifmp ].ErrDBFormatFeatureEnabled( JET_efvReservedTags ) );
+    Assert( pfucb == NULL || JET_errSuccess == g_rgfmp[ pfucb->ifmp ].ErrDBFormatFeatureEnabled( JET_efvReservedTags ) );
     Assert( pcsr->Cpage().CbPageFree() > cb );
     Assert( resvTagId <= rtidMax );
 
@@ -2732,7 +2732,7 @@ VOID NDReplaceReservedTag( _In_ FUCB* pfucb, _In_ CSR* pcsr, _In_ NodeResvTagId 
 //  Caller should log this operation before calling this API.
 {
     Assert( pcsr->FDirty() );
-    Assert( g_rgfmp[ pfucb->ifmp ].ErrDBFormatFeatureEnabled( JET_efvReservedTags ) );
+    Assert( JET_errSuccess == g_rgfmp[ pfucb->ifmp ].ErrDBFormatFeatureEnabled( JET_efvReservedTags ) );
     Assert( resvTagId <= rtidMax );
 
     NDIReplaceReservedTag( pcsr->Cpage(), resvTagId, data );

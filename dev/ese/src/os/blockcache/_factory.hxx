@@ -154,6 +154,8 @@ class COSBlockCacheFactoryImpl : public IBlockCacheFactory
         ERR ErrDetachFile(  _In_z_      const WCHAR* const                              wszFilePath,
                             _In_opt_    const IBlockCacheFactory::PfnDetachFileStatus   pfnDetachFileStatus,
                             _In_opt_    const DWORD_PTR                                 keyDetachFileStatus ) override;
+
+        ERR ErrIsCachedFile( _In_z_ const WCHAR* const wszFilePath, _Out_ BOOL* const pfCached ) override;
 };
 
 INLINE ERR COSBlockCacheFactoryImpl::ErrCreateFileSystemWrapper(    _Inout_ IFileSystemAPI** const  ppfsapiInner,
@@ -867,5 +869,42 @@ INLINE ERR COSBlockCacheFactoryImpl::ErrDetachFile( _In_z_      const WCHAR* con
 HandleError:
     delete pfsf;
     delete pfsapi;
+    return err;
+}
+
+INLINE ERR COSBlockCacheFactoryImpl::ErrIsCachedFile(   _In_z_  const WCHAR* const  wszFilePath,
+                                                        _Out_   BOOL* const         pfCached )
+{
+    ERR             err                                                 = JET_errSuccess;
+    IFileSystemAPI* pfsapi                                              = NULL;
+    WCHAR           wszStreamCachedPath[ IFileSystemAPI::cchPathMax ]   = { 0 };
+
+    *pfCached = fFalse;
+
+    //  the file is cached if the alternate data stream exists
+
+    Call( ErrOSFSCreate( NULL, &pfsapi ) );
+
+    Call( ErrOSStrCbCopyW( wszStreamCachedPath, _cbrg( wszStreamCachedPath ), wszFilePath ) );
+    Call( ErrOSStrCbAppendW( wszStreamCachedPath, _cbrg( wszStreamCachedPath ), CFileSystemFilter::c_wszStreamCached ) );
+    Call( pfsapi->ErrPathExists( wszStreamCachedPath, NULL ) );
+
+    *pfCached = fTrue;
+
+HandleError:
+    delete pfsapi;
+    if ( err < JET_errSuccess )
+    {
+        switch ( err )
+        {
+            case JET_errInvalidPath:
+            case JET_errBufferTooSmall:
+            case JET_errFileNotFound:
+                err = JET_errSuccess;
+                break;
+        }
+
+        *pfCached = fFalse;
+    }
     return err;
 }

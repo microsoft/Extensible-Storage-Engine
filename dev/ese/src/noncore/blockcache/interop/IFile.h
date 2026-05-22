@@ -69,7 +69,15 @@ namespace Internal
                     /// <summary>
                     /// Causes any previous writes to the file to be written to the media.
                     /// </summary>
-                    void FlushFileBuffers();
+                    /// <param name="fileFlushMode">File flush mode.</param>
+                    void FlushFileBuffers( FileFlushMode fileFlushMode );
+
+                    /// <summary>
+                    /// Returns the number of Write IOs that are unflushed or flush pending  
+                    /// since the last FlushFileBuffers call.
+                    /// </summary>
+                    /// <returns>The current unflushed write count for the file.</returns>
+                    Int64 CountIoNonFlushed();
 
                     /// <summary>
                     /// Indicates that the caller doesn't care if any previous writes to the file make it to the media.
@@ -269,13 +277,6 @@ namespace Internal
                     /// </summary>
                     /// <returns>The disk ID of the file.</returns>
                     IntPtr DiskId();
-
-                    /// <summary>
-                    /// Get number of write IOs that are unflushed or flush pending 
-                    /// since last ErrFlushFileBuffers call.
-                    /// </summary>
-                    /// <returns>The current unflushed write count for the file.</returns>
-                    Int64 CountIoNonFlushed();
 
                     /// <summary>
                     /// Get seek penalty (in order to identify SSD).

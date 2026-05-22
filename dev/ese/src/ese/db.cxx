@@ -1576,10 +1576,7 @@ ERR ErrDBParseDbParams(
     if ( ( pgrbitShrinkDatabaseOptions != NULL ) &&
         ( ( *pgrbitShrinkDatabaseOptions &
           ~( JET_bitShrinkDatabaseEofOnAttach |
-             JET_bitShrinkDatabaseFullCategorizationOnAttach |
-             JET_bitShrinkDatabaseDontMoveRootsOnAttach |
-             JET_bitShrinkDatabaseDontTruncateLeakedPagesOnAttach |
-             JET_bitShrinkDatabaseDontTruncateIndeterminatePagesOnAttach ) ) != 0 ) )
+             JET_bitShrinkDatabaseFullCategorizationOnAttach ) ) != 0 ) )
     {
         return ErrERRCheck( JET_errInvalidGrbit );
     }
@@ -2679,6 +2676,7 @@ ERR ErrDBReadHeaderCheckConsistency(
     err = ErrUtilReadShadowedHeader(    pfmp->Pinst(),
                                         pfsapi,
                                         pfapi,
+                                        JET_filetypeDatabase,
                                         (BYTE*)pdbfilehdr,
                                         g_cbPage,
                                         OffsetOf( DBFILEHDR, le_cbPageSize ),
@@ -3958,6 +3956,7 @@ LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
             pinst,
             pfsapi,
             wszDatabase,
+            JET_filetypeDatabase,
             reinterpret_cast<BYTE *>( pdbfilehdr ),
             g_cbPage,
             OffsetOf( DBFILEHDR_FIX, le_cbPageSize ),
@@ -5643,7 +5642,7 @@ StartDetaching:
     // 1. For the log writer it is OK to generate a new log w/o updating the header as no log operations
     // for this db will be logged in new logs
     // 2. For the checkpoint: don't advance the checkpoint if db's header weren't update
-    Assert( pfmp->FAllowHeaderUpdate() || pfmp->FReadOnlyAttach() );
+    Assert( pfmp->FAllowHeaderUpdate() || pfmp->FReadOnlyAttach() || pfmp->FAttachedForRecovery() );
     pfmp->RwlDetaching().EnterAsWriter();
     pfmp->ResetAllowHeaderUpdate();
     pfmp->RwlDetaching().LeaveAsWriter();
@@ -6185,6 +6184,7 @@ ERR ISAMAPI ErrIsamSetDatabaseSize( JET_SESID sesid, const WCHAR *wszDatabase, D
     Call( ErrUtilReadShadowedHeader(    PinstFromPpib( ppib ),
                                         pfsapi,
                                         pfapi,
+                                        JET_filetypeDatabase,
                                         (BYTE *)pdbfilehdr,
                                         g_cbPage,
                                         OffsetOf( DBFILEHDR_FIX, le_cbPageSize ) ) );

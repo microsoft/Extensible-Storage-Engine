@@ -37,3 +37,7 @@ target_include_directories(oswinnt PRIVATE
     ${ESE_DEV}/src/inc/_osu/
     ./
 )
+
+target_link_libraries(oswinnt PRIVATE
+    _lz4
+)

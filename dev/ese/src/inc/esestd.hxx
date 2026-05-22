@@ -8,13 +8,6 @@
 #define _CRT_RAND_S
 #include <stdlib.h>
 #include <string.h>
-#pragma prefast(push)
-#pragma prefast(disable:26006, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:26007, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:28718, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:28726, "Dont bother us with tchar, someone else owns that.")
-#include <tchar.h>
-#pragma prefast(pop)
 #include <stddef.h>
 #include <stdio.h>
 #include <time.h>
@@ -24,21 +17,10 @@
 
 #include <specstrings.h>
 
-typedef __nullterminated char* PSTR;
-typedef __nullterminated const char* PCSTR;
-typedef __nullterminated wchar_t* PWSTR;
-typedef __nullterminated const wchar_t* PCWSTR;
-
 #include <algorithm>
 #include <functional>
 #include <memory>
 using namespace std;
-
-#pragma prefast(push)
-#pragma prefast(disable:28196, "Do not bother us with strsafe, someone else owns that.")
-#pragma prefast(disable:28205, "Do not bother us with strsafe, someone else owns that.")
-#include <strsafe.h>
-#pragma prefast(pop)
 
 // some security macros taken from exwarning.h
 
@@ -128,6 +110,7 @@ using namespace std;
 #include "idb.hxx"
 #include "callback.hxx"
 #include "fcb.hxx"
+#include "bbtbuff.hxx"
 #include "fucb.hxx"
 #include "scb.hxx"
 #include "tdb.hxx"

@@ -7,7 +7,6 @@
 
 #include "PageSizeClean.hxx"
 
-
 ///#define BREAK_ON_PREFERRED_BUCKET_LIMIT
 
 #ifdef DEBUG
@@ -174,8 +173,8 @@ VER::VER( INST *pinst )
     :   CZeroInit( sizeof( VER ) ),
         m_pinst( pinst ),
         m_fVERCleanUpWait( 2 ),
-        m_msigRCECleanPerformedRecently( CSyncBasicInfo( _T( "m_msigRCECleanPerformedRecently" ) ) ),
-        m_asigRCECleanDone( CSyncBasicInfo( _T( "m_asigRCECleanDone" ) ) ),
+        m_msigRCECleanPerformedRecently( CSyncBasicInfo( "m_msigRCECleanPerformedRecently" ) ),
+        m_asigRCECleanDone( CSyncBasicInfo( "m_asigRCECleanDone" ) ),
         m_critRCEClean( CLockBasicInfo( CSyncBasicInfo( szRCEClean ), rankRCEClean, 0 ) ),
         m_critBucketGlobal( CLockBasicInfo( CSyncBasicInfo( szBucketGlobal ), rankBucketGlobal, 0 ) ),
 #ifdef VERPERF
@@ -188,6 +187,8 @@ VER::VER( INST *pinst )
             (INT)UlParam(pinst, JET_paramVersionStoreTaskQueueMax),
             ctasksPerBatchMaxDefault,
             ctasksBatchedMaxDefault ),
+        m_fAboveMaxTransactionSize( fFalse ),
+        m_trxOldestRCE( trxMin ),
         m_cresBucket( pinst )
 {
 
@@ -1217,7 +1218,29 @@ INLINE VOID RCE::SetPrcePrevOfNode( RCE * prce )
     Assert( FAssertRwlHashAsWriter_() );
     Assert( prceNil == prce
         || RceidCmp( m_rceid, prce->Rceid() ) > 0 );
-    m_prcePrevOfNode = prce;
+#ifdef DEBUG
+    if ( prce )
+    {
+        const BOOL  fPrevRCEIsDelete = ( operFlagDelete == prce->m_oper && !prce->FMoved() );
+        if ( fPrevRCEIsDelete )
+        {
+            switch ( m_oper )
+            {
+                case operInsert:
+                case operPreInsert:
+                case operWriteLock:
+                    //  these are the only valid operations after a delete
+                    break;
+
+                default:
+                {
+                    Assert( m_fRolledBack );
+                }
+            }
+        }
+    }
+#endif
+     m_prcePrevOfNode = prce;
 }
 
 
@@ -1758,6 +1781,10 @@ ERR VER::ErrVERICreateRCE(
     }
 
     Call( ErrVERIAllocateRCE( cbNewRCE, &prce, uiHashConcurrentOp ) );
+    if ( m_trxOldestRCE == trxMin )
+    {
+        m_trxOldestRCE = trxBegin0;
+    }
 
 #ifdef DEBUG
     if ( !PinstFromIfmp( pfcb->Ifmp() )->m_plog->FRecovering() )
@@ -4412,11 +4439,11 @@ ERR VER::ErrVERCheckTransactionSize( PIB * const ppib )
     ERR err = JET_errSuccess;
     if ( m_fAboveMaxTransactionSize )
     {
-        UpdateCachedTrxOldest( m_pinst );
+        VERSignalCleanup();
 
         // If this is the oldest transaction and the version store is too
         // full, return an error
-        if ( ppib->trxBegin0 == TrxOldestCached( m_pinst ) )
+        if ( TrxCmp( ppib->trxBegin0, m_trxOldestRCE ) <= 0 )
         {
             const BOOL fCleanupWasRun   = m_msigRCECleanPerformedRecently.FWait( cmsecAsyncBackgroundCleanup );
 
@@ -5157,8 +5184,19 @@ LOCAL VOID VERIFreeExt( PIB * const ppib, FCB *pfcb, PGNO pgnoFirst, CPG cpg )
 
     const BOOL fCleanUpStateSavedSavedSaved = FOSSetCleanupState( fFalse );
 
-    (VOID)ErrSPFreeExt( pfucb, pgnoFirst, cpg, "VerFreeExt" );
-    
+    // Free extent only only after logging extent freed. If not, we might not capture the fact that these pages need to be reconciled if in required range and page is in dbtimeRevert.
+    // We will also mark the extent empty to avoid re-capturing page preimage.
+    err = ErrSPCaptureSnapshot( pfucb, pgnoFirst, cpg, fTrue );
+
+    if ( err >= JET_errSuccess )
+    {
+        (VOID)ErrSPFreeExt( pfucb, pgnoFirst, cpg, "VerFreeExt" );
+    }
+    else
+    {
+        SPReportSpaceLeak( pfucb, err, pgnoFirst, cpg, "VerFreeExt" );
+    }
+
     // Restore cleanup checking
     FOSSetCleanupState( fCleanUpStateSavedSavedSaved );
 
@@ -5787,10 +5825,10 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
                 VERIWaitForTasks( this, pfcbT, fFalse, fTrue );
 
-                // bugfix (#45382): May have outstanding moved RCE's
+                // Processing of delta RCEs may have created flagDelete/writeLock RCEs after operTableDelete.
                 Assert( pfcbT->PrceOldest() == prceNil
-                    || ( pfcbT->PrceOldest()->Oper() == operFlagDelete
-                        && pfcbT->PrceOldest()->FMoved() ) );
+                    || pfcbT->PrceOldest()->Oper() == operFlagDelete
+                    || pfcbT->PrceOldest()->Oper() == operWriteLock );
                 VERNullifyAllVersionsOnFCB( pfcbT );
 
                 pfcbT->PrepareForPurge( fFalse );
@@ -5978,6 +6016,37 @@ ERR RCE::ErrPrepareToDeallocate( TRX trxOldest )
         FCB * const pfcb = prce->Pfcb();
         ENTERCRITICALSECTION enterCritFCBRCEList( &( pfcb->CritRCEList() ) );
 
+        // Except for recovery, this should be the HEAD RCE for this node. Recovery can
+        // allocate RCEs out of order because of deferred RCEs, so make sure to still clean
+        // them up in order.
+        Assert( PinstFromIfmp( m_ifmp )->FRecovering() ||  m_prcePrevOfNode == NULL );
+        if ( PinstFromIfmp( m_ifmp )->FRecovering() )
+        {
+            RCE *prceFirst = this;
+            // With Delta RCEs, you can have uncommitted delta RCEs preceding it, so let them be.
+            while ( prceFirst->Oper() != operDelta && prceFirst->Oper() != operDelta64 && prceFirst->m_prcePrevOfNode != NULL )
+            {
+                Assert( prceFirst->m_prcePrevOfNode->m_prceNextOfNode == prceFirst );
+                prceFirst = prceFirst->m_prcePrevOfNode;
+            }
+
+            while ( prceFirst != this )
+            {
+                RCE *prceNext = prceFirst->PrceNextOfNode();
+
+                ASSERT_VALID( prceFirst );
+                Assert( !prceFirst->FOperNull() );
+                // Only deferrable oper's like FlagDelete/Replace should end up out-of-order
+                Assert( prceFirst->Oper() == operFlagDelete || prceFirst->Oper() == operReplace );
+                Assert( prceFirst->FFullyCommitted() );
+                Assert( TrxCmp( prceFirst->TrxCommitted(), trxOldest ) < 0 );
+
+                VERINullifyCommittedRCE( prceFirst );
+
+                prceFirst = prceNext;
+            }
+        }
+
         do
         {
             RCE *prceNext;
@@ -6138,6 +6207,11 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
                 const TRX   trxRCECommitted = prce->TrxCommitted();
                 BOOL        fCleanable      = fFalse;
 
+                if ( !fCleanOneDb )
+                {
+                    m_trxOldestRCE = fFullyCommitted ? trxRCECommitted : prce->TrxBegin0();
+                }
+
                 if ( trxMax == trxOldest )
                 {
                     //  trxOldest may no longer be trxMax. if so we may not be able to
@@ -6183,6 +6257,13 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
                         //  reached this code path)
                         //
                         Assert( fFalse );
+                    }
+
+                    // If we are only cleaning one database, and this RCE belongs to another one and we already
+                    // skipped the first RCE in the node chain, skip this one also.
+                    if ( fCleanable && fCleanOneDb && prce->Ifmp() != ifmp && prce->FPastVersionsOfNode() )
+                    {
+                        fCleanable = fFalse;
                     }
                 }
 
@@ -6333,6 +6414,7 @@ NextRCE:
         }
         else
         {
+            m_trxOldestRCE = trxMin;
             Assert( pbucketNil == m_pbucketGlobalTail );
         }
         m_critBucketGlobal.Leave();

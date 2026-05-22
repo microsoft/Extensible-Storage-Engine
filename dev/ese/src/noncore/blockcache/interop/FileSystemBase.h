@@ -257,7 +257,7 @@ namespace Internal
                     if ( path )
                     {
                         pin_ptr<const Char> wszPathT = PtrToStringChars( path );
-                        Call( ErrOSStrCbCopyW( wszPathStorage, _cbrg( wszPathStorage ), (STRSAFE_LPCWSTR)wszPathT ) );
+                        Call( ErrOSStrCbCopyW( wszPathStorage, _cbrg( wszPathStorage ), wszPathT ) );
                         wszPath = wszPathStorage;
                     }
 
@@ -295,7 +295,7 @@ namespace Internal
                     WCHAR   wszFolder[ OSFSAPI_MAX_PATH ]   = { 0 };
 
                     pin_ptr<const Char> wszFolderT = PtrToStringChars( folder );
-                    Call( ErrOSStrCbCopyW( wszFolder, _cbrg( wszFolder ), (STRSAFE_LPCWSTR)wszFolderT ) );
+                    Call( ErrOSStrCbCopyW( wszFolder, _cbrg( wszFolder ), wszFolderT ) );
 
                     Call( Pi->ErrPathFolderNorm( wszFolder, _cbrg( wszFolder ) ) );
 

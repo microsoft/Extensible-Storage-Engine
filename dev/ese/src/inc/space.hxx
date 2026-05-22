@@ -150,6 +150,7 @@ ERR ErrSPInitFCB( _Inout_ FUCB * const pfucb );
 ERR ErrSPDeferredInitFCB( _Inout_ FUCB * const pfucb );
 ERR ErrSPGetLastPgno( _Inout_ PIB * ppib, _In_ const IFMP ifmp, _Out_ PGNO * ppgno );
 ERR ErrSPGetLastExtent( _Inout_ PIB * ppib, _In_ const IFMP ifmp, _Out_ EXTENTINFO * pextinfo );
+ERR ErrSPGetOwningExtent( _In_ FUCB* pfucb, _In_ const PGNO pgno, _Out_ EXTENTINFO* pextinfo );
 
 //  Flags related to page or extent allocation.
 //
@@ -299,7 +300,7 @@ typedef struct SpaceCatCtx
     FUCB* pfucbParent;
     FUCB* pfucb;
     FUCB* pfucbSpace;
-    BOOKMARK_COPY* pbm;
+    BOOKMARK_BUFFER* pbmb;
 } SpaceCatCtx;
 
 // Frees a SpaceCatCtx handle.
@@ -423,6 +424,7 @@ INLINE BOOL FSPExpectedError( const ERR err )
         case JET_errOutOfMemory:
         case JET_errOutOfBuffers:
         case JET_errTransactionTooLong:
+        case JET_errCheckpointDepthTooDeep:
         case JET_errDiskIO:
         case JET_errLogWriteFail:
             fExpectedErr = fTrue;
@@ -437,7 +439,9 @@ INLINE BOOL FSPExpectedError( const ERR err )
 
 BOOL FSPIsRootSpaceTree( const FUCB * const pfucb );
 
-PGNO PgnoSPIParentFDP( FUCB *pfucb );
+PGNO PgnoSPParentFDP( FUCB *pfucb );
+
+VOID SPReportSpaceLeak( _In_ const FUCB* const pfucb, _In_ const ERR err, _In_ const PGNO pgnoFirst, _In_ const CPG cpg, __in_z const CHAR* const szTag );
 
 //  space Manager constants
 const INT   cSecFrac                = 4;    // divider of primary extent to get secondary

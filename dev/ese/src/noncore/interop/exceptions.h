@@ -1008,6 +1008,54 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamBBTNodeCorruptedException : public IsamCorruptionException
+    {
+    public:
+        IsamBBTNodeCorruptedException() : IsamCorruptionException( "A property of the BBT node is logically corrupted. Or the BBT node isn't valid.", JET_errBBTNodeCorrupted)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamBBTNodeCorruptedException( String ^ description, Exception^ innerException ) :
+            IsamCorruptionException( description, innerException )
+        {
+        }
+
+        IsamBBTNodeCorruptedException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamCorruptionException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
+    public ref class IsamBBTBuffCorruptedException : public IsamCorruptionException
+    {
+    public:
+        IsamBBTBuffCorruptedException() : IsamCorruptionException( "A BBT buff is logically corrupted. The nodes are out of sequence or the BBT header is corrupt.", JET_errBBTBuffCorrupted)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamBBTBuffCorruptedException( String ^ description, Exception^ innerException ) :
+            IsamCorruptionException( description, innerException )
+        {
+        }
+
+        IsamBBTBuffCorruptedException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamCorruptionException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamCannotSeparateIntrinsicLVException : public IsamUsageException
     {
     public:
@@ -5691,7 +5739,7 @@ namespace Isam
     public ref class IsamDatabaseAttachedForRecoveryException : public IsamUsageException
     {
     public:
-        IsamDatabaseAttachedForRecoveryException() : IsamUsageException( "Database is attached but only for recovery.  It must be explicitly attached before it can be opened. ", JET_errDatabaseAttachedForRecovery)
+        IsamDatabaseAttachedForRecoveryException() : IsamUsageException( "Database is attached but only for recovery.  It must be explicitly attached before it can be opened.", JET_errDatabaseAttachedForRecovery)
         {
         }
 
@@ -8688,6 +8736,30 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamRBSRedeleteFDPExpectedException : public IsamCorruptionException
+    {
+    public:
+        IsamRBSRedeleteFDPExpectedException() : IsamCorruptionException( "Indicates that the reverted table is expected to be marked with delete flag.", JET_errRBSRedeleteFDPExpected)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamRBSRedeleteFDPExpectedException( String ^ description, Exception^ innerException ) :
+            IsamCorruptionException( description, innerException )
+        {
+        }
+
+        IsamRBSRedeleteFDPExpectedException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamCorruptionException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamDatabaseAlreadyRunningMaintenanceException : public IsamUsageException
     {
     public:
@@ -9195,6 +9267,10 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamPageTagCorruptedException;
         case JET_errNodeCorrupted:
             return gcnew IsamNodeCorruptedException;
+        case JET_errBBTNodeCorrupted:
+            return gcnew IsamBBTNodeCorruptedException;
+        case JET_errBBTBuffCorrupted:
+            return gcnew IsamBBTBuffCorruptedException;
         case JET_errCannotSeparateIntrinsicLV:
             return gcnew IsamCannotSeparateIntrinsicLVException;
         case JET_errSeparatedLongValue:
@@ -9835,6 +9911,8 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamRBSRedeleteFDPUnexpectedException;
         case JET_errRBSRCPageFDPDeleteFileCorrupt:
             return gcnew IsamRBSRCPageFDPDeleteFileCorruptException;
+        case JET_errRBSRedeleteFDPExpected:
+            return gcnew IsamRBSRedeleteFDPExpectedException;
         case JET_errDatabaseAlreadyRunningMaintenance:
             return gcnew IsamDatabaseAlreadyRunningMaintenanceException;
         case JET_errRootSpaceLeakEstimationAlreadyRunning:

@@ -44,7 +44,6 @@ i.e Assignment changes ownership -- like the unique_ptr<T> template
 *******************************************************************/
 
 #include "std.hxx"
-
 #include <malloc.h> // required for _alloca()
 
 //  We have moved all globals / statics involving g_cbPage out of
@@ -2569,6 +2568,12 @@ ERR CPAGE::ErrLoadPage(
 
     UtilMemCpy( m_bfl.pv, pv, cb );
 
+    // A loaded page is considered dirty-on-load. So save the scrub state.
+    // For a loaded page, scrub state before dirty isn't available.
+    // So RevertDbtime() will leave the scrub state unchanged.
+    // Note that this is consistent with behavior prior to the bug fix for reverting scrub flag.
+    m_fPageScrubbedPrevSet = fTrue;
+    m_fPageScrubbedPrev = !!FScrubbed();
     return JET_errSuccess;
 }
 
@@ -2603,7 +2608,7 @@ VOID CPAGE::LoadNewPage(
 
 #ifdef ENABLE_JET_UNIT_TEST
 //  ================================================================
-VOID CPAGE::LoadNewTestPage( _In_ const ULONG cb, _In_ const IFMP ifmp )
+VOID CPAGE::LoadNewTestPage( _In_ const ULONG cb, _In_ const IFMP ifmp, const PGNO pgno /* = 42 */ )
 //  ================================================================
 {
     Assert( 0 != cb );
@@ -2626,7 +2631,7 @@ VOID CPAGE::LoadNewTestPage( _In_ const ULONG cb, _In_ const IFMP ifmp )
     //  Initialize the Page so it is usable for testing
     //
 
-    PreInitializeNewPage_( ppibNil, ifmp, 2, 3, 0 );
+    PreInitializeNewPage_( ppibNil, ifmp, pgno, 3, 0 );
     ConsumePreInitPage( 0x0 );
 
     //  Avoid Uninitialized Page issues
@@ -2980,6 +2985,7 @@ VOID CPAGE::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
     Expected( fFlags != 0 );
     m_platchManager->AssertPageIsDirty( m_bfl );
     Assert( FAssertWriteLatch( ) );
+    Assert( m_fPageScrubbedPrevSet );   // prev fPageScrubbed state must've been captured on dirty.
 
     ((PGHDR*)m_bfl.pv)->dbtimeDirtied = dbtime;
 
@@ -2987,33 +2993,23 @@ VOID CPAGE::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
     // state with the way scrubbed was implemented embedded in ::Dirty() and ::DirtyForScrub().
     // Still, we don't expect any other flags to change other than fPageScrubbed.
     //
-    // Its also possible we are replaying a log on an available lag on a table which was deleted and reverted with fPageFDPDelete.
-    // We do not want to overwrite that flag. So we might be restoring that flag.
-    //
     // If the FireWall() below goes off, it doesn't necessarily mean we have
     // a corruption problem, but it means there will be a divergence between
     // copies in a replicated system that may triger a DB divergence error.
 #ifndef ENABLE_JET_UNIT_TEST
-    if ( ( FFlags() | fPageScrubbed ) != ( fFlags | fPageScrubbed ) &&
-         ( FFlags() | fPageFDPDelete ) != ( fFlags | fPageFDPDelete ) &&
-         ( FFlags() | fPageScrubbed |  fPageFDPDelete ) != ( fFlags | fPageScrubbed | fPageFDPDelete ) )
+    if ( ( FFlags() | fPageScrubbed ) != ( fFlags | fPageScrubbed ) )
     {
         FireWall( OSFormat( "RevertDbtime:0x%I32x:0x%I32x", fFlags, FFlags() ) );
     }
-#endif
-    const BOOL fScrubbedBefore = ( fFlags & fPageScrubbed );
-    if ( !FScrubbed() != !fScrubbedBefore )
-    {
-        SetFScrubbedValue_( fScrubbedBefore );
-    }
 
-    // If existing root page had been marked for FDP delete but current root page isn't, mark it again.
-    const BOOL fPageFDPDeleteBefore = ( fFlags & fPageFDPDelete );
-    if ( fPageFDPDeleteBefore && !FPageFDPDelete() )
+    const ULONG fScrubbedBefore = ( fFlags & fPageScrubbed );
+    if ( m_fPageScrubbedPrev != fScrubbedBefore )
     {
-        Assert( FRootPage() );
-        SetPageFDPDelete( fPageFDPDeleteBefore );
+        FireWall( OSFormat( "RevertDbtime(fPageScrubbed):0x%I32x:0x%I32x", fScrubbedBefore, m_fPageScrubbedPrev ) );
     }
+#endif
+
+    SetFScrubbedValue_( m_fPageScrubbedPrev );
 }
 
 
@@ -3388,6 +3384,35 @@ VOID CPAGE::ReplaceReservedTag( INT itag, const DATA* rgdata, INT cdata )
     Replace_( itag, rgdata, cdata, 0 );
 }
 
+//  ================================================================
+VOID CPAGE::ResetReservedTag( INT itag, INT cb, BYTE fill )
+//  ================================================================
+//
+//  Sets size and pattern-fills a reserved tag.
+//
+//-
+{
+    Assert( itag < CTagReserved_() );
+
+    const BOOL  fSmallFormat = FSmallPageFormat();
+    PGHDR*      ppghdr = (PGHDR*) m_bfl.pv;
+    TAG*        ptag = PtagFromItag_( itag );
+
+    // Release space. Stored data will be lost !
+    ppghdr->ibMicFree += ptag->Cb( fSmallFormat );
+    ptag->SetIb( this, 0 );
+    ptag->SetCb( this, 0 );
+    FreeSpace_( cb );
+
+    ptag->SetIb( this, ppghdr->ibMicFree );
+    ppghdr->ibMicFree = USHORT( ppghdr->ibMicFree + cb );
+    ptag->SetCb( this, (USHORT) cb );
+    const USHORT cbFree = (USHORT) ( ppghdr->cbFree - cb );
+    ppghdr->cbFree = cbFree;
+
+    BYTE* pb = PbFromIb_( ptag->Ib( fSmallFormat ) );
+    memset( pb, fill, ptag->Cb( fSmallFormat ) );
+}
 
 //  ================================================================
 bool CPAGE::FResvTagFormatEnabled()
@@ -3430,6 +3455,8 @@ VOID CPAGE::ReleaseWriteLatch( BOOL fTossImmediate )
         m_objidPreInit = objidNil;
     }
 
+    m_fPageScrubbedPrevSet = fFalse;
+
     m_platchManager->ReleaseWriteLatch( &m_bfl, !!fTossImmediate );
     Abandon_();
     Assert( FAssertUnused_( ) );
@@ -3447,6 +3474,7 @@ VOID CPAGE::ReleaseRDWLatch( BOOL fTossImmediate )
     ASSERT_VALID( this );
     DebugCheckAll();
 
+    m_fPageScrubbedPrevSet = fFalse;
     m_platchManager->ReleaseRDWLatch( &m_bfl, !!fTossImmediate );
     Abandon_();
     Assert( FAssertUnused_( ) );
@@ -3467,6 +3495,7 @@ VOID CPAGE::ReleaseReadLatch( BOOL fTossImmediate )
     DebugCheckAll();
 #endif  // DEBUG_PAGE
 
+    m_fPageScrubbedPrevSet = fFalse;
     m_platchManager->ReleaseReadLatch( &m_bfl, !!fTossImmediate );
     Abandon_();
     Assert( FAssertUnused_( ) );
@@ -3808,6 +3837,12 @@ VOID CPAGE::Dirty_( const BFDirtyFlags bfdf )
             FAssertWARLatch() );
     //  for now, but someday in the future we may allow dirty small pages
     Assert( FIsNormalSized() );
+
+    if ( !m_fPageScrubbedPrevSet )
+    {
+        m_fPageScrubbedPrevSet = fTrue;
+        m_fPageScrubbedPrev = !!FScrubbed();
+    }
 
     if( FLoadedPage() )
     {
@@ -4721,7 +4756,7 @@ ERR CPAGE::ErrCheckPage(
     const ULONG_PTR pbPageDataEnd = PbDataEnd_();      // m_bfl.pv + CbBuffer() - tag array size (off itagMicFree)
     if ( pbPageDataEnd <= ( pbPageDataStart + 1 /* generous 1 byte in data section, tighter check next */ ) )
     {
-        MakeCorruptionDetailsSz( L"itagMicFree / tag array too large, overlapping PGHDR (%p,%p,%I64d / %d)", pbPageDataEnd, pbPageDataStart, ctags, CbTagArray_() );
+        MakeCorruptionDetailsSz( L"itagMicFree / tag array too large, overlapping PGHDR (%p,%p,%I64d / %d)", (PVOID)pbPageDataEnd, (PVOID)pbPageDataStart, ctags, CbTagArray_() );
         (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
         Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagArrayWalkingOntoPghdr", wszCorruptionDetails, fLogEvent ) );
     }
@@ -4913,35 +4948,26 @@ ERR CPAGE::ErrCheckPage(
                 //  The whole line is starting above the data start, i.e. off the data section, and possibly even off page.
                 MakeCorruptionDetailsSz( L"TAG %d computed offset starts too high (ib=%d, cb=%d, %p > %p)", itag, ib, cb, line.pv, pbPageDataEnd );
                 (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
-                PageAssertTrack( *this, fFalse, "LineEntirelyAboveDataSection" );
-#ifdef DEBUG
                 Error( ErrCaptureCorruptedPageInfoSz( mode, L"LineEntirelyAboveDataSection", wszCorruptionDetails, fLogEvent ) );
-#endif
             }
             if ( pbLineLastByte > pbPageDataEnd )
             {
                 //  The line ends above the data start, i.e. off the data section, but does start / overlaping in valid data section.
                 MakeCorruptionDetailsSz( L"TAG %d computed offset starts too high (ib=%d, cb=%d, %p > %p)", itag, ib, cb, pbLineLastByte, pbPageDataEnd );
                 (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
-                PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "LineEndsAboveDataSection" );
-#ifdef DEBUG
                 Error( ErrCaptureCorruptedPageInfoSz( mode, L"LineEndsAboveDataSection", wszCorruptionDetails, fLogEvent ) );
-#endif
             }
 
             if ( errGetLine < JET_errSuccess || !FOnData( line.pv, line.cb ) )
             {
                 // catch all
-                CHAR szGetLineErr[40];
-                OSStrCbFormatA( szGetLineErr, sizeof( szGetLineErr ), "GetLineFailed:%d\n", errGetLine );
+                WCHAR wszGetLineErr[40];
+                OSStrCbFormatW( wszGetLineErr, sizeof( wszGetLineErr ), L"GetLineFailed:%d\n", errGetLine );
                 MakeCorruptionDetailsSz( L"GetLineFailed:%d\n", errGetLine );
                 MakeCorruptionDetailsSz( L"UNCAUGHT: TAG %d ErrGetPtr() failed or got line off page (ib=%d, cb=%d, err=%d,f=%d).", itag, ib, cb, errGetLine, FOnData( line.pv, line.cb ) );
                 (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
                 //  there should not be too many errors coming from ErrGetLine() that we can't embed the err in the corruption type.
-                PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "GetLineFailed:%d\n", errGetLine );
-#ifdef DEBUG
-                Error( ErrCaptureCorruptedPageInfoSz( mode, szGetLineErr, wszCorruptionDetails, fLogEvent ) );
-#endif
+                Error( ErrCaptureCorruptedPageInfoSz( mode, wszGetLineErr, wszCorruptionDetails, fLogEvent ) );
             }
 
             //  do some simple KEYDATAFLAGS checks
@@ -5040,12 +5066,12 @@ ERR CPAGE::ErrCheckPage(
 
                 if ( errGetKdf < JET_errSuccess )
                 {
-                    CHAR szGetKdfErr [40];
+                    WCHAR wszGetKdfErr [40];
                     //  there should not be too many errors coming from ErrNDIGetKeydataflags() that we can't embed the err in the corruption type.
-                    OSStrCbFormatA( szGetKdfErr, sizeof( szGetKdfErr ), "NdiGetKdfFailed:%d", errGetKdf );
-                    MakeCorruptionDetailsSz( L"TAG %d failed to load NDIGetKeydataFlags with %d\r\n", errGetKdf );
+                    OSStrCbFormatW( wszGetKdfErr, sizeof( wszGetKdfErr ), L"NdiGetKdfFailed:%d", errGetKdf );
+                    MakeCorruptionDetailsSz( L"TAG %d failed to load NDIGetKeydataFlags with %d\r\n", itag, errGetKdf );
                     (*pcprintf)( "%ws\r\n", wszCorruptionDetails );
-                    Error( ErrCaptureCorruptedPageInfoSz( mode, L"TagDataTooLarge", wszCorruptionDetails, fLogEvent ) );
+                    Error( ErrCaptureCorruptedPageInfoSz( mode, wszGetKdfErr, wszCorruptionDetails, fLogEvent ) );
                 }
 
                 if ( grbitExtensiveCheck & CheckLinesInOrder )
@@ -5765,7 +5791,7 @@ VOID CPAGE::DehydratePageUnadjusted_( _In_ const ULONG cbNewSize )
     Enforce( cbShrinkage < CbPage() );
     Enforce( cbShrinkage < 0x10000 );
 
-    Enforce( ppghdr->cbFree >= cbShrinkage );
+    PageEnforce( (*this), ppghdr->cbFree >= cbShrinkage );
     Enforce( ppghdr->ibMicFree < ( m_platchManager->CbBuffer( m_bfl ) - cbShrinkage ) );
 
     Assert( ppghdr->ibMicFree < m_platchManager->CbBuffer( m_bfl ) - CbTagArray_() );
@@ -6507,7 +6533,7 @@ HandleError:
 
 
 //  ================================================================
-VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
+VOID CPAGE::DumpAllocMap_( CHAR * rgchBuf, CPRINTF * pcprintf ) const
 //  ================================================================
 //
 //  Prints a 'map' of the page, showing how it is used.
@@ -6530,7 +6556,7 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
     //  header
     for ( ich = 0; ich < CbPageHeader(); ++ich )
     {
-        rgchBuf[ich+ichBase] = _T( 'H' );
+        rgchBuf[ich+ichBase] = 'H';
     }
     ichBase = ich;
 
@@ -6543,7 +6569,7 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
         Assert( ptag->Ib( FSmallPageFormat() ) < min( CbPage(), m_platchManager->CbBuffer( m_bfl ) ) );
         for ( ich = ptag->Ib( FSmallPageFormat() ); ich < (ptag->Cb( FSmallPageFormat() ) + ptag->Ib( FSmallPageFormat() )); ++ich )
         {
-            rgchBuf[ich+ichBase] = _T( 'E' );
+            rgchBuf[ich+ichBase] = 'E';
         }
 
         for ( itag = 1; itag < ITagMicFree_(); ++itag )
@@ -6573,7 +6599,7 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
         ich = ptagT->Ib( FSmallPageFormat() );
         for ( ; ich < ((ptagT->Cb( FSmallPageFormat() )) + (ptagT->Ib( FSmallPageFormat() ))); ++ich )
         {
-            rgchBuf[ich+ichBase] = ( iptag % 2 ) ? _T( '%' ) : _T( '#' );
+            rgchBuf[ich+ichBase] = ( iptag % 2 ) ? '%' : '#';
         }
     }
 
@@ -6583,19 +6609,19 @@ VOID CPAGE::DumpAllocMap_( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const
 
     for ( ich = 0; ich < (INT) ( sizeof( CPAGE::TAG ) * ITagMicFree_() ); ++ich )
     {
-        rgchBuf[ich+ichBase] = _T( 'T' );
+        rgchBuf[ich+ichBase] = 'T';
     }
 
     // print the map
     for ( INT iRow = 0; iRow < (INT)m_platchManager->CbBuffer( m_bfl )/cchDumpAllocRow; ++iRow )
     {
-        _TCHAR rgchLineBuf[cchDumpAllocRow+1+1];
-        UtilMemCpy( rgchLineBuf, &(rgchBuf[iRow*cchDumpAllocRow]), cchDumpAllocRow * sizeof( _TCHAR ) );
-        rgchLineBuf[cchDumpAllocRow] = _T( '\n' );
+        CHAR rgchLineBuf[cchDumpAllocRow+1+1];
+        UtilMemCpy( rgchLineBuf, &(rgchBuf[iRow*cchDumpAllocRow]), cchDumpAllocRow * sizeof( CHAR ) );
+        rgchLineBuf[cchDumpAllocRow] = '\n';
         rgchLineBuf[cchDumpAllocRow+1] = 0;
         (*pcprintf)( "%s", rgchLineBuf );
     }
-    (*pcprintf)( _T( "\n" ) );
+    (*pcprintf)( "\n" );
 }
 
 //  ================================================================
@@ -6603,12 +6629,12 @@ ERR CPAGE::DumpAllocMap( CPRINTF * pcprintf ) const
 //  ================================================================
 {
     const INT   cchBuf      = CbPage();
-    _TCHAR      rgchBuf[g_cbPageMax];
+    CHAR        rgchBuf[g_cbPageMax];
 
     for ( INT ich = 0; ich < cchBuf && ich < (sizeof(rgchBuf)/sizeof(rgchBuf[0])); ++ich )
     {
         //  we have to use a loop, not memset, so this will work with unicode
-        rgchBuf[ich] = _T( '.' );
+        rgchBuf[ich] = '.';
     }
 
 #pragma prefast( pop )
@@ -6640,7 +6666,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     if ( ErrEnumTags( ErrAccumulatePageStats, (void*)&btsPageSpace ) < JET_errSuccess )
     {
-        (*pcprintf)( _T( "Failed to accumulate page stats!\n" ) );
+        (*pcprintf)( "Failed to accumulate page stats!\n" );
     }
 
     for ( INT itag = 0; itag < ITagMicFree_(); ++itag )
@@ -6663,7 +6689,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
         {
             if ( itag < CTagReserved_() )
             {
-                (*pcprintf)( _T( "TAG %3d: cb:0x%04x,ib:0x%04x                                                  offset:0x%04x-0x%04x flags:0x%04x %s" ),
+                (*pcprintf)( "TAG %3d: cb:0x%04x,ib:0x%04x                                                  offset:0x%04x-0x%04x flags:0x%04x %s",
                      itag,
                      ptag->Cb( FSmallPageFormat() ),
                      ptag->Ib( FSmallPageFormat() ),
@@ -6684,7 +6710,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                     if( ErrSPREPAIRValidateSpaceNode( &kdf, &pgnoLast, &cpgExtent, &cwszPoolName ) >= JET_errSuccess )
                     {
                         (*pcprintf)(
-                                _T( "TAG %3d: cb=0x%04x,ib=0x%04x SP: %ws: %d,%d-%d flags=0x%04x %s" ),
+                                "TAG %3d: cb=0x%04x,ib=0x%04x SP: %ws: %d,%d-%d flags=0x%04x %s",
                                 itag,
                                 ptag->Cb( FSmallPageFormat() ),
                                 ptag->Ib( FSmallPageFormat() ),
@@ -6700,7 +6726,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
                 if ( !fHandledSpecialCase )
                 {
-                    (*pcprintf)( _T( "TAG %3d: cb:0x%04x,ib:0x%04x prefix:cb=0x%04x suffix:cb=0x%04x data:cb=0x%04x offset:0x%04x-0x%04x flags:0x%04x %s" ),
+                    (*pcprintf)( "TAG %3d: cb:0x%04x,ib:0x%04x prefix:cb=0x%04x suffix:cb=0x%04x data:cb=0x%04x offset:0x%04x-0x%04x flags:0x%04x %s",
                          itag,
                          ptag->Cb( FSmallPageFormat() ),
                          ptag->Ib( FSmallPageFormat() ),
@@ -6721,7 +6747,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
             if ( itag < CTagReserved_() )
             {
                 (*pcprintf)(
-                        _T( "TAG %3d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x  flags=0x%04x %s" ),
+                        "TAG %3d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x  flags=0x%04x %s",
                         itag,
                         __int64( dwAddress ),
                         ptag->Cb( FSmallPageFormat() ),
@@ -6741,7 +6767,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                     if( ErrSPREPAIRValidateSpaceNode( &kdf, &pgnoLast, &cpgExtent, &wsczPoolName ) >= JET_errSuccess )
                     {
                         (*pcprintf)(
-                                _T( "TAG %3d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x SP: %ws: %d,%d-%d flags=0x%04x %s" ),
+                                "TAG %3d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x SP: %ws: %d,%d-%d flags=0x%04x %s",
                                 itag,
                                 __int64( dwAddress ),
                                 ptag->Cb( FSmallPageFormat() ),
@@ -6760,7 +6786,7 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                 {
                     //  If nothing could recognize and handle the special case, then print out a regular line.
                     (*pcprintf)(
-                            _T( "TAG %3d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x  prefix:cb=0x%04x  suffix:pb=0x%I64x,cb=0x%04x  data:pb=0x%I64x,cb=0x%04x  flags=0x%04x %s" ),
+                            "TAG %3d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x  prefix:cb=0x%04x  suffix:pb=0x%I64x,cb=0x%04x  data:pb=0x%I64x,cb=0x%04x  flags=0x%04x %s",
                             itag,
                             __int64( dwAddress ),
                             ptag->Cb( FSmallPageFormat() ),
@@ -6793,44 +6819,44 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     if ( 0 == ITagMicFree_() )
     {
-        (*pcprintf)( _T( "[No tags found]\n" ) );
+        (*pcprintf)( "[No tags found]\n" );
     }
     else
     {
-        (*pcprintf)( _T( "\n" ) );
+        (*pcprintf)( "\n" );
 
         if ( CStatsFromPv(btsPageSpace.phistoNodeCounts)->C() )
         {
             Assert( CStatsFromPv( btsPageSpace.phistoNodeCounts )->C() == CTagReserved_() );
             Assert( CStatsFromPv(btsPageSpace.phistoNodeCounts)->Min() == CStatsFromPv(btsPageSpace.phistoNodeCounts)->Ave() );
             Assert( CStatsFromPv(btsPageSpace.phistoNodeCounts)->Max() == CStatsFromPv(btsPageSpace.phistoNodeCounts)->Ave() );
-            (*pcprintf)( _T( "Nodes: %I64d\n" ),
+            (*pcprintf)( "Nodes: %I64d\n",
                         CStatsFromPv(btsPageSpace.phistoNodeCounts)->Ave(),
                         CStatsFromPv(btsPageSpace.phistoKeyCompression)->C(),
                         CStatsFromPv(btsPageSpace.phistoUnreclaimedBytes)->C() );
-            (*pcprintf)( _T( "                      min,    ave,   max, total\n" ) );
-            (*pcprintf)( _T( " Logical Key Sizes: %5I64d, %6.1f, %5I64d, %5I64d\n" ),
+            (*pcprintf)( "                      min,    ave,   max, total\n" );
+            (*pcprintf)( " Logical Key Sizes: %5I64d, %6.1f, %5I64d, %5I64d\n",
                         CStatsFromPv(btsPageSpace.phistoKeySizes)->Min(),
                         CStatsFromPv(btsPageSpace.phistoKeySizes)->DblAve(),
                         CStatsFromPv(btsPageSpace.phistoKeySizes)->Max(),
                         CStatsFromPv(btsPageSpace.phistoKeySizes)->Total() );
             if ( CStatsFromPv(btsPageSpace.phistoKeyCompression)->C() )
             {
-                (*pcprintf)( _T( "   Key Compression: %5I64d, %6.1f, %5I64d, %5I64d (nodes=%I64d)\n" ),
+                (*pcprintf)( "   Key Compression: %5I64d, %6.1f, %5I64d, %5I64d (nodes=%I64d)\n",
                             CStatsFromPv(btsPageSpace.phistoKeyCompression)->Min(),
                             CStatsFromPv(btsPageSpace.phistoKeyCompression)->DblAve(),
                             CStatsFromPv(btsPageSpace.phistoKeyCompression)->Max(),
                             CStatsFromPv(btsPageSpace.phistoKeyCompression)->Total(),
                             CStatsFromPv(btsPageSpace.phistoKeyCompression)->C() );
             }
-            (*pcprintf)( _T( "   Node Data Sizes: %5I64d, %6.1f, %5I64d, %5I64d\n" ),
+            (*pcprintf)( "   Node Data Sizes: %5I64d, %6.1f, %5I64d, %5I64d\n",
                         CStatsFromPv(btsPageSpace.phistoDataSizes)->Min(),
                         CStatsFromPv(btsPageSpace.phistoDataSizes)->DblAve(),
                         CStatsFromPv(btsPageSpace.phistoDataSizes)->Max(),
                         CStatsFromPv(btsPageSpace.phistoDataSizes)->Total() );
             if ( CStatsFromPv(btsPageSpace.phistoUnreclaimedBytes)->C() )
             {
-                (*pcprintf)( _T( " Unreclaimed Space: %5I64d, %6.1f, %5I64d, %5I64d (nodes=%I64d)\n" ),
+                (*pcprintf)( " Unreclaimed Space: %5I64d, %6.1f, %5I64d, %5I64d (nodes=%I64d)\n",
                             CStatsFromPv(btsPageSpace.phistoUnreclaimedBytes)->Min(),
                             CStatsFromPv(btsPageSpace.phistoUnreclaimedBytes)->DblAve(),
                             CStatsFromPv(btsPageSpace.phistoUnreclaimedBytes)->Max(),
@@ -6840,12 +6866,12 @@ ERR CPAGE::DumpTags( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
         }
         else
         {
-            (*pcprintf)( _T( " No nodes, except maybe external header.  No stats.\n" ) );
+            (*pcprintf)( " No nodes, except maybe external header.  No stats.\n" );
         }
 
     }
 
-    (*pcprintf)( _T( "\n" ) );
+    (*pcprintf)( "\n" );
 
     return 0;
 }
@@ -6871,7 +6897,7 @@ VOID CPAGE::DumpTag( CPRINTF * pcprintf, const INT iline, const DWORD_PTR dwOffs
         ptag->FFlags( this, FSmallPageFormat() ) & fNDCompressed ? 'c' : ' ' );
 
     (*pcprintf)(
-            _T( "TAG %d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x  prefix:cb=0x%04x  suffix:pb=0x%I64x,cb=0x%04x  data:pb=0x%I64x,cb=0x%04x  flags=0x%04x %s\n" ),
+            "TAG %d:  pb=0x%I64x,cb=0x%04x,ib=0x%04x  prefix:cb=0x%04x  suffix:pb=0x%I64x,cb=0x%04x  data:pb=0x%I64x,cb=0x%04x  flags=0x%04x %s\n",
             itag,
             __int64( PbFromIb_( 0 ) +  ptag->Ib( FSmallPageFormat() ) + dwOffset ),
             ptag->Cb( FSmallPageFormat() ),
@@ -6904,7 +6930,7 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     DumpPageChecksumInfo( m_bfl.pv, m_platchManager->CbBuffer( m_bfl ), databasePage, m_pgno, pcprintf );
     const __int64 chksumLogPage = LoggedDataChecksum().rgChecksum[0];
     (*pcprintf)( "                       logged data checksum = %16I64x\n", chksumLogPage );
-    (*pcprintf)( _T( "\n" ) );
+    (*pcprintf)( "\n" );
 
     (*pcprintf)( FORMAT_INT( CPAGE::PGHDR, (PGHDR*)m_bfl.pv, checksum, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( CPAGE::PGHDR, (PGHDR*)m_bfl.pv, dbtimeDirtied, dwOffset ) );
@@ -6929,29 +6955,34 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     if( FLeafPage() )
     {
-        (*pcprintf)( _T( "\t\tLeaf page\n" ) );
+        (*pcprintf)( "\t\tLeaf page\n" );
     }
 
     if( FParentOfLeaf() )
     {
-        (*pcprintf)( _T( "\t\tParent of leaf\n" ) );
+        (*pcprintf)( "\t\tParent of leaf\n" );
     }
 
     if( FInvisibleSons() )
     {
-        (*pcprintf)( _T( "\t\tInternal page\n" ) );
+        (*pcprintf)( "\t\tInternal page\n" );
     }
 
     if( FRootPage() )
     {
-        (*pcprintf)( _T( "\t\tRoot page\n" ) );
+        (*pcprintf)( "\t\tRoot page\n" );
+    }
+
+    if ( FBBTBuffPage() )
+    {
+        (*pcprintf)( "\t\tBBT %sPage", FBBTBuffRootPage() ? "Base " : "" );
     }
 
     BOOL fNewExtHdrFormat = fFalse;
     BYTE fNodeFlag = 0;
     if( FFDPPage() )
     {
-        (*pcprintf)( _T( "\t\tFDP page\n" ) );
+        (*pcprintf)( "\t\tFDP page\n" );
 
         const TAG * const ptag = PtagFromItag_( 0 );
 
@@ -6964,7 +6995,7 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
             || ptag->Ib( FSmallPageFormat() ) < 0
             || ptag->Ib( FSmallPageFormat() ) > m_platchManager->CbBuffer( m_bfl ) - CbPageHeader() - sizeof(TAG) )
         {
-            (*pcprintf)( _T( "\t\tCorrupted External Header\n" ) );
+            (*pcprintf)( "\t\tCorrupted External Header\n" );
         }
         else
         {
@@ -6978,14 +7009,14 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                 fNodeFlag = *pb;
                 ++pb;
 
-                (*pcprintf)( _T( "\t\tNew external header format\n" ) );
+                (*pcprintf)( "\t\tNew external header format\n" );
                 if ( fNodeFlag & BNDIGetPersistedNrfFlag( noderfSpaceHeader ) )
                 {
-                    (*pcprintf)( _T( "\t\t\tSpace header flag presents\n" ) );
+                    (*pcprintf)( "\t\t\tSpace header flag presents\n" );
                 }
                 if ( fNodeFlag & BNDIGetPersistedNrfFlag( noderfIsamAutoInc ) )
                 {
-                    (*pcprintf)( _T( "\t\t\tAutoInc flag presents\n" ) );
+                    (*pcprintf)( "\t\t\tAutoInc flag presents\n" );
                 }
 
                 const USHORT usTagSize = ptag->Cb( FSmallPageFormat() );
@@ -7002,7 +7033,7 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                 // check the expected tag size is consistent with the flag
                 if ( usExpectedTagSize != usTagSize )
                 {
-                    (*pcprintf)( _T( "\t\tCorrupted Extended External Header. External header flag %d, Expected external header size %d, actual size %d.\n" ),
+                    (*pcprintf)( "\t\tCorrupted Extended External Header. External header flag %d, Expected external header size %d, actual size %d.\n",
                                 fNodeFlag,
                                 usExpectedTagSize,
                                 usTagSize );
@@ -7016,7 +7047,7 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                     }
                     else
                     {
-                        (*pcprintf)( _T( "Corruption, on a FDP page with no space header!" ) );
+                        (*pcprintf)( "Corruption, on a FDP page with no space header!" );
                         AssertSz( fFalse, "Corruption, on an FDP page with no space header!" );
 
                     }
@@ -7036,35 +7067,35 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                 if ( psph->FMultipleExtent() )
                 {
                     (*pcprintf)(
-                        _T( "\t\t\tMultiple Extent Space (ParentFDP: %d, pgnoOE: %d)\n" ),
+                        "\t\t\tMultiple Extent Space (ParentFDP: %d, pgnoOE: %d)\n",
                         psph->PgnoParent(),
                         psph->PgnoOE() );
                 }
                 else
                 {
-                    (*pcprintf)( _T( "\t\t\tSingle Extent Space (ParentFDP: %d, CpgPri: %d, AvailBitmap: 0x%08X)\n" ), psph->PgnoParent(), psph->CpgPrimary(), psph->RgbitAvail() );
+                    (*pcprintf)( "\t\t\tSingle Extent Space (ParentFDP: %d, CpgPri: %d, AvailBitmap: 0x%08X)\n", psph->PgnoParent(), psph->CpgPrimary(), psph->RgbitAvail() );
                 }
             }
             if ( fNeedPrintAutoInc )
             {
-                (*pcprintf)( _T( "\t\t\tAuto increment maximum: %d\n" ), qwAutoInc );
+                (*pcprintf)( "\t\t\tAuto increment maximum: %d\n", qwAutoInc );
             }
         }
     }
 
     if( FEmptyPage() )
     {
-        (*pcprintf)( _T( "\t\tEmpty page\n" ) );
+        (*pcprintf)( "\t\tEmpty page\n" );
     }
 
     if( FPreInitPage() )
     {
-        (*pcprintf)( _T( "\t\tPre-init page\n" ) );
+        (*pcprintf)( "\t\tPre-init page\n" );
     }
 
     if( FSpaceTree() )
     {
-        (*pcprintf)( _T( "\t\tSpace tree page" ) );
+        (*pcprintf)( "\t\tSpace tree page" );
 
         if ( FRootPage() )
         {
@@ -7073,7 +7104,7 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                 || ptag->Ib( FSmallPageFormat() ) < 0
                 || ptag->Ib( FSmallPageFormat() ) > m_platchManager->CbBuffer( m_bfl ) - CbPageHeader() - sizeof(TAG) )
             {
-                (*pcprintf)( _T( "\tCorrupted Split Buffer!\n" ) );
+                (*pcprintf)( "\tCorrupted Split Buffer!\n" );
             }
             else
             {
@@ -7082,56 +7113,56 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                         0 == pslitbuf->CpgBuffer2() )
 
                 {
-                    (*pcprintf)( _T( " (spbuf: none)\n" ) );
+                    (*pcprintf)( " (spbuf: none)\n" );
                 }
                 else
                 {
-                    (*pcprintf)( _T( " (spbuf:" ) );
+                    (*pcprintf)( " (spbuf:" );
                     if ( pslitbuf->CpgBuffer1() )
                     {
-                        (*pcprintf)( _T( " buf1: %d-%d (%d)" ),
+                        (*pcprintf)( " buf1: %d-%d (%d)",
                                             pslitbuf->PgnoLastBuffer1() - pslitbuf->CpgBuffer1() + 1,
                                             pslitbuf->PgnoLastBuffer1(), pslitbuf->CpgBuffer1() );
                     }
                     if ( pslitbuf->CpgBuffer2() )
                     {
-                        (*pcprintf)( _T( " buf2: %d-%d (%d)" ),
+                        (*pcprintf)( " buf2: %d-%d (%d)",
                                             pslitbuf->PgnoLastBuffer2() - pslitbuf->CpgBuffer2() + 1,
                                             pslitbuf->PgnoLastBuffer2(), pslitbuf->CpgBuffer2() );
                     }
-                    (*pcprintf)( _T( ") \n" ) );
+                    (*pcprintf)( ") \n" );
                 }
             }
         }
         else
         {
-            (*pcprintf)( _T( "\n" ) );
+            (*pcprintf)( "\n" );
         }
 
     }
 
     if( FRepairedPage() )
     {
-        (*pcprintf)( _T( "\t\tRepaired page\n" ) );
+        (*pcprintf)( "\t\tRepaired page\n" );
     }
 
     if( FPrimaryPage() )
     {
-        (*pcprintf)( _T( "\t\tPrimary page\n" ) );
+        (*pcprintf)( "\t\tPrimary page\n" );
         Assert( !FIndexPage() );
     }
 
     if( FIndexPage() )
     {
-        (*pcprintf)( _T( "\t\tIndex page " ) );
+        (*pcprintf)( "\t\tIndex page " );
 
         if ( FNonUniqueKeys() )
         {
-            (*pcprintf)( _T( "(non-unique keys)\n" ) );
+            (*pcprintf)( "(non-unique keys)\n" );
         }
         else
         {
-            (*pcprintf)( _T( "(unique keys)\n" ) );
+            (*pcprintf)( "(unique keys)\n" );
         }
     }
     else
@@ -7141,36 +7172,36 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     if( FLongValuePage() )
     {
-        (*pcprintf)( _T( "\t\tLong Value page\n" ) );
+        (*pcprintf)( "\t\tLong Value page\n" );
     }
 
     if( FNewRecordFormat() )
     {
-        (*pcprintf)( _T( "\t\tNew record format\n" ) );
+        (*pcprintf)( "\t\tNew record format\n" );
     }
 
     if( FNewChecksumFormat() )
     {
-        (*pcprintf)( _T( "\t\tNew checksum format\n" ) );
+        (*pcprintf)( "\t\tNew checksum format\n" );
     }
 
     if( FScrubbed() )
     {
-        (*pcprintf)( _T( "\t\tScrubbed\n" ) );
+        (*pcprintf)( "\t\tScrubbed\n" );
     }
 
     if ( FPageFDPRootDelete() )
     {
-        (*pcprintf)( _T( "\t\tFDP Root Delete Page\n" ) );
+        (*pcprintf)( "\t\tFDP Root Delete Page\n" );
     }
     else if ( FPageFDPDelete() )
     {
-        (*pcprintf)( _T( "\t\tFDP Delete Page\n" ) );
+        (*pcprintf)( "\t\tFDP Delete Page\n" );
     }
 
-    (*pcprintf)( _T( "\t\tPageFlushType = %d\n" ), Pgft() );
+    (*pcprintf)( "\t\tPageFlushType = %d\n", Pgft() );
 
-    (*pcprintf)( _T( "\n" ) );
+    (*pcprintf)( "\n" );
 
     return JET_errSuccess;
 }

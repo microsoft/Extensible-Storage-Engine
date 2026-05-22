@@ -43,11 +43,12 @@ enum NodeRootField {
 PERSISTED
 enum NodeResvTagId : BYTE
 {
-    rtidInvalid = 0,
-    rtidMax = 0x1f  // tag Ids are byte values, but we only support a max of 7 reserved tags.
-                    // Reserving 3 high bits to keep it similar to NodeFlags on the first byte of a regular iline.
-                    // This isn't needed because reserved tags don't have node flags.
-                    // Keeping these bits free just in case. They can be reclaimed in the future.
+    rtidInvalid     = 0,
+    rtidBBTBuff     = 1,
+    rtidMax         = 0x1f  // tag Ids are byte values, but we only support a max of 7 reserved tags.
+                            // Reserving 3 high bits to keep it similar to NodeFlags on the first byte of a regular iline.
+                            // This isn't needed because reserved tags don't have node flags.
+                            // Keeping these bits free just in case. They can be reclaimed in the future.
 };
 
 PERSISTED

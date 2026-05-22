@@ -168,7 +168,8 @@ class COSFile  //  osf
 
         IFileAPI::FileModeFlags Fmf() const override;
 
-        ERR ErrFlushFileBuffers( const IOFLUSHREASON iofr ) override;
+        ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const FileFlushMode ffm ) override;
+        LONG64 CioNonFlushed() const override;
         void SetNoFlushNeeded() override;
 
         ERR ErrPath( _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) WCHAR* const wszAbsPath ) override;
@@ -283,8 +284,6 @@ class COSFile  //  osf
 
         ERR ErrDiskId( ULONG_PTR* const pulDiskId ) const override;
 
-        LONG64 CioNonFlushed() const override;
-
         BOOL FSeekPenalty() const override
         {
             return m_posv->FSeekPenalty();
@@ -306,7 +305,7 @@ class COSFile  //  osf
             public:
 
                 CIOComplete()
-                    :   m_signal( CSyncBasicInfo( _T( "CIOComplete::m_signal" ) ) ),
+                    :   m_signal( CSyncBasicInfo( "CIOComplete::m_signal" ) ),
                         m_err( JET_errSuccess ),
                         m_tidWait( DwUtilThreadId() ),
                         m_keyIOComplete( NULL ),
@@ -412,7 +411,7 @@ class COSFile  //  osf
                                         CIOComplete* const  piocomplete );
     private:
 
-        static void IOSyncHandoff_( const ERR           err,
+        static void IOSyncHandoff_(     const ERR           err,
                                         COSFile* const      posf,
                                         const FullTraceContext& tc,
                                         const OSFILEQOS     grbitQOS,

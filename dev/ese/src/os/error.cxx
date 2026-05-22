@@ -408,22 +408,24 @@ VOID ERRFormatIssueSource( __out_bcount( cbIssueSource ) WCHAR * wszIssueSource,
 
     //  WARNING: This code was designed and tested to be 100% resilient to all the worse
     //  parameters and so if you change it, retest as this is retail code.
-    OSStrCbFormatW( wszIssueSource, cbIssueSource,
-                        L"PV: %u.%u.%u.%u SV: %u.%u.%u.%u GLE: %u ERR: %d(%hs%hs:%u): %hs%hs(%u)",
+    ERR errT = ErrOSStrCbFormatW( wszIssueSource, cbIssueSource,
+                    L"PV: %u.%u.%u.%u SV: %u.%u.%u.%u GLE: %u ERR: %d(%hs%hs:%u): %hs%hs(%u)",
 #ifndef TEST_ONCE_FORMAT_MAX
-                        DwUtilImageVersionMajor(), DwUtilImageVersionMinor(), DwUtilImageBuildNumberMajor(), DwUtilImageBuildNumberMinor(),
-                        DwUtilSystemVersionMajor(), DwUtilSystemVersionMinor(), DwUtilSystemBuildNumber(), DwUtilSystemServicePackNumber(),
-                        dwSavedGLE,
-                        errLast, szFilenameLastErrPre, szFilenameLastErr, lErrLastLine,
-                        szFilenameSourcePre, szFilenameSource, lLine
+                    DwUtilImageVersionMajor(), DwUtilImageVersionMinor(), DwUtilImageBuildNumberMajor(), DwUtilImageBuildNumberMinor(),
+                    DwUtilSystemVersionMajor(), DwUtilSystemVersionMinor(), DwUtilSystemBuildNumber(), DwUtilSystemServicePackNumber(),
+                    dwSavedGLE,
+                    errLast, szFilenameLastErrPre, szFilenameLastErr, lErrLastLine,
+                    szFilenameSourcePre, szFilenameSource, lLine
 #else
-                        xWorstDword, xWorstDword, xWorstDword, xWorstDword,
-                        xWorstDword, xWorstDword, xWorstDword, xWorstDword,
-                        xWorstDword,
-                        xWorstInt, szFilenameLastErrPre, szFilenameLastErr, xWorstDword,
-                        szFilenameSourcePre, szFilenameSource, xWorstDword
+                    xWorstDword, xWorstDword, xWorstDword, xWorstDword,
+                    xWorstDword, xWorstDword, xWorstDword, xWorstDword,
+                    xWorstDword,
+                    xWorstInt, szFilenameLastErrPre, szFilenameLastErr, xWorstDword,
+                    szFilenameSourcePre, szFilenameSource, xWorstDword
 #endif
-                        );
+                    );
+
+    CallS( errT );
 }
 
 
@@ -647,7 +649,7 @@ void __stdcall AssertFail( PCSTR szMessageFormat, PCSTR szFilename, LONG lLine, 
     //
 
     {
-    CPRINTFFILE cprintffileAssertTxt( wszAssertFile );
+    CPRINTFFILE cprintffileAssertTxt( wszAssertFile, CPRINTFFILE::FILEENCODING::ASCII );
     cprintffileAssertTxt( "%ws", g_wszAssertTextFull );
     }
 
@@ -1062,7 +1064,7 @@ LOCAL_BROKEN BOOL ExceptionDialog( const WCHAR wszException[] )
     const WCHAR wszPidHdr[]         = L"PID: ";
     const WCHAR wszTidHdr[]         = L", TID: 0x";
 
-    OSStrCbFormatW( wszMessage, sizeof(wszMessage), wszFmt,
+    (VOID)ErrOSStrCbFormatW( wszMessage, sizeof(wszMessage), wszFmt,
         wszReleaseHdr,
         DwUtilImageBuildNumberMajor(),
         DwUtilImageBuildNumberMinor(),
@@ -1216,7 +1218,7 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
     //  print the exception information and callstack to our assert file
 
     {
-        CPRINTFFILE cprintffileAssert( wszAssertFile );
+        CPRINTFFILE cprintffileAssert( wszAssertFile, CPRINTFFILE::FILEENCODING::ASCII );
 
         cprintffileAssert(  "JET Exception: Function \"%hs\" raised exception 0x%08X (%ws) at address 0x%0*I64X (base:0x%0*I64X, exr:0x%0*I64X, cxr:0x%0*I64X).",
                             szMessage,

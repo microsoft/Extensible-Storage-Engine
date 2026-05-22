@@ -13,18 +13,17 @@ const INT rankThrottleContexts = 0;
 const INT rankThrottleContext = 0;
 const INT rankFileFilterReferences = 0;
 const INT rankCachedFileHash = 0;
-const INT rankCacheThreadLocalStorage = 0;
 const INT rankClusterReferenceHash = 0;
 const INT rankClusterWrites = 0;
 const INT rankSlabWrites = 0;
 const INT rankSlabWriteBackHash = 0;
+const INT rankCacheThreadLocalStorage = 1;
 const INT rankSlabHash = 1;
 const INT rankCachedBlockWriteCounts = 0;
 const INT rankCacheRepository = 0;
 const INT rankRegisterIFilePerfAPI = 0;
 const INT rankFileFilter = 0;
 const INT rankFileIdentification = 0;
-const INT rankIOCompleteHash = 0;
 const INT rankJournalSegment = 0;
 const INT rankIORangeLock = 0;
 const INT rankCachedFileSparseMap = 0;
@@ -78,17 +77,6 @@ class COffsets
 
         QWORD  m_ibStart;
         QWORD  m_ibEnd;
-};
-
-
-//  Buffer of the same size as another type.
-
-template< class T >
-class Buffer
-{
-    private:
-
-        BYTE    m_rgb[sizeof( T )];
 };
 
 
@@ -339,6 +327,53 @@ INLINE const char* OSFormatFileId( _In_ ICache* const pc )
 
 //  Pool of objects with a minimum lifetime
 
+template< class T = void >
+class TStateBase
+{
+    public:
+
+        static void CleanupAll()
+        {
+            for ( TStateBase<T>* pstate = s_il.PrevMost(); pstate; pstate = s_il.Next( pstate ) )
+            {
+                pstate->CleanupThis();
+            }
+        }
+
+    protected:
+
+        TStateBase()
+        {
+            s_il.InsertAsNextMost( this );
+        }
+
+        virtual ~TStateBase()
+        {
+            s_il.Remove( this );
+        }
+
+        virtual void CleanupThis() {}
+
+        static SIZE_T OffsetOfILE() { return OffsetOf( TStateBase<T>, m_ile ); }
+
+    private:
+
+        static CInvasiveList<TStateBase<T>, TStateBase<T>::OffsetOfILE>             s_il;
+
+        typename CInvasiveList<TStateBase<T>, TStateBase<T>::OffsetOfILE>::CElement m_ile;
+};
+
+template< class T >
+CInvasiveList<TStateBase<T>, TStateBase<T>::OffsetOfILE> TStateBase<T>::s_il;
+
+class CStateBase : public TStateBase<>
+{
+};
+
+class CPoolRepository : public CStateBase
+{
+};
+
 template< class T, BOOL fHeap = fTrue, TICK dtickMin = 10 * 1000 >
 class TPool
 {
@@ -353,20 +388,20 @@ class TPool
         {
             void* pv = NULL;
 
-            if ( s_state.m_il.PrevMost() )
+            if ( s_state.FInit() && s_state.Il().PrevMost() )
             {
-                s_state.m_crit.Enter();
+                s_state.Crit().Enter();
 
-                CHeader* pheader = s_state.m_il.PrevMost();
+                CHeader* pheader = s_state.Il().PrevMost();
 
                 pheader = pheader && pheader->Cb() >= cb ? pheader : NULL;
 
                 if ( pheader )
                 {
-                    s_state.m_il.Remove( pheader );
+                    s_state.Il().Remove( pheader );
                 }
 
-                s_state.m_crit.Leave();
+                s_state.Crit().Leave();
 
                 if ( pheader )
                 {
@@ -405,33 +440,44 @@ class TPool
                 *ppv = NULL;
             }
 
+            if ( !s_state.FInit() )
+            {
+                Free_( pv );
+                return;
+            }
+
             if ( pv && cb >= sizeof( CHeader ) )
             {
                 pheader = new( pv ) CHeader( cb );
                 pv = NULL;
             }
 
-            s_state.m_crit.Enter();
+            s_state.Crit().Enter();
 
             if ( pheader )
             {
-                s_state.m_il.InsertAsPrevMost( pheader );
+                s_state.Il().InsertAsPrevMost( pheader );
                 pheader = NULL;
             }
 
-            while ( s_state.m_il.NextMost() && s_state.m_il.NextMost()->FRelease() )
+            while ( s_state.Il().NextMost() && s_state.Il().NextMost()->FRelease() )
             {
-                pheader = s_state.m_il.NextMost();
-                s_state.m_il.Remove( pheader );
+                pheader = s_state.Il().NextMost();
+                s_state.Il().Remove( pheader );
                 il.InsertAsNextMost( pheader );
                 pheader = NULL;
             }
 
-            s_state.m_crit.Leave();
+            s_state.Crit().Leave();
 
             s_state.Release( il );
 
             Free_( pv );
+        }
+
+        static void Cleanup()
+        {
+            s_state.CleanupThis();
         }
 
     private:
@@ -488,19 +534,31 @@ class TPool
 
     private:
 
-        class CState
+        class CState : CStateBase
         {
             public:
 
                 CState()
-                    :   m_crit( CLockBasicInfo( CSyncBasicInfo( "TPool<T, fHeap, dtickMin>::CState::m_crit" ), rankPool, 0 ) )
+                    :   m_fInit( fTrue ),
+                        m_crit( CLockBasicInfo( CSyncBasicInfo( "TPool<T, fHeap, dtickMin>::CState::m_crit" ), rankPool, 0 ) )
                 {
                 }
 
                 ~CState()
                 {
+                    m_fInit = fFalse;
+                    CleanupThis();
+                }
+
+                void CleanupThis() override
+                {
                     Release( m_il );
                 }
+
+                BOOL FInit() const { return m_fInit; }
+
+                CCriticalSection& Crit() { return m_crit; }
+                CCountedInvasiveList<CHeader, CHeader::OffsetOfILE>& Il() { return m_il; }
 
                 static void Release( CInvasiveList<CHeader, CHeader::OffsetOfILE>& il )
                 {
@@ -513,6 +571,9 @@ class TPool
                     }
                 }
 
+            private:
+
+                BOOL                                                            m_fInit;
                 CCriticalSection                                                m_crit;
                 typename CCountedInvasiveList<CHeader, CHeader::OffsetOfILE>    m_il;
         };

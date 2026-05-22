@@ -21,7 +21,7 @@ namespace Isam
 // a warning. Instead we'll use INT_MIN, which is the same bit value.
 // Converting MJET_GRIT to be an unsigned enum is a nuisance, since CLR is much happier
 // with signed numbers.
-C_ASSERT( 0x80000000 == INT_MIN );
+static_assert( 0x80000000 == INT_MIN );
 
 [Flags]
 MSINTERNAL enum class MJET_GRBIT
@@ -137,6 +137,7 @@ MSINTERNAL enum class MJET_GRBIT
     IdleAvailBuffersStatus = 0x00000020, // Returns JET_wrnIdleFull when database cache available buffers is less than the JET_paramStartFlushThreshold setting.
     IdleWaitForAsyncActivity = 0x00000040, // Waits for all async activity to quiesce. Returns JET_wrnRemainingVersions if there are still pending version store buckets.
     ForceSessionClosed = 0x00000001,
+    DupReadOnlySnapshot = 0x00000001, // Duplicate the transaction snapshot point (including transaction context) for readonly transaction.
     DbReadOnly = 0x00000001,
     DbExclusive = 0x00000002, // multiple opens allowed
     DbSingleExclusive = 0x00000002, // NOT CURRENTLY IMPLEMENTED - currently maps to JET_bitDbExclusive
@@ -421,9 +422,6 @@ MSINTERNAL enum class MJET_GRBIT
     StageProdBetaMode = 0x400000,
     ShrinkDatabaseEofOnAttach = 0x00000001, // Resizes the database file during its attachment.
     ShrinkDatabaseFullCategorizationOnAttach = 0x00000002, // Enables full space categorization when shrinking the database
-    ShrinkDatabaseDontMoveRootsOnAttach = 0x00000004, // Disable root moves when shrinking the database
-    ShrinkDatabaseDontTruncateLeakedPagesOnAttach = 0x00000008, // Disable truncating leaked pages when shrinking the database
-    ShrinkDatabaseDontTruncateIndeterminatePagesOnAttach = 0x00000010, // Disable truncating indeterminate/uncategorized pages when
     DumpMinimum = 0x00000001,
     DumpMaximum = 0x00000002,
     DumpCacheMinimum = 0x00000004,

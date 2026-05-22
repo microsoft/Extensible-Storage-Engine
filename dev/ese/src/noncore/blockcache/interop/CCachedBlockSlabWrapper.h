@@ -77,6 +77,8 @@ namespace Internal
 
                         BOOL FDirty() override;
 
+                        int CInvalidSlot() override;
+
                         ERR ErrSave(    _In_opt_    const ::ICachedBlockSlab::PfnSlabSaved  pfnSlabSaved, 
                                         _In_opt_    const DWORD_PTR                         keySlabSaved ) override;
                 };
@@ -418,6 +420,12 @@ namespace Internal
                 inline BOOL CCachedBlockSlabWrapper<TM, TN>::FDirty()
                 {
                     return I()->IsDirty() ? fTrue : fFalse;
+                }
+
+                template<class TM, class TN>
+                inline int CCachedBlockSlabWrapper<TM, TN>::CInvalidSlot()
+                {
+                    return I()->InvalidSlotCount();
                 }
 
                 template<class TM, class TN>

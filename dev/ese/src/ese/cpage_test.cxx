@@ -2293,6 +2293,7 @@ void CPageTestFixture::TestInternalTest()
 void CPageTestFixture::TestRevertDbtimeCheckDbtime()
 //  ================================================================
 {
+    m_cpage.Dirty_( bfdfDirty );
     m_cpage.SetDbtime( 1 );
     CHECK( 1 == m_cpage.Dbtime() );
     m_cpage.SetDbtime( 2 );
@@ -2317,36 +2318,51 @@ void CPageTestFixture::TestRevertDbtimeCheckFlags()
     m_cpage.SetFlags( fFlagsAfter );
     CHECK( !m_cpage.FScrubbed() );
     CHECK( fFlagsAfter == m_cpage.FFlags() );
+    m_cpage.Dirty_( bfdfDirty );
     m_cpage.SetDbtime( 2 );
     CHECK( 2 == m_cpage.Dbtime() );
     m_cpage.RevertDbtime( 1, fFlagsBefore );
     CHECK( 1 == m_cpage.Dbtime() );
     CHECK( !m_cpage.FScrubbed() );
     CHECK( fFlagsAfter == m_cpage.FFlags() );
+
+    // Check scrub state is set/released correctly
+    CHECK( m_cpage.m_fPageScrubbedPrevSet );
+    m_cpage.ReleaseReadLatch();
+    CHECK( !m_cpage.m_fPageScrubbedPrevSet );
+
+    m_cpage.LoadNewPage( m_ifmp, m_pgno, m_objidFDP, m_fFlags, m_pvPage, CbPage_() );
 
     // Scrub is unset and changes.
-    fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue;
+    fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageRoot;
     m_cpage.SetFlags( fFlagsBefore );
     CHECK( !m_cpage.FScrubbed() );
     CHECK( fFlagsBefore == m_cpage.FFlags() );
-    fFlagsAfter = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageRoot | CPAGE::fPageScrubbed;
-    m_cpage.SetFlags( fFlagsAfter );
-    CHECK( m_cpage.FScrubbed() );
-    CHECK( fFlagsAfter == m_cpage.FFlags() );
+    fFlagsAfter = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageRoot;
+    m_cpage.Dirty_( bfdfDirty );
+    m_cpage.SetFScrubbed_();
     m_cpage.SetDbtime( 2 );
     CHECK( 2 == m_cpage.Dbtime() );
     m_cpage.RevertDbtime( 1, fFlagsBefore );
     CHECK( 1 == m_cpage.Dbtime() );
     CHECK( !m_cpage.FScrubbed() );
-    CHECK( ( fFlagsAfter & ~CPAGE::fPageScrubbed ) == m_cpage.FFlags() );
+    CHECK( fFlagsAfter == m_cpage.FFlags() );
+
+    // Check scrub state is set/released correctly
+    CHECK( m_cpage.m_fPageScrubbedPrevSet );
+    m_cpage.ReleaseRDWLatch();
+    CHECK( !m_cpage.m_fPageScrubbedPrevSet );
+
+    m_cpage.LoadNewPage( m_ifmp, m_pgno, m_objidFDP, m_fFlags, m_pvPage, CbPage_() );
 
     // Scrub is set and doesn't change.
-    fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageScrubbed;
+    fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageRoot | CPAGE::fPageScrubbed;
     m_cpage.SetFlags( fFlagsBefore );
     CHECK( m_cpage.FScrubbed() );
     CHECK( fFlagsBefore == m_cpage.FFlags() );
     fFlagsAfter = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageRoot | CPAGE::fPageScrubbed;
-    m_cpage.SetFlags( fFlagsAfter );
+    m_cpage.Dirty_( bfdfDirty );
+    m_cpage.SetFScrubbed_();
     CHECK( m_cpage.FScrubbed() );
     CHECK( fFlagsAfter == m_cpage.FFlags() );
     m_cpage.SetDbtime( 2 );
@@ -2356,21 +2372,24 @@ void CPageTestFixture::TestRevertDbtimeCheckFlags()
     CHECK( m_cpage.FScrubbed() );
     CHECK( fFlagsAfter == m_cpage.FFlags() );
 
+    // Check scrub state is set/released correctly
+    CHECK( m_cpage.m_fPageScrubbedPrevSet );
+    m_cpage.ReleaseWriteLatch();
+    CHECK( !m_cpage.m_fPageScrubbedPrevSet );
+
+    m_cpage.LoadNewPage( m_ifmp, m_pgno, m_objidFDP, m_fFlags, m_pvPage, CbPage_() );
+
     // Scrub is set and changes.
-    fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageScrubbed;
+    fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageRoot | CPAGE::fPageScrubbed;
     m_cpage.SetFlags( fFlagsBefore );
     CHECK( m_cpage.FScrubbed() );
     CHECK( fFlagsBefore == m_cpage.FFlags() );
     fFlagsAfter = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageRoot;
-    m_cpage.SetFlags( fFlagsAfter );
-    CHECK( !m_cpage.FScrubbed() );
-    CHECK( fFlagsAfter == m_cpage.FFlags() );
+    m_cpage.Dirty_( bfdfDirty );
     m_cpage.SetDbtime( 2 );
     CHECK( 2 == m_cpage.Dbtime() );
     m_cpage.RevertDbtime( 1, fFlagsBefore );
     CHECK( 1 == m_cpage.Dbtime() );
-    CHECK( m_cpage.FScrubbed() );
-    CHECK( fFlagsAfter == ( m_cpage.FFlags() & ~CPAGE::fPageScrubbed ) );
 }
 
 //  ================================================================

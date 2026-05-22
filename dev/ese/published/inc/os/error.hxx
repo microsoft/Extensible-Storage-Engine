@@ -22,13 +22,9 @@ const CHAR * SzSourceFileName( const CHAR * szFilePath );
 //  Prototypes
 //
 
-#ifdef DEBUG
-
-// IsDebuggerAttached() is useful to silence Asserts.  It shouldn't be used in 
-// retail code.  
+//  indicates if a user mode debugger is attached to this process
 
 BOOL IsDebuggerAttached();
-#endif
 
 
 // ------------------------------------------------------------------------------------------------
@@ -375,41 +371,6 @@ extern void (__stdcall *g_pfnEnforceContextFail)( const WCHAR* wszContext, const
 
 // ------------------------------------------------------------------------------------------------
 //
-//  Compiler Assert
-//
-
-//
-// C_ASSERT() can be used to perform many compile-time assertions:
-//            type sizes, field offsets, etc.
-//
-// An assertion failure results in
-//      error C2118: negative subscript.
-// If you have not defined a static / compile-time constraint results in
-//      error C3861: 'countof': identifier not found
-//      error C2086: 'char __C_ASSERT__[1]' : redefinition
-//
-//  Copied over from winnt.h
-
-#define C_ASSERT(e) typedef char __C_ASSERT__[(e)?1:-1]
-// This C_ASSERT() is not sufficient for a check like this:
-//      C_ASSERT( dtickMaintCacheSizeRequest <= dtickMaintCacheStatsPeriod / 2 );
-// b/c (at the time) dtickMaintCacheSizeRequest = 0, and so the error 
-//      2>e:\src\win8\esent2\ds\esent\src\ese\bf.cxx(11397) : error C4296: '<=' : expression is always true
-// is returned.  It is complaining that "0 <= x" ... no value of x can ever
-// make this false ... but since 0 can change (b/c it's a constant that may 
-// be altered) this is actually a valid C_ASSERT().
-
-// Doing a better C_ASSERT() ...
-#define S_ASSERT(e)                     \
-    __pragma(warning(push))             \
-    __pragma(warning(disable:4296))     \
-    typedef char __C_ASSERT__[(e)?1:-1] \
-    __pragma(warning(pop))
-
-
-
-// ------------------------------------------------------------------------------------------------
-//
 //  Exceptions
 //
 
@@ -527,12 +488,6 @@ public:
 
 __forceinline CErrFrameSimple * PefLastThrow();
 
-__forceinline ERR ErrERRSetLastThrow( _In_ const CHAR* szFile, _In_ const LONG lLine, _In_ const ERR err )
-{
-    PefLastThrow()->Set( szFile, lLine, err );
-    return err;
-}
-
 //  Returns the line of the last call that failed out w/ an error, presumably within this frame.
 
 ULONG UlLineLastCall();
@@ -573,7 +528,10 @@ ERR ErrERRCheck_( const ERR err, const CHAR* szFile, const LONG lLine );
 __forceinline ERR ErrERRCheck_( _In_ const ERR err, _In_ const CHAR* szFile, _In_ const LONG lLine )
 {
     extern ERR g_errTrap;
-    PefLastThrow()->Set( szFile, lLine, err );
+    if ( err < 0 /* JET_errSuccess */ )
+    {
+        PefLastThrow()->Set( szFile, lLine, err );
+    }
     if ( g_errTrap == err )
     {
         KernelDebugBreakPoint();

@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 #include "osstd.hxx"
-
 //  we use LoadLibrary in here to test loading our own DLL for EDBGLoad
 #undef LoadLibraryExW
 
@@ -29,6 +28,11 @@ DEBUG_EXT( name )       VOID name(  const PDEBUG_CLIENT pdebugClient, const INT 
 #pragma pop_macro( "Alloc" )
 
 // Allows easier porting from the older wdbgexts-style extensions.
+HRESULT
+EDBGPrintf(
+    _In_ PCSTR szFormat,
+    ...
+);
 #define dprintf EDBGPrintf
 
 #ifdef DEBUGGER_EXTENSION
@@ -303,13 +307,6 @@ typedef CLRUKResourceUtilityManager<2,DWORD,0,DWORD>    CLRUKResourceUtilityMana
         const INT argc,                     \
         const CHAR * const argv[]  )
 
-HRESULT
-DPrintf(
-    _In_ PCSTR szFormat,
-    ...
-)
-;
-
 LOCAL BOOL FFetchGlobalParamsArray(
     _Deref_out_ CJetParam** prgparam,
     _Out_ size_t* pcparam );
@@ -374,6 +371,7 @@ DEBUG_EXT( EDBGSetImplicitDB );
 DEBUG_EXT( EDBGSetImplicitInst );
 DEBUG_EXT( EDBGSetImplicitBT );
 DEBUG_EXT( EDBGSetPii );
+DEBUG_EXT( EDBGDumpBBTBuff );
 
 
 extern VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID * const pv, const INT cb, CPRINTF * pcprintf, const INT cbWidth );
@@ -497,6 +495,10 @@ LOCAL const EDBGFUNCMAP rgfuncmap[] = {
 {
         "DUMP",             EDBGDump,
         "DUMP &lt;class&gt; &lt;address&gt;             - Dump an ESE structure at the given address"
+},
+{
+        "DUMPBBTBUFF",    EDBGDumpBBTBuff,
+        "DUMPBBTBUFF &lt;pBBTBuff&gt;] [&lt;level&gt;] - Dumps nodes in a loaded BBT Buff. All nodes &lt;=level are dumped."
 },
 {
         "DUMPCACHEINFO",    EDBGDumpCacheInfo,
@@ -668,7 +670,7 @@ const INT cfuncmap = sizeof( rgfuncmap ) / sizeof( EDBGFUNCMAP );
 
 
 #define DUMPA( _struct )            { #_struct, &(CDUMPA<_struct>::instance), #_struct " <address>" }
-#define DUMPAA( _struct, addlargs ) { #_struct, &(CDUMPA<_struct>::instance), #_struct " <address> " addlargs }
+#define DUMPAA( _struct, addlargs ) { #_struct, &(CDUMPA<_struct>::instance), #_struct " <address>" addlargs }
 
 
 //  ================================================================
@@ -694,20 +696,20 @@ LOCAL const CDUMPMAP rgcdumpmap[] = {
     DUMPA( LOG_STREAM ),
     DUMPA( LOG_WRITE_BUFFER ),
     DUMPA( VER ),
-    DUMPAA( MEMPOOL, "[<itag>|*]              - <itag>=specified tag only, *=all tags" ),
+    DUMPAA( MEMPOOL, " [<itag>|*]              - <itag>=specified tag only, *=all tags" ),
     DUMPA( SPLIT ),
     DUMPA( SPLITPATH ),
     DUMPA( MERGE ),
     DUMPA( MERGEPATH ),
-    DUMPA( DBFILEHDR ),
+    DUMPAA( DBFILEHDR, "|.|.disk" ),
     { "CDynamicHashTable", &(CDUMPA<CDynamicHashTableEDBG>::instance), "CDynamicHashTable <address>" },
     { "CApproximateIndex", &(CDUMPA<CApproximateIndexEDBG>::instance), "CApproximateIndex <address>" },
     { "g_bflruk", &(CDUMPA<CLRUKResourceUtilityManagerEDBG>::instance), "g_bflruk ese!g_bflruk" },
-    DUMPA( COSDisk ),
-    DUMPA( COSFile ),
+    DUMPAA( COSDisk, "|.db|.edb" ),
+    DUMPAA( COSFile, "|.db|.edb" ),
     DUMPA( COSFileFind ),
     DUMPA( COSFileSystem ),
-    DUMPAA( IOREQ, "[dumpall|norunstats]" ),
+    DUMPAA( IOREQ, " [dumpall|norunstats]" ),
     { "PAGE", &(CDUMPA<CPAGE>::instance), 
          "PAGE <pgno> <address|.> [a|b|h|t|*|2|4|8|16|32]   - a=alloc map, b=binary dump, h=header, t=tags, *=all, 2/4/8/16/32=pagesize" },
     DUMPA( CResource ),
@@ -13353,7 +13355,7 @@ ERR ErrPopulateUsageArray(CArray<CEntry> * rgUsage, const CRedBlackTreeNode<CKey
             goto HandleError;
 
         CEntry entryToAdd( pnode->Key(), pnode->Data() );
-        if ( rgUsage->ErrSetEntry( rgUsage->Size(), entryToAdd ) != CArray<CEntry>::ERR::errSuccess )
+        if ( rgUsage->ErrAppendEntry( entryToAdd ) != CArray<CEntry>::ERR::errSuccess )
         {
             Error( ErrERRCheck( JET_errOutOfMemory ) );
         }
@@ -16120,7 +16122,7 @@ DEBUG_EXT( EDBGDumpDBDiskPage )
         dprintf( "Error: Could not read global FMP variables for ifmp = %d.\n", ifmp );
         goto HandleError;
     }
-    else if ( pgno < 1 )        //  UNDONE: don't currently support dumping page header
+    else if ( pgno < 1 )
     {
         dprintf( "Error: Invalid pgno.\n" );
         goto HandleError;
@@ -16182,6 +16184,10 @@ HandleError:
     if ( NULL != pbPage )
     {
         VirtualFree( pbPage, 0, MEM_RELEASE );
+    }
+    if ( NULL != posf )
+    {
+        Unfetch( posf );
     }
 }
 
@@ -16459,6 +16465,7 @@ DEBUG_EXT( EDBGDecrypt )
     }
 
     err = ErrOSDecryptWithAes256(
+            AES256_CAPI_IMPLEMENTATION,
             pbBuffer,
             pbDecrypted,
             &cbDecrypted,
@@ -16539,17 +16546,17 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
     {
         if ( FFetchVariable( (BYTE *)kdf.key.prefix.Pv() + dwOffset, &rgbPrefix, kdf.key.prefix.Cb() ) )
         {
-            (*pcprintf)( _T( "Prefix (%d bytes):%c" ), kdf.key.prefix.Cb(), ( kdf.key.prefix.Cb() > 16 ? '\n' : ' ' ) );
+            (*pcprintf)( "Prefix (%d bytes):%c", kdf.key.prefix.Cb(), ( kdf.key.prefix.Cb() > 16 ? '\n' : ' ' ) );
             EDBGDumpRawData( pcprintf, rgbPrefix, kdf.key.prefix.Cb(), fFalse );
         }
         else
         {
-            (*pcprintf)( _T( "Error: Failed fetching node prefix.\n" ) );
+            (*pcprintf)( "Error: Failed fetching node prefix.\n" );
         }
     }
     else
     {
-        (*pcprintf)( _T( "Prefix: <null>\n" ) );
+        (*pcprintf)( "Prefix: <null>\n" );
     }
 
     //  fetch and dump suffix, if any
@@ -16558,17 +16565,17 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
     {
         if ( FFetchVariable( (BYTE *)kdf.key.suffix.Pv() + dwOffset, &rgbSuffix, kdf.key.suffix.Cb() ) )
         {
-            (*pcprintf)( _T( "Suffix (%d bytes):%c" ), kdf.key.suffix.Cb(), ( kdf.key.suffix.Cb() > 16 ? '\n' : ' ' ) );
+            (*pcprintf)( "Suffix (%d bytes):%c", kdf.key.suffix.Cb(), ( kdf.key.suffix.Cb() > 16 ? '\n' : ' ' ) );
             EDBGDumpRawData( pcprintf, rgbSuffix, kdf.key.suffix.Cb(), fFalse );
         }
         else
         {
-            (*pcprintf)( _T( "Error: Failed fetching node suffix.\n" ) );
+            (*pcprintf)( "Error: Failed fetching node suffix.\n" );
         }
     }
     else
     {
-        (*pcprintf)( _T( "Suffix: <null>\n" ) );
+        (*pcprintf)( "Suffix: <null>\n" );
     }
 
     //  only fetch data if not performing key-only dump,
@@ -16580,13 +16587,13 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
         {
             if ( !FFetchVariable( (BYTE *)kdf.data.Pv() + dwOffset, &rgbData, kdf.data.Cb() ) )
             {
-                (*pcprintf)( _T( "Error: Failed fetching node data.\n" ) );
+                (*pcprintf)( "Error: Failed fetching node data.\n" );
                 goto HandleError;
             }
         }
         else
         {
-            (*pcprintf)( _T( "Data: <null>\n" ) );
+            (*pcprintf)( "Data: <null>\n" );
             goto HandleError;
         }
     }
@@ -16599,7 +16606,7 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
         if ( !pcpage->FLeafPage() )
         {
             (*pcprintf)(
-                    _T( "Page Pointer: %d (0x%x)\n" ),
+                    "Page Pointer: %d (0x%x)\n",
                     (PGNO)*((LittleEndian<PGNO>*)rgbData),
                     (PGNO)*((LittleEndian<PGNO>*)rgbData) );
             fDumpRawData = fFalse;
@@ -16613,7 +16620,7 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
             if( ErrSPREPAIRValidateSpaceNode( &kdf, &pgnoLast, &cpgExtent, &wszPoolName ) >= JET_errSuccess )
             {
                 (*pcprintf)(
-                        _T( "Space Data (%d bytes): Pool:%ws, cpg:%d, page range:%d-%d\n" ),
+                        "Space Data (%d bytes): Pool:%ws, cpg:%d, page range:%d-%d\n",
                         kdf.data.Cb(),
                         wszPoolName,
                         cpgExtent,
@@ -16622,19 +16629,19 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
             }
             else
             {
-                (*pcprintf)( _T( "Space Data (%d bytes): <could not parse space node data>\n" ), kdf.data.Cb() );
+                (*pcprintf)( "Space Data (%d bytes): <could not parse space node data>\n", kdf.data.Cb() );
                 fDumpRawData = fTrue;
             }
         }
         else if ( pcpage->FLongValuePage() )
         {
-            (*pcprintf)( _T( "Long-Value Data (%d bytes):\n" ), kdf.data.Cb() );
+            (*pcprintf)( "Long-Value Data (%d bytes):\n", kdf.data.Cb() );
             EDBGDumpRawData( pcprintf, rgbData, kdf.data.Cb(), fTrue );
             fDumpRawData = fFalse;
         }
         else if ( pcpage->FIndexPage() )
         {
-            (*pcprintf)( _T( "Primary Bookmark (%d bytes):%c" ), kdf.data.Cb(), ( kdf.data.Cb() > 16 ? '\n' : ' ' ) );
+            (*pcprintf)( "Primary Bookmark (%d bytes):%c", kdf.data.Cb(), ( kdf.data.Cb() > 16 ? '\n' : ' ' ) );
             EDBGDumpRawData( pcprintf, rgbData, kdf.data.Cb(), fFalse );
             fDumpRawData = fFalse;
         }
@@ -16669,7 +16676,7 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
                 dprintf( "WARNING: Could not retrieve table metadata on pfcb = %p, so will be missing some column data.\n", Pdls()->PfcbCurrentTableDebuggee() );
             }
 
-            (*pcprintf)( _T( "Data Record (%d bytes):\n"), kdf.data.Cb() );
+            (*pcprintf)( "Data Record (%d bytes):\n", kdf.data.Cb() );
 
             // Note: pfcbTable ? pfucbSchemaOnly : NULL is _correct_.  We are just using the pfucbSchemaOnly to 
             // pass the FCB really, as that's what DBUTLDumpRec() expects.
@@ -16683,12 +16690,12 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
     //
     if ( fDumpRawData )
     {
-        (*pcprintf)( _T( "Raw Data (%d bytes):\n"), kdf.data.Cb() );
+        (*pcprintf)( "Raw Data (%d bytes):\n", kdf.data.Cb() );
         EDBGDumpRawData( pcprintf, rgbData, kdf.data.Cb(), fTrue );
     }
 
 HandleError:
-    (*pcprintf)( _T( "\n" ) );
+    (*pcprintf)( "\n" );
     Unfetch( rgbPrefix );
     Unfetch( rgbSuffix );
     Unfetch( rgbData );
@@ -16815,6 +16822,129 @@ DEBUG_EXT( EDBGHelpDump )
         dprintf( "\t%s\n", rgcdumpmap[icdumpmap].szHelp );
     }
     dprintf( "\n--------------------\n\n" );
+}
+
+
+//  ================================================================
+LOCAL ERR ErrEDBGDumpBBTBuff_( BBTBuff* pBBTBuffDebuggee, INT level )
+//  ================================================================
+{
+    ERR             err = JET_errSuccess;
+    BBTBuff*        pBBTBuff = NULL;
+    CSR*            pcsrBase = NULL;
+    CSR*            rgcsr = NULL;
+    BBTBuffFormat   rgFormat[ sizeof( BBTBUFF_FORMAT_CONSTANTS ) ];
+    CSRStackArray   rgcsrNew;
+
+    if ( !FFetchVariable( pBBTBuffDebuggee, &pBBTBuff ) )
+    {
+        dprintf( "Error: Failed to fetch BBT Buff\n" );
+        Error( ErrERRCheck( JET_errInternalError ) );
+    }
+
+    // Fetch pages
+    if ( !FReadGlobal( "BBTBUFF_FORMAT_CONSTANTS", &rgFormat ) )
+    {
+        dprintf( "Error: Failed to get BBTBuff format constants.\n" );
+        Error( ErrERRCheck( JET_errInternalError ) );
+    }
+
+    if ( !FFetchVariable( pBBTBuff->m_pcsrBase, &pcsrBase ) ||
+        !FFetchVariable( pBBTBuff->m_rgcsrLatched, &rgcsr, pBBTBuff->m_cMaxPages - 1 ) )
+    {
+        dprintf( "Error: Failed to fetch BBT CSRs\n" );
+        Error( ErrERRCheck( JET_errInternalError ) );
+    }
+
+    rgcsrNew = CSRStackArray( _alloca( sizeof( CSR ) * pBBTBuff->m_cMaxPages ), pBBTBuff->m_cMaxPages, false ); // don't release latches
+    ULONG cbPage = rgFormat[ pBBTBuff->m_ifmt ].cbCPAGE;
+    dprintf( "Detected page size: %u\n", cbPage );
+
+    for ( int i = 0; i < rgcsrNew.CItems(); i++ )
+    {
+        CSR* pcsrCurr = ( i == 0 ? pcsrBase : &rgcsr[ i - 1 ] );
+        IFMP ifmp = pcsrCurr->Cpage().Ifmp();
+        PGNO pgno = pcsrCurr->Pgno();   // must use CSR::m_pgno, CPAGE::PgnoThis() gets it off of the pghdr, which isn't available yet
+        BYTE* rgbPage;
+        BYTE* rgbDebuggee = (BYTE*) ( i == 0 ? pcsrBase->Cpage().PvBuffer() : rgcsr[ i - 1 ].Cpage().PvBuffer() );
+        Call( FFetchAlignedVariable( rgbDebuggee, &rgbPage, cbPage ) );
+        rgcsrNew[ i ].LoadDehydratedPage( ifmp, pgno, rgbPage, cbPage, cbPage );
+    }
+
+    {
+    LINE line;
+    BBTBuff bbtBuffNew;
+    BBTBuff::GetBBTBuffRoot( rgcsrNew[ 0 ], &line );
+    BBTBuffHeader* pbbtHeader = BBTBuff::PBBTHeader( line );
+    bbtBuffNew.Load( NULL, ifmpNil, &rgcsrNew[ 0 ], CSRHeapArray( rgcsrNew.Subarray( 1 ) ), pbbtHeader, latchReadNoTouch );
+
+    if ( pBBTBuff->m_pnodeCurr != NULL )
+    {
+        // Translate currency
+        int ipgCurr = pBBTBuff->m_ipgCurr;
+        BYTE* rgbDebuggee = (BYTE*) ( ipgCurr == 0 ? pcsrBase->Cpage().PvBuffer() : rgcsr[ ipgCurr - 1 ].Cpage().PvBuffer() );
+        auto ibOnPage = ( (BYTE*) pBBTBuff->m_pnodeCurr ) - rgbDebuggee;
+        if ( ibOnPage > bbtBuffNew.IbPageDataEnd( ipgCurr ) )
+        {
+            dprintf( "Error: Can't figure out currency\n" );
+            Error( ErrERRCheck( JET_errInternalError ) );
+        }
+
+        SkipListLink linkCurr = bbtBuffNew.LinkFromIpgOffset( ipgCurr, (int) ibOnPage );
+        Call( bbtBuffNew.ErrSetCurrNodeFromLink( linkCurr ) );
+    }
+
+    std::string szDump = DumpBBTBuff( bbtBuffNew, (INT) level );
+    dprintf( "%s", szDump.c_str() );
+    }
+
+HandleError:
+    rgcsrNew.ForEach( []( CSR& csr )
+    {
+        UnfetchAligned( csr.Cpage().PvBuffer() );
+    } );
+
+    Unfetch( rgcsr );
+    Unfetch( pcsrBase );
+    Unfetch( pBBTBuff );
+    return err;
+}
+
+//  ================================================================
+DEBUG_EXT( EDBGDumpBBTBuff )
+//  ================================================================
+{
+    BBTBuff* pBBTBuffDebuggee = NULL;
+    ULONG level = 0;
+
+    auto printHelp = []()
+    {
+        //  invalid usage
+        //
+        dprintf( "Usage: DUMPBBTBUFF <pBBTBuff> [<level>]\n" );
+        dprintf( "    <pBBTBuff> is the address of a loaded BBTBuff object\n" );
+        dprintf( "    <level> is an integer between 0 - 15. Any nodes with the skiplist level <= to the given level will be dumped\n" );
+        dprintf( "    0 dumps all nodes.\n" );
+    };
+
+    if ( argc < 1 ||
+         argc > 2 ||
+        !FAddressFromSz( argv[ 0 ], &pBBTBuffDebuggee ) )
+    {
+        printHelp();
+        return;
+    }
+
+    if ( argc == 2 )
+    {
+        if ( !FUlFromSz( argv[ 1 ], &level, 10 ) )
+        {
+            printHelp();
+            return;
+        }
+    }
+
+    (void) ErrEDBGDumpBBTBuff_( pBBTBuffDebuggee, (INT) level );
 }
 
 
@@ -17172,6 +17302,24 @@ const CHAR * const mpdbstatesz[ JET_dbstateDirtyAndPatchedShutdown + 1 ] =
     "JET_dbstateIncrementalReseedInProgress",
     "JET_dbstateDirtyAndPatchedShutdown",
 };
+
+//  ================================================================
+VOID CSR::LoadDehydratedPage( const IFMP ifmp, const PGNO pgno, VOID* const pv, const ULONG cb, const ULONG cbPage )
+//  ================================================================
+{
+    ASSERT_VALID( this );
+    Assert( m_latch == latchNone );
+
+    m_cpage.LoadDehydratedPage( ifmp, pgno, pv, cb, cbPage );
+
+    //  set members
+    m_pgno = pgno;
+    m_dbtimeSeen = m_cpage.Dbtime();
+    m_latch = latchReadNoTouch;
+    m_pagetrimState = pagetrimNormal;
+
+    Assert( m_dbtimeSeen == m_cpage.Dbtime() );
+}
 
 //  ================================================================
 VOID CSR::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
@@ -19130,6 +19278,8 @@ VOID CDUMPA<DBFILEHDR>::Dump(
 {
     DBFILEHDR *     pdbfilehdrDebuggee  = NULL;
     DBFILEHDR *     pdbfilehdr          = NULL;
+    COSFile *       posf                = NULL;
+    const BOOL      fReadFromDisk       = ( argc >= 1 || 0 == _stricmp( argv[ 0 ], ".disk" ) );
 
     const CHAR * const szMemDump = "mem";
 
@@ -19147,24 +19297,81 @@ VOID CDUMPA<DBFILEHDR>::Dump(
         return;
     }
 
-    if ( FFetchVariable( pdbfilehdrDebuggee, &pdbfilehdr ) )
+    if ( fReadFromDisk )
     {
-        const SIZE_T    dwOffset        = (BYTE *)pdbfilehdrDebuggee - (BYTE *)pdbfilehdr;
+        HANDLE      hCurrentProcess;
+        ULONG64     ulCurrentProcess;
 
-        dprintf(    "[DBFILEHDR] 0x%p bytes @ 0x%N\n",
-                    QWORD( sizeof( DBFILEHDR ) ),
-                    pdbfilehdrDebuggee );
-        if ( fMemDump )
+        const ULONG cbPage = Pdls()->CbPage();
+
+        if ( Pdls()->IfmpCurrent() == ifmpNil || Pdls()->IfmpCurrent() == 0 ||
+             Pdls()->PfmpCache( Pdls()->IfmpCurrent() ) == NULL ||
+             cbPage == 0 )
         {
-            (VOID)( pdbfilehdr->Dump( CPRINTFWDBG::PcprintfInstance(), dwOffset ) );
+            dprintf( "Something went wrong.  To use .disk argument, must have an implicit IFMP set with !ese .db.  Or we couldn't load the Pfmp cache or cbPage. (%d, 0x%p, %d)\n",
+                     Pdls()->IfmpCurrent(), ( Pdls()->IfmpCurrent() != 0 && Pdls()->IfmpCurrent() != ifmpNil ) ? Pdls()->PfmpCache( Pdls()->IfmpCurrent() ) : NULL, cbPage );
+            goto HandleError;
         }
-        else
+
+        //  UNDONE: currently assumes all databases are COSFile
+        //
+        if ( !FFetchVariable( (COSFile *)( Pdls()->PfmpCache( Pdls()->IfmpCurrent() ) )->Pfapi(), &posf ) )
         {
-            (VOID)( pdbfilehdr->DumpLite( CPRINTFWDBG::PcprintfInstance(), "\n", dwOffset ) );
+            dprintf( "Error: Could not read COSFile at 0x%N for specified FMP.\n", ( Pdls()->PfmpCache( Pdls()->IfmpCurrent() ) )->Pfapi() );
+            goto HandleError;
         }
-        
-        Unfetch( pdbfilehdr );
+
+        //  VirtualAlloc() the buffer to ensure alignment
+        //
+        pdbfilehdr = (DBFILEHDR *)VirtualAlloc( NULL, cbPage, MEM_COMMIT, PAGE_READWRITE );
+        if ( NULL == pdbfilehdr )
+        {
+            dprintf( "Error: Could not allocate DBFILEHDR buffer (%d bytes) via VA !\n", cbPage );
+            goto HandleError;
+            return;
+        }
+
+        HRESULT hr = g_DebugSystemObjects->GetCurrentProcessHandle( &ulCurrentProcess );
+        hCurrentProcess = (HANDLE) ulCurrentProcess;
+        if ( FAILED( hr ) )
+        {
+            dprintf( "Failed to fetch process handle: %#x\n", hr );
+            goto HandleError;
+        }
+
+        if ( !FEDBGGetDbDiskPage( hCurrentProcess, posf->Handle(), (PGNO)-1 /* 0 would be shadow header */, (BYTE*)pdbfilehdr, cbPage ) )
+        {
+            dprintf( "Failed to read from disk handle.\n" );
+            goto HandleError;            
+        }
+        dprintf( "Successfully read DBFILEHDR off the disk.\n" );
+        if ( pdbfilehdr->le_filetype != JET_filetypeDatabase )
+        {
+            dprintf( "\nWARNING:  The read DBFILEHDR doesn't have JET_filetypeDatabase.  Corruption or maybe EBC is enabled.  Dumping contents anyways.\n\n" );
+        }
     }
+    else if ( !FFetchVariable( pdbfilehdrDebuggee, &pdbfilehdr ) )
+    {
+        dprintf( "Failed to fetch DBFILEHDR memory from debugger process.\n" );
+        goto HandleError;            
+    }
+
+    const SIZE_T dwOffset = fReadFromDisk ? 0 : ( (BYTE *)pdbfilehdrDebuggee - (BYTE *)pdbfilehdr );
+
+    dprintf( "[DBFILEHDR] 0x%p bytes @ 0x%N\n", QWORD( sizeof( DBFILEHDR ) ), pdbfilehdrDebuggee );
+    if ( fMemDump )
+    {
+        (VOID)( pdbfilehdr->Dump( CPRINTFWDBG::PcprintfInstance(), dwOffset ) );
+    }
+    else
+    {
+        (VOID)( pdbfilehdr->DumpLite( CPRINTFWDBG::PcprintfInstance(), "\n", dwOffset ) );
+    }        
+
+HandleError:
+
+    fReadFromDisk ? VirtualFree( pdbfilehdr, 0, MEM_RELEASE ) : Unfetch( pdbfilehdr );
+    Unfetch( posf );
 }
 
 // TrxidStack dumping
@@ -21261,7 +21468,7 @@ HRESULT CALLBACK ese(
         DEBUGGER_LOCAL_STORE::DlsDestroy();
         LocalFree( pv );
     }
-    EXCEPT( fDebugMode ? ExceptionFail( _T( "ESE Debugger Extension" ) ) : efaContinueSearch )
+    EXCEPT( fDebugMode ? ExceptionFail( "ESE Debugger Extension" ) : efaContinueSearch )
     {
         DEBUGGER_LOCAL_STORE::DlsDestroy();
         AssertPREFIX( !"This code path should be impossible (the exception-handler should have terminated the process)." );

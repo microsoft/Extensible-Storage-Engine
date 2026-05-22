@@ -155,7 +155,9 @@ class IFileFilter  //  ff
 
         //  Flushes all data previously written for the current file.
 
-        virtual ERR ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const IFileFilter::IOMode iom ) = 0;
+        virtual ERR ErrFlush(   _In_ const IOFLUSHREASON            iofr,
+                                _In_ const IFileAPI::FileFlushMode  ffm,
+                                _In_ const IFileFilter::IOMode      iom ) = 0;
 };
 
 constexpr IFileFilter::IOMode iomRaw = IFileFilter::IOMode::iomRaw;
@@ -757,13 +759,15 @@ INLINE BOOL operator>=( _In_ const TouchNumber tonoA, _In_ const TouchNumber ton
 enum class UpdateNumber : USHORT  //  updno
 {
     updnoInvalid = 0,
+    updnoFirst = 1,
     updnoMax = 65535,
 };
 
 constexpr UpdateNumber updnoInvalid = UpdateNumber::updnoInvalid;
+constexpr UpdateNumber updnoFirst = UpdateNumber::updnoFirst;
 constexpr UpdateNumber updnoMax = UpdateNumber::updnoMax;
 
-INLINE UpdateNumber operator+( _In_ const UpdateNumber updno, _In_ const LONG i ) { return ( (LONG)updno + i > (LONG)updnoMax ) ? (UpdateNumber)( (LONG)updnoInvalid + 1 ) : (UpdateNumber)( (LONG)updno + i ); }
+INLINE UpdateNumber operator+( _In_ const UpdateNumber updno, _In_ const LONG i ) { return ( (LONG)updno + i > (LONG)updnoMax ) ? (UpdateNumber)( (LONG)updnoFirst + 1 ) : (UpdateNumber)( (LONG)updno + i ); }
 INLINE int CmpUpdno( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return (SHORT)( (USHORT)updnoA - (USHORT)updnoB ); }
 INLINE BOOL operator<( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return CmpUpdno( updnoA, updnoB ) < 0; }
 INLINE BOOL operator<=( _In_ const UpdateNumber updnoA, _In_ const UpdateNumber updnoB ) { return CmpUpdno( updnoA, updnoB ) <= 0; }
@@ -809,6 +813,7 @@ class CCachedBlock  //  cbl
         BOOL FDirty() const { return m_fDirty != 0; }
         BOOL FEverDirty() const { return m_fEverDirty != 0; }
         BOOL FPurged() const { return m_fPurged != 0; }
+        UpdateNumber Updno() const { return m_le_updno; }
 
     protected:
 
@@ -846,7 +851,6 @@ class CCachedBlock  //  cbl
         DWORD DwECC() const { return m_le_dwECC; }
         TouchNumber Tono0() const { return m_le_rgtono[ 0 ]; }
         TouchNumber Tono1() const { return m_le_rgtono[ 1 ]; }
-        UpdateNumber Updno() const { return m_le_updno; }
 
         BYTE RgbitReserved0() const { return m_rgbitReserved0; }
 
@@ -944,6 +948,11 @@ class CCachedBlockSlot : public CCachedBlock
         {
         }
 
+        CCachedBlockSlot( _In_ const CCachedBlockSlot& other )
+        {
+            memcpy( this, &other, sizeof( *this ) );
+        }
+
         QWORD IbSlab() const { return m_le_ibSlab; }
         ChunkNumber Chno() const { return m_le_chno; }
         SlotNumber Slno() const { return m_le_slno; }
@@ -1015,7 +1024,7 @@ class CCachedBlockSlotState : public CCachedBlockSlot
         BOOL FSlotUpdated() const { return m_fSlotUpdated; }
         BOOL FClusterUpdated() const { return m_fClusterUpdated; }
         BOOL FSuperceded() const { return m_fSuperceded; }
-        BOOL FFirstUpdate() const { return Updno() == (UpdateNumber)1; }
+        BOOL FFirstUpdate() const { return Updno() == updnoFirst; }
 
         static void Dump(   _In_ const CCachedBlockSlotState&   slotst,
                             _In_ CPRINTF* const                 pcprintf,
@@ -1240,6 +1249,10 @@ class ICachedBlockSlab  //  cbs
 
         virtual BOOL FDirty() = 0;
 
+        //  Indicates the number of invalid slots in the slab.
+
+        virtual int CInvalidSlot() = 0;
+
         //  Callback used to indicate that a slab is saved.
 
         typedef void (*PfnSlabSaved)(   _In_ const ERR          err,
@@ -1447,6 +1460,8 @@ class IBlockCacheFactory  //  bcf
         virtual ERR ErrDetachFile(  _In_z_      const WCHAR* const                              wszFilePath,
                                     _In_opt_    const IBlockCacheFactory::PfnDetachFileStatus   pfnDetachFileStatus,
                                     _In_opt_    const DWORD_PTR                                 keyDetachFileStatus ) = 0;
+
+        virtual ERR ErrIsCachedFile( _In_z_ const WCHAR* const wszFilePath, _Out_ BOOL* const pfCached ) = 0;
 };
 
 class COSBlockCacheFactory

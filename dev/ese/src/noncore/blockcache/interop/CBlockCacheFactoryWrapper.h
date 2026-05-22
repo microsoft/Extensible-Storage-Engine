@@ -230,6 +230,11 @@ namespace Internal
                         {
                             return ErrERRCheck( JET_wrnNyi );
                         }
+
+                        ERR ErrIsCachedFile( _In_z_ const WCHAR* const wszFilePath, _Out_ BOOL* const pfCached ) override
+                        {
+                            return ErrERRCheck( JET_wrnNyi );
+                        }
                 };
             }
         }

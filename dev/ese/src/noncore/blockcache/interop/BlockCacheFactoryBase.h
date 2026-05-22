@@ -581,6 +581,24 @@ namespace Internal
                                 throw EseException( err );
                             }
                         }
+
+                        virtual bool IsCachedFile( String^ path )
+                        {
+                            ERR     err     = JET_errSuccess;
+                            BOOL    fCached = fFalse;
+
+                            pin_ptr<const Char> wszPath = PtrToStringChars( path );
+                            Call( Pi->ErrIsCachedFile( wszPath, &fCached ) );
+
+                            return fCached ? true : false;
+
+                        HandleError:
+                            if ( err < JET_errSuccess )
+                            {
+                                throw EseException( err );
+                            }
+                            return false;
+                        }
                 };
             }
         }

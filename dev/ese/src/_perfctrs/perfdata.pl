@@ -376,13 +376,6 @@ print DATAFILE<<END_DATAFILE_PROLOG;
 
 
 #include <stddef.h>
-#pragma prefast(push)
-#pragma prefast(disable:26006, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:26007, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:28718, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:28726, "Dont bother us with tchar, someone else owns that.")
-#include <tchar.h>
-#pragma prefast(pop)
 #include <windows.h>
 #include <winperf.h>
 
@@ -458,8 +451,7 @@ print DISPFILE<<END_DISPFILE_PROLOG;
 #else
 
 #include <stddef.h>
-#include <tchar.h>
-
+    
 #include "perfmon.hxx"
 
 #pragma pack(4)
@@ -639,7 +631,7 @@ print DATAFILE<<EOF9;
 	};
 
 // These two objects should be the same.
-C_ASSERT( sizeof( PerfDataTemplateReadOnly ) == sizeof( PerfDataTemplateReadWrite ) );
+static_assert( sizeof( PerfDataTemplateReadOnly ) == sizeof( PerfDataTemplateReadWrite ) );
 
 EOF9
 

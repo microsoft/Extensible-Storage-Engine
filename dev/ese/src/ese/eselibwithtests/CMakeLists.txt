@@ -39,6 +39,7 @@ add_library(eselibwithtests SHARED
 
     # Tests
     daehelpers_test.cxx
+    ../bbtbuff_test.cxx
     ../clogredomaps_test.cxx
     ../cpage_test.cxx
     ../checksum_test.cxx

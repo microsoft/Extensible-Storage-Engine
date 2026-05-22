@@ -1841,6 +1841,7 @@ void PerfCollectorStopAndReport( HANDLE hCollector, const char* const szLabel );
 typedef VOID (__stdcall *PFNEVENTLOGGING)
 (
     PWSTR           wszEventLog,
+    DWORD           dwRecordNumber,
     PWSTR           wszEventSource,
     PSYSTEMTIME     pTimeGenerated,
     WORD            wEventType,
@@ -1947,6 +1948,7 @@ EventLoggingModuleFromEventSource(
 VOID
 EventLoggingPrintEvent(
     _In_ PCWSTR                         wszEventLog,
+    _In_ DWORD                          dwRecordNumber,
     _In_ PCWSTR                         wszEventSource,
     _In_ PSYSTEMTIME                    pTimeGenerated,
     _In_ WORD                           wEventType,

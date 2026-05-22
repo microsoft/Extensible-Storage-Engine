@@ -52,7 +52,7 @@ struct OSTLS
 
     //      other properties
 
-    const _TCHAR*               szCprintfPrefix;
+    const   CHAR*               szCprintfPrefix;
 
     ULONG               dwCurPerfObj;           //  perf object for which data is currently being collected
 

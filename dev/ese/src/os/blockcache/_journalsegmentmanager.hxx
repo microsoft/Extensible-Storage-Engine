@@ -516,7 +516,7 @@ HandleError:
 template< class I  >
 INLINE ERR TJournalSegmentManager<I>::ErrFlush()
 {
-    return m_pff->ErrFlushFileBuffers( iofrBlockCache );
+    return m_pff->ErrFlushFileBuffers( iofrBlockCache, ffmDataOnly );
 }
 
 template< class I  >

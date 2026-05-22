@@ -182,10 +182,12 @@ class TCompressedJournalEntry : public TJournalEntryBase<T, JETYPCOMPRESSED>  //
         {
             caInvalid = 0,
             caLegacyXpressHuffman = 1,
+            caLz4 = 2,
         };
 
         static const CompressionAlgorithm caInvalid = CompressionAlgorithm::caInvalid;
         static const CompressionAlgorithm caLegacyXpressHuffman = CompressionAlgorithm::caLegacyXpressHuffman;
+        static const CompressionAlgorithm caLz4 = CompressionAlgorithm::caLz4;
 
         TCompressedJournalEntry(    _In_ const TJournalEntry<T>* const  pje,
                                     _In_ const CompressionAlgorithm     ca,
@@ -214,7 +216,6 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrCreate(  _In_    cons
     ERR                     err                 = JET_errSuccess;
     void*                   pv                  = NULL;
     CompressionAlgorithm    ca                  = caInvalid;
-    USHORT                  compressionFormat   = s_rgusCompressionFormats[ (int)caInvalid ];
     NTSTATUS                status              = 0;
     ULONG                   cbWorkspace         = 0;
     ULONG                   cbUnused            = 0;
@@ -231,34 +232,56 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrCreate(  _In_    cons
 
     //  determine our compression algorithm
 
-    ca = caLegacyXpressHuffman;
-    compressionFormat = s_rgusCompressionFormats[ (int)(CompressionAlgorithm)ca ];
+    ca = caLz4;
 
-    //  allocate our workspace for compression
+    //  compress the data
 
-    status = g_pfnRtlGetCompressionWorkSpaceSize( compressionFormat, &cbWorkspace, &cbUnused );
-    if ( status >= 0 )
+    if ( ca == caLz4 )
     {
-        Alloc( rgbWorkspace = new BYTE[ cbWorkspace ] );
+        cbCompressed = LZ4_compress_default(    (char*)pje,
+                                                (char*)((CCompressedJournalEntry*)pv)->m_rgbCompressed,
+                                                pje->Cb(),
+                                                pje->Cb() );
+
+        //  determine if we successfully compressed the journal entry
+
+        fCompressed = fCompressed && cbCompressed > 0;
     }
-
-    //  try to compress the journal entry
-
-    if ( status >= 0 )
+    else if ( ca == caLegacyXpressHuffman )
     {
-        status = g_pfnRtlCompressBuffer(    compressionFormat,
-                                            (PUCHAR)pje,
-                                            pje->Cb(),
-                                            (PUCHAR)((CCompressedJournalEntry*)pv)->m_rgbCompressed,
-                                            pje->Cb(),
-                                            4096,
-                                            &cbCompressed,
-                                            rgbWorkspace );
+        //  determine our compression format
+
+        const USHORT compressionFormat = s_rgusCompressionFormats[ (int)(CompressionAlgorithm)ca ];
+
+        //  allocate our workspace for compression
+
+        status = g_pfnRtlGetCompressionWorkSpaceSize( compressionFormat, &cbWorkspace, &cbUnused );
+        if ( status >= 0 )
+        {
+            Alloc( rgbWorkspace = new BYTE[ cbWorkspace ] );
+        }
+
+        //  try to compress the journal entry
+
+        if ( status >= 0 )
+        {
+            status = g_pfnRtlCompressBuffer(    compressionFormat,
+                                                (PUCHAR)pje,
+                                                pje->Cb(),
+                                                (PUCHAR)((CCompressedJournalEntry*)pv)->m_rgbCompressed,
+                                                pje->Cb(),
+                                                4096,
+                                                &cbCompressed,
+                                                rgbWorkspace );
+        }
+
+        //  determine if we successfully compressed the journal entry
+
+        fCompressed = fCompressed && status >= 0;
     }
 
     //  determine if we successfully compressed the journal entry
 
-    fCompressed = fCompressed && status >= 0;
     fCompressed = fCompressed && sizeof( CCompressedJournalEntry ) + cbCompressed < pje->Cb();
     fCompressed = fCompressed && pje->Jetyp() != JETYPCOMPRESSED;
 
@@ -303,7 +326,6 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrExtract( _In_    cons
     ERR                                     err                 = JET_errSuccess;
     const CCompressedJournalEntry* const    pcje                = (const CCompressedJournalEntry*)jb.Rgb();
     void*                                   pv                  = NULL;
-    USHORT                                  compressionFormat   = s_rgusCompressionFormats[ (int)caInvalid ];
     NTSTATUS                                status              = 0;
     ULONG                                   cbWorkspace         = 0;
     ULONG                                   cbUnused            = 0;
@@ -327,11 +349,24 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrExtract( _In_    cons
 
         //  decompress based on the algorithm
 
-        if ( pcje->m_le_ca == caLegacyXpressHuffman )
+        if ( pcje->m_le_ca == caLz4 )
         {
-            //  determine our compression algorithm
+            cbUncompressed = LZ4_decompress_safe_partial(   (char*)pcje->m_rgbCompressed,
+                                                            (char*)pv,
+                                                            pcje->CbCompressed(),
+                                                            pcje->m_le_cbUncompressed,
+                                                            pcje->m_le_cbUncompressed );
 
-            compressionFormat = s_rgusCompressionFormats[ (int)(CompressionAlgorithm)pcje->m_le_ca ];
+            if ( cbUncompressed <= 0 )
+            {
+                Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryDecompressionFailure" ) );
+            }
+        }
+        else if ( pcje->m_le_ca == caLegacyXpressHuffman )
+        {
+            //  determine our compression format
+
+            const USHORT compressionFormat = s_rgusCompressionFormats[ (int)(CompressionAlgorithm)pcje->m_le_ca ];
 
             //  allocate our workspace for compression
 
@@ -353,29 +388,32 @@ INLINE ERR TCompressedJournalEntry<T, JETYPCOMPRESSED>::ErrExtract( _In_    cons
             {
                 Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryDecompressionFailure" ) );
             }
-            if ( cbUncompressed != pcje->m_le_cbUncompressed )
-            {
-                Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntrySizeMismatch" ) );
-            }
-            if ( Crc32Checksum( (const BYTE*)pv, pcje->m_le_cbUncompressed ) != pcje->m_le_crc32Uncompressed )
-            {
-                Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryChecksumMismatch" ) );
-            }
-            Call( ErrValidate( CJournalBuffer( pcje->m_le_cbUncompressed, (const BYTE*)pv ) ) );
-            if ( ((const TJournalEntry<T>*)pv)->Jetyp() == JETYPCOMPRESSED )
-            {
-                Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryTypeMismatch" ) );
-            }
-
-            //  get the journal entry
-
-            pje = (const TJournalEntry<T>*)pv;
-            pv = NULL;
         }
         else
         {
             Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryUnknownAlgorithm" ) );
         }
+
+        //  validate the decompressed journal entry
+
+        if ( cbUncompressed != pcje->m_le_cbUncompressed )
+        {
+            Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntrySizeMismatch" ) );
+        }
+        if ( Crc32Checksum( (const BYTE*)pv, pcje->m_le_cbUncompressed ) != pcje->m_le_crc32Uncompressed )
+        {
+            Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryChecksumMismatch" ) );
+        }
+        Call( ErrValidate( CJournalBuffer( pcje->m_le_cbUncompressed, (const BYTE*)pv ) ) );
+        if ( ( ( const TJournalEntry<T>* )pv )->Jetyp() == JETYPCOMPRESSED )
+        {
+            Error( ErrBlockCacheInternalError( L"", "CompressedJournalEntryTypeMismatch" ) );
+        }
+
+        //  get the journal entry
+
+        pje = ( const TJournalEntry<T>* )pv;
+        pv = NULL;
     }
 
     //  if this is any other type of journal entry then just copy it
@@ -419,10 +457,13 @@ template<class T, T JETYPCOMPRESSED>
 USHORT TCompressedJournalEntry<T, JETYPCOMPRESSED>::s_rgusCompressionFormats[] =
 {
     //  caInvalid
-    COMPRESSION_FORMAT_NONE,
+    NULL,
 
     //  caLegacyXpressHuffman
     COMPRESSION_FORMAT_XPRESS_HUFF | COMPRESSION_ENGINE_STANDARD,
+
+    //  caLz4
+    NULL,
 };
 
 

@@ -227,7 +227,7 @@ namespace Internal
                     ExCall( absRootPath = I()->PathRoot( gcnew String( wszPath ) ) );
 
                     pin_ptr<const Char> wszAbsRootPathT = PtrToStringChars( absRootPath );
-                    Call( ErrOSStrCbCopyW( wszAbsRootPath, OSFSAPI_MAX_PATH * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszAbsRootPathT ) );
+                    Call( ErrOSStrCbCopyW( wszAbsRootPath, OSFSAPI_MAX_PATH * sizeof( WCHAR ), wszAbsRootPathT ) );
 
                 HandleError:
                     if ( err < JET_errSuccess )
@@ -255,9 +255,9 @@ namespace Internal
                                                         diskNumber );
 
                     pin_ptr<const Char> wszVolumeCanonicalPathT = PtrToStringChars( volumeCanonicalPath );
-                    OSStrCbCopyW( wszVolumeCanonicalPath, cchVolumeCanonicalPath * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszVolumeCanonicalPathT );
+                    OSStrCbCopyW( wszVolumeCanonicalPath, cchVolumeCanonicalPath * sizeof( WCHAR ), wszVolumeCanonicalPathT );
                     pin_ptr<const Char> wszDiskIdT = PtrToStringChars( diskId );
-                    OSStrCbCopyW( wszDiskId, cchDiskId * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszDiskIdT );
+                    OSStrCbCopyW( wszDiskId, cchDiskId * sizeof( WCHAR ), wszDiskIdT );
                     *pdwDiskNumber = diskNumber;
                 }
 
@@ -273,7 +273,7 @@ namespace Internal
                     ExCall( absPath = I()->PathComplete( gcnew String( wszPath ) ) );
 
                     pin_ptr<const Char> wszAbsPathT = PtrToStringChars( absPath );
-                    Call( ErrOSStrCbCopyW( wszAbsPath, OSFSAPI_MAX_PATH * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszAbsPathT ) );
+                    Call( ErrOSStrCbCopyW( wszAbsPath, OSFSAPI_MAX_PATH * sizeof( WCHAR ), wszAbsPathT ) );
 
                 HandleError:
                     if ( err < JET_errSuccess )
@@ -312,17 +312,17 @@ namespace Internal
                     if ( wszFolder && folder != nullptr )
                     {
                         pin_ptr<const Char> wszFolderT = PtrToStringChars( folder );
-                        Call( ErrOSStrCbCopyW( wszFolder, OSFSAPI_MAX_PATH * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszFolderT ) );
+                        Call( ErrOSStrCbCopyW( wszFolder, OSFSAPI_MAX_PATH * sizeof( WCHAR ), wszFolderT ) );
                     }
                     if ( wszFileBase && fileBase != nullptr )
                     {
                         pin_ptr<const Char> wszFileBaseT = PtrToStringChars( fileBase );
-                        Call( ErrOSStrCbCopyW( wszFileBase, OSFSAPI_MAX_PATH * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszFileBaseT ) );
+                        Call( ErrOSStrCbCopyW( wszFileBase, OSFSAPI_MAX_PATH * sizeof( WCHAR ), wszFileBaseT ) );
                     }
                     if ( wszFileExt && fileExt != nullptr )
                     {
                         pin_ptr<const Char> wszFileExtT = PtrToStringChars( fileExt );
-                        Call( ErrOSStrCbCopyW( wszFileExt, OSFSAPI_MAX_PATH * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszFileExtT ) );
+                        Call( ErrOSStrCbCopyW( wszFileExt, OSFSAPI_MAX_PATH * sizeof( WCHAR ), wszFileExtT ) );
                     }
 
                 HandleError:
@@ -386,7 +386,7 @@ namespace Internal
                                                     gcnew String( wszFileExt ) ) );
 
                     pin_ptr<const Char> wszPathT = PtrToStringChars( path );
-                    Call( ErrOSStrCbCopyW( wszPath, cbPath, (STRSAFE_LPCWSTR)wszPathT ) );
+                    Call( ErrOSStrCbCopyW( wszPath, cbPath, wszPathT ) );
 
                 HandleError:
                     if ( err < JET_errSuccess )
@@ -410,7 +410,7 @@ namespace Internal
                     ExCall( folderOut = I()->PathFolderNorm( folderIn ) );
 
                     pin_ptr<const Char> wszFolderT = PtrToStringChars( folderOut );
-                    Call( ErrOSStrCbCopyW( wszFolder, cbSize, (STRSAFE_LPCWSTR)wszFolderT ) );
+                    Call( ErrOSStrCbCopyW( wszFolder, cbSize, wszFolderT ) );
 
                 HandleError:
                     return err;
@@ -469,7 +469,7 @@ namespace Internal
                     ExCall( folder = I()->PathFolderDefault( fCanProcessUseRelativePaths ) );
 
                     pin_ptr<const Char> wszFolderT = PtrToStringChars( folder );
-                    Call( ErrOSStrCbCopyW( wszFolder, cbFolder, (STRSAFE_LPCWSTR)wszFolderT ) );
+                    Call( ErrOSStrCbCopyW( wszFolder, cbFolder, wszFolderT ) );
                     *pfCanProcessUseRelativePaths = fCanProcessUseRelativePaths ? fTrue : fFalse;
 
                 HandleError:
@@ -499,7 +499,7 @@ namespace Internal
                     ExCall( folder = I()->GetTempFolder() );
 
                     pin_ptr<const Char> wszFolderT = PtrToStringChars( folder );
-                    Call( ErrOSStrCbCopyW( wszFolder, cchFolder * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszFolderT ) );
+                    Call( ErrOSStrCbCopyW( wszFolder, cchFolder * sizeof( WCHAR ), wszFolderT ) );
 
                 HandleError:
                     if ( err < JET_errSuccess )
@@ -525,7 +525,7 @@ namespace Internal
                     ExCall( filename = I()->GetTempFileName( gcnew String( wszFolder ), gcnew String( wszPrefix ) ) );
 
                     pin_ptr<const Char> wszFileNameT = PtrToStringChars( filename );
-                    Call( ErrOSStrCbCopyW( wszFileName, OSFSAPI_MAX_PATH * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszFileNameT ) );
+                    Call( ErrOSStrCbCopyW( wszFileName, OSFSAPI_MAX_PATH * sizeof( WCHAR ), wszFileNameT ) );
 
                 HandleError:
                     if ( err < JET_errSuccess )

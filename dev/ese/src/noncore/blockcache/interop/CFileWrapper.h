@@ -24,7 +24,8 @@ namespace Internal
 
                         IFileAPI::FileModeFlags Fmf() const override;
 
-                        ERR ErrFlushFileBuffers( const IOFLUSHREASON iofr ) override;
+                        ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const IFileAPI::FileFlushMode ffm ) override;
+                        LONG64 CioNonFlushed() const override;
                         void SetNoFlushNeeded() override;
 
                         ERR ErrPath( _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) WCHAR* const wszAbsPath ) override;
@@ -105,8 +106,6 @@ namespace Internal
 
                         ERR ErrDiskId( ULONG_PTR* const pulDiskId ) const override;
 
-                        LONG64 CioNonFlushed() const override;
-
                         BOOL FSeekPenalty() const override;
 
 #ifdef DEBUG
@@ -124,14 +123,21 @@ namespace Internal
                 }
 
                 template< class TM, class TN >
-                inline ERR CFileWrapper<TM, TN>::ErrFlushFileBuffers( const IOFLUSHREASON iofr )
+                inline ERR CFileWrapper<TM, TN>::ErrFlushFileBuffers(   _In_ const IOFLUSHREASON            iofr,
+                                                                        _In_ const IFileAPI::FileFlushMode  ffm )
                 {
                     ERR err = JET_errSuccess;
 
-                    ExCall( I()->FlushFileBuffers() );
+                    ExCall( I()->FlushFileBuffers( (Internal::Ese::BlockCache::Interop::FileFlushMode)ffm ) );
 
                 HandleError:
                     return err;
+                }
+
+                template< class TM, class TN >
+                inline LONG64 CFileWrapper<TM, TN>::CioNonFlushed() const
+                {
+                    return I()->CountIoNonFlushed();
                 }
 
                 template< class TM, class TN >
@@ -151,7 +157,7 @@ namespace Internal
                     ExCall( absPath = I()->Path() );
 
                     pin_ptr<const Char> wszAbsPathT = PtrToStringChars( absPath );
-                    Call( ErrOSStrCbCopyW( wszAbsPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszAbsPathT ) );
+                    Call( ErrOSStrCbCopyW( wszAbsPath, cbOSFSAPI_MAX_PATHW, wszAbsPathT ) );
 
                 HandleError:
                     if ( err < JET_errSuccess )
@@ -526,12 +532,6 @@ namespace Internal
                         *pulDiskId = 0;
                     }
                     return err;
-                }
-
-                template< class TM, class TN >
-                inline LONG64 CFileWrapper<TM, TN>::CioNonFlushed() const
-                {
-                    return I()->CountIoNonFlushed();
                 }
 
                 template< class TM, class TN >

@@ -158,7 +158,7 @@ public:
         Assert(ppv);
         Assert(pcb);
         *ppv = m_sz;
-        (VOID) StringCbLengthA(m_sz, m_cchMax, pcb);
+        *pcb = LOSStrLengthA( m_sz, m_cchMax );
     }
 
     virtual ERR ErrSetFromPvCb(const void * const pv, const size_t cb)

@@ -184,7 +184,7 @@ class PgnoCollection : private CArray< PGNO >
         {
             m_rwl.EnterAsWriter();
 
-            if ( ErrSetEntry( Size(), pgno ) != CArray< PGNO >::ERR::errSuccess )
+            if ( ErrAppendEntry( pgno ) != CArray< PGNO >::ERR::errSuccess )
             {
                 m_rwl.LeaveAsWriter();
                 return ErrERRCheck( JET_errOutOfMemory );
@@ -265,7 +265,7 @@ struct CHECKTABLE
 
     //  need a constructor to initialize the signal
 
-    CHECKTABLE() : signal( CSyncBasicInfo( _T( "CHECKTABLE::signal" ) ) ) {}
+    CHECKTABLE() : signal( CSyncBasicInfo( "CHECKTABLE::signal" ) ) {}
 };
 
 
@@ -1218,7 +1218,7 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
         CallR( ErrERRCheck( JET_errInvalidParameter ) );
     }
     OSStrCbFormatW(wszFile, sizeof( wszFile ), L"%s%s", wszPrefix, L".INTEG.RAW" );
-    CPRINTFFILE cprintfFile( wszFile );
+    CPRINTFFILE cprintfFile( wszFile, CPRINTFFILE::FILEENCODING::ASCII );
 
     // we check this only if we are going to use the szFile in the next line
     //
@@ -1231,7 +1231,7 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
         OSStrCbFormatW(wszFile, sizeof( wszFile ), L"%s%s", wszPrefix, L".INTGINFO.TXT" );
     }
     CPRINTF * const pcprintfStatsInternal = ( pdbutil->grbitOptions & JET_bitDBUtilOptionStats ) ?
-                                    new CPRINTFFILE( wszFile ) :
+                                    new CPRINTFFILE( wszFile, CPRINTFFILE::FILEENCODING::ASCII ) :
                                     CPRINTFNULL::PcprintfInstance();
     if ( NULL == pcprintfStatsInternal )
     {
@@ -2141,6 +2141,7 @@ LOCAL ERR ErrREPAIRCheckHeader(
     err = ErrUtilReadShadowedHeader(    pinst,
                                         pinst->m_pfsapi,
                                         wszDatabase,
+                                        JET_filetypeDatabase,
                                         reinterpret_cast<BYTE*>( pdbfilehdr ),
                                         g_cbPage,
                                         OffsetOf( DBFILEHDR_FIX, le_cbPageSize ),
@@ -7166,7 +7167,7 @@ LOCAL ERR ErrREPAIRICheck(
     {
         if ( !csr.Cpage().FInvisibleSons() )
         {
-            (*popts->pcprintfError)( "page %d: not an internal page\r\n" );
+            (*popts->pcprintfError)( "page %d: not an internal page\r\n", csr.Pgno() );
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
 
@@ -8087,6 +8088,7 @@ LOCAL ERR ErrREPAIRChangeDBSignature(
     err = ErrUtilReadShadowedHeader(    pinst,
                                         pinst->m_pfsapi,
                                         wszDatabase,
+                                        JET_filetypeDatabase,
                                         reinterpret_cast<BYTE*>( pdbfilehdr ),
                                         g_cbPage,
                                         OffsetOf( DBFILEHDR, le_cbPageSize ),

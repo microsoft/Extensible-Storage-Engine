@@ -474,7 +474,7 @@ sub PrintAppVerifierThunkArray( $$ )
 		"};\n".
 		"\n".
 		"// Confirm that the VF_PROVIDER_ESENT_HOOK_MAXIMUM_INDEX constant is correct.\n".
-		"C_ASSERT( LENGTH_OF( VfProviderEsentThunks) == VF_PROVIDER_ESENT_HOOK_MAXIMUM_INDEX + 1);\n".
+		"static_assert( LENGTH_OF( VfProviderEsentThunks) == VF_PROVIDER_ESENT_HOOK_MAXIMUM_INDEX + 1);\n".
 		"\n"
 	);
 

@@ -185,7 +185,6 @@ Crc32Checksum(
 
 
 HCRYPTPROV g_hAESProv = NULL;
-CCriticalSection g_critAESProv( CLockBasicInfo( CSyncBasicInfo( _T( "g_critAESProv" ) ), rankAESProv, 0 ) );
 #define BlockSizeAes256 16
 
 BOOL FOSEncryptionPreinit()
@@ -205,31 +204,16 @@ ErrOSEncryptionInit()
 ERR
 ErrOSIAESProviderInit()
 {
-    if ( g_hAESProv != NULL )
+    if ( !CryptAcquireContextW( &g_hAESProv, NULL, MS_ENH_RSA_AES_PROV_W, PROV_RSA_AES, CRYPT_VERIFYCONTEXT ) )
     {
-        return JET_errSuccess;
-    }
-
-    g_critAESProv.Enter();
-
-    if ( g_hAESProv != NULL )
-    {
-        g_critAESProv.Leave();
-        return JET_errSuccess;
-    }
-
-    HCRYPTPROV hAESProv = NULL;
-    if ( !CryptAcquireContextW( &hAESProv, NULL, MS_ENH_RSA_AES_PROV_W, PROV_RSA_AES, CRYPT_VERIFYCONTEXT ) )
-    {
-        g_critAESProv.Leave();
         return ErrOSErrFromWin32Err(GetLastError());
     }
 
-    const VOID *hPrev = AtomicExchangePointer( (VOID **)&g_hAESProv, (VOID *)hAESProv );
-    Assert( hPrev == NULL );
-    g_critAESProv.Leave();
     return JET_errSuccess;
 }
+
+CInitOnce< ERR, decltype(&ErrOSIAESProviderInit) > g_AESInitOnce;
+extern void OSBCryptEncryptionTerm();
 
 void
 OSEncryptionTerm()
@@ -239,6 +223,9 @@ OSEncryptionTerm()
         CryptReleaseContext( g_hAESProv, 0 );
         g_hAESProv = NULL;
     }
+    g_AESInitOnce.Reset();
+
+    OSBCryptEncryptionTerm();
 }
 
 #include <pshpack1.h>
@@ -250,7 +237,7 @@ struct AES256KEY
     BYTE                            pbKey[0];
 };
 
-ERR ErrOSEncryptionVerifyKey(
+ERR ErrOSCAPIEncryptionVerifyKey(
         _In_reads_bytes_(cbKey)                         const   BYTE *pbKey,
         _In_                                                    ULONG cbKey )
 {
@@ -267,7 +254,7 @@ ERR ErrOSEncryptionVerifyKey(
 }
 
 ERR
-ErrOSCreateAes256Key(
+ErrOSCAPICreateAes256Key(
     _Out_writes_bytes_to_opt_(*pcbKeySize, *pcbKeySize) BYTE *pbKey,
     _Inout_                                             ULONG *pcbKeySize )
 {
@@ -276,7 +263,7 @@ ErrOSCreateAes256Key(
     AES256KEY *pKey = (AES256KEY *)pbKey;
     ULONG cbKeySize = *pcbKeySize;
 
-    CallR( ErrOSIAESProviderInit() );
+    CallR( g_AESInitOnce.Init( ErrOSIAESProviderInit ));
 
     if ( !CryptGenKey( g_hAESProv, CALG_AES_256, CRYPT_EXPORTABLE, &hKey ) )
     {
@@ -326,7 +313,7 @@ ErrOSCreateAes256Key(
         Expected( blockSize == BlockSizeAes256*8 );
     }
 
-    CallS( ErrOSEncryptionVerifyKey( pbKey, *pcbKeySize ) );
+    CallS( ErrOSCAPIEncryptionVerifyKey( pbKey, *pcbKeySize ) );
 #endif
 
 HandleError:
@@ -352,7 +339,7 @@ ULONG CbOSEncryptAes256SizeNeeded( ULONG cbDataLen )
 }
 
 ERR
-ErrOSEncryptWithAes256(
+ErrOSCAPIEncryptWithAes256(
     _Inout_updates_bytes_to_(cbDataBufLen, *pcbDataLen)     BYTE *pbData,
     _Inout_                                                 ULONG *pcbDataLen,
     _In_                                                    ULONG cbDataBufLen,
@@ -366,9 +353,9 @@ ErrOSEncryptWithAes256(
     AES256BLOBTRAILER trailer;
     ULONG cbNeeded;
 
-    CallR( ErrOSIAESProviderInit() );
+    CallR( g_AESInitOnce.Init( ErrOSIAESProviderInit ));
 
-    CallR( ErrOSEncryptionVerifyKey( pbKey, cbKey ) );
+    CallR( ErrOSCAPIEncryptionVerifyKey( pbKey, cbKey ) );
 
     cbNeeded = CbOSEncryptAes256SizeNeeded( *pcbDataLen );
     if ( cbNeeded > cbDataBufLen )
@@ -425,7 +412,7 @@ HandleError:
 }
 
 ERR
-ErrOSDecryptWithAes256(
+ErrOSCAPIDecryptWithAes256(
     _In_reads_( *pcbDataLen )                           BYTE *pbDataIn,
     _Out_writes_bytes_to_(*pcbDataLen, *pcbDataLen)     BYTE *pbDataOut,
     _Inout_                                             ULONG *pcbDataLen,
@@ -438,9 +425,9 @@ ErrOSDecryptWithAes256(
     ULONG checksum;
     AES256BLOBTRAILER *ptrailer;
 
-    CallR( ErrOSIAESProviderInit() );
+    CallR( g_AESInitOnce.Init( ErrOSIAESProviderInit ));
 
-    CallR( ErrOSEncryptionVerifyKey( pbKey, cbKey ) );
+    CallR( ErrOSCAPIEncryptionVerifyKey( pbKey, cbKey ) );
 
     if ( *pcbDataLen < BlockSizeAes256 + sizeof(AES256BLOBTRAILER) ||
          *pcbDataLen % BlockSizeAes256 != sizeof(AES256BLOBTRAILER) % BlockSizeAes256 )
@@ -496,5 +483,116 @@ HandleError:
     }
 
     return err;
+}
+
+ERR
+ErrOSBCryptCreateAes256Key(
+    _Out_writes_bytes_to_opt_(*pcbKeySize, *pcbKeySize) BYTE *pbKey,
+    _Inout_                                             ULONG *pcbKeySize );
+
+ERR
+ErrOSBCryptEncryptionVerifyKey(
+    _In_reads_bytes_(cbKey)                     const   BYTE *pbKey,
+    _In_                                                ULONG cbKey );
+
+ERR
+ErrOSBCryptEncryptWithAes256(
+    _Inout_updates_bytes_to_(cbDataBufLen, *pcbDataLen) BYTE *pbData,
+    _Inout_                                             ULONG *pcbDataLen,
+    _In_                                                ULONG cbDataBufLen,
+    _In_reads_bytes_(cbKey)                     const   BYTE *pbKey,
+    _In_                                                ULONG cbKey );
+
+ERR
+ErrOSBCryptDecryptWithAes256(
+    _In_reads_( *pcbDataLen )                           BYTE *pbDataIn,
+    _Out_writes_bytes_to_(*pcbDataLen, *pcbDataLen)     BYTE *pbDataOut,
+    _Inout_                                             ULONG *pcbDataLen,
+    _In_reads_bytes_(cbKey)                     const   BYTE *pbKey,
+    _In_                                                ULONG cbKey );
+
+ERR
+ErrOSCreateAes256Key(
+    _In_                                                AES256_IMPLEMENTATION impl,
+    _Out_writes_bytes_to_opt_(*pcbKeySize, *pcbKeySize) BYTE *pbKey,
+    _Inout_                                             ULONG *pcbKeySize )
+{
+    switch( impl )
+    {
+    case AES256_CAPI_IMPLEMENTATION:
+        return ErrOSCAPICreateAes256Key( pbKey, pcbKeySize );
+
+    case AES256_CNG_IMPLEMENTATION:
+        return ErrOSBCryptCreateAes256Key( pbKey, pcbKeySize );
+
+    default:
+        Assert( fFalse );
+        return ErrERRCheck( JET_wrnNyi );
+    }
+}
+
+ERR ErrOSEncryptionVerifyKey(
+    _In_                                                AES256_IMPLEMENTATION impl,
+    _In_reads_bytes_(cbKey)                     const   BYTE *pbKey,
+    _In_                                                ULONG cbKey )
+{
+    switch( impl )
+    {
+    case AES256_CAPI_IMPLEMENTATION:
+        return ErrOSCAPIEncryptionVerifyKey( pbKey, cbKey );
+
+    case AES256_CNG_IMPLEMENTATION:
+        return ErrOSBCryptEncryptionVerifyKey( pbKey, cbKey );
+
+    default:
+        Assert( fFalse );
+        return ErrERRCheck( JET_wrnNyi );
+    }
+}
+
+ERR
+ErrOSEncryptWithAes256(
+    _In_                                                AES256_IMPLEMENTATION impl,
+    _Inout_updates_bytes_to_(cbDataBufLen, *pcbDataLen) BYTE *pbData,
+    _Inout_                                             ULONG *pcbDataLen,
+    _In_                                                ULONG cbDataBufLen,
+    _In_reads_bytes_(cbKey)                     const   BYTE *pbKey,
+    _In_                                                ULONG cbKey )
+{
+    switch( impl )
+    {
+    case AES256_CAPI_IMPLEMENTATION:
+        return ErrOSCAPIEncryptWithAes256( pbData, pcbDataLen, cbDataBufLen, pbKey, cbKey );
+
+    case AES256_CNG_IMPLEMENTATION:
+        return ErrOSBCryptEncryptWithAes256( pbData, pcbDataLen, cbDataBufLen, pbKey, cbKey );
+
+    default:
+        Assert( fFalse );
+        return ErrERRCheck( JET_wrnNyi );
+    }
+}
+
+ERR
+ErrOSDecryptWithAes256(
+    _In_                                                AES256_IMPLEMENTATION impl,
+    _In_reads_( *pcbDataLen )                           BYTE *pbDataIn,
+    _Out_writes_bytes_to_(*pcbDataLen, *pcbDataLen)     BYTE *pbDataOut,
+    _Inout_                                             ULONG *pcbDataLen,
+    _In_reads_bytes_(cbKey)                     const   BYTE *pbKey,
+    _In_                                                ULONG cbKey )
+{
+    switch( impl )
+    {
+    case AES256_CAPI_IMPLEMENTATION:
+        return ErrOSCAPIDecryptWithAes256( pbDataIn, pbDataOut, pcbDataLen, pbKey, cbKey );
+
+    case AES256_CNG_IMPLEMENTATION:
+        return ErrOSBCryptDecryptWithAes256( pbDataIn, pbDataOut, pcbDataLen, pbKey, cbKey );
+
+    default:
+        Assert( fFalse );
+        return ErrERRCheck( JET_wrnNyi );
+    }
 }
 

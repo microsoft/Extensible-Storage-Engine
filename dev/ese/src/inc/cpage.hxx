@@ -334,7 +334,7 @@ class CPAGE
                                         const ULONG cb );
 
 #ifdef ENABLE_JET_UNIT_TEST
-        VOID LoadNewTestPage( _In_ const ULONG cb, _In_ const IFMP ifmp = ifmpNil );
+        VOID LoadNewTestPage( _In_ const ULONG cb, _In_ const IFMP ifmp = ifmpNil, const PGNO pgno = 42 );
 #endif // ENABLE_JET_UNIT_TEST
 
         VOID LoadPage( const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb );
@@ -387,6 +387,7 @@ class CPAGE
         template< PageNodeBoundsChecking pgnbc = pgnbcNoChecks >
         VOID GetPtrReservedTag  ( INT itag, LINE* pline, _Out_opt_ ERR* perrNoEnforce = NULL ) const;
         VOID ReplaceReservedTag ( INT itag, const DATA* rgdata, INT cdata );
+        VOID ResetReservedTag   ( INT itag, INT cb, BYTE fill );
 
         template< PageNodeBoundsChecking pgnbc = pgnbcNoChecks >
         VOID GetPtr             ( INT iline, LINE * pline, _Out_opt_ ERR * perrNoEnforce = NULL ) const;
@@ -419,6 +420,8 @@ class CPAGE
         BOOL    FEmptyPage      ( ) const;
         BOOL    FPreInitPage    ( ) const;
         BOOL    FParentOfLeaf   ( ) const;
+        BOOL    FBBTBuffRootPage( ) const;
+        BOOL    FBBTBuffPage    ( ) const;
         BOOL    FSpaceTree      ( ) const;
         BOOL    FScrubbed       ( ) const;
 
@@ -464,7 +467,7 @@ class CPAGE
         VOID    SetPgnoNext ( PGNO pgno );
         VOID    SetPgnoPrev ( PGNO pgno );
         VOID    SetDbtime   ( const DBTIME dbtime );
-        VOID    RevertDbtime ( const DBTIME dbtime, const ULONG fFlags );
+        VOID    RevertDbtime( const DBTIME dbtime, const ULONG fFlags );
         VOID    SetFlags    ( ULONG fFlags );
         VOID    ResetParentOfLeaf   ( );
         VOID    SetFEmpty    ( );
@@ -624,7 +627,7 @@ class CPAGE
         struct PGHDR2;
         typedef INT (*PFNVISITNODE)( const CPAGE::PGHDR * const ppghdr, INT itag, DWORD fNodeFlags, const KEYDATAFLAGS * const pkdf, void * pvCtx );
 
-        VOID    DumpAllocMap_   ( _TCHAR * rgchBuf, CPRINTF * pcprintf ) const;
+        VOID    DumpAllocMap_   ( CHAR * rgchBuf, CPRINTF * pcprintf ) const;
         ERR     DumpAllocMap    ( CPRINTF * pcprintf ) const;
         ERR     DumpTags        ( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
         VOID    DumpTag         ( CPRINTF * pcprintf, const INT itag, const DWORD_PTR dwOffset ) const;
@@ -676,6 +679,8 @@ class CPAGE
         enum : ULONG     { fPageRoot                 = 0x0001    };
         enum : ULONG     { fPageLeaf                 = 0x0002    };
         enum : ULONG     { fPageParentOfLeaf         = 0x0004    };
+        enum : ULONG     { fPageBBTBuffRoot          = 0x0100    }; // reuse SLVAvail
+        enum : ULONG     { fPageBBTBuff              = 0x0200    }; // reuse SLVOwnerMap
 
         //  special flags
         enum : ULONG     { fPageEmpty                = 0x0008    };
@@ -1067,6 +1072,9 @@ class CPAGE
                 FLAG32          m_reservedTestFlags             : 8; //  Bits reserved for test
 #endif
                 // Add non-test flags here.
+                FLAG32          m_fPageScrubbedPrev             : 1; //  On dirty, fPageScrubbed flag is reset. But if we revert the dirty, the fPageScrubbed must be restored.
+                                                                     //  This bit stores the previous value of the flag, when Dirty() is called.
+                FLAG32          m_fPageScrubbedPrevSet          : 1; //  Set if fPageScrubbed state has been captured. Used to prevent overwriting the state in case of multiple dirties.
             };
             FLAG32              m_fRuntimeFlags;
         };
@@ -1306,6 +1314,27 @@ INLINE BOOL CPAGE::FLongValuePage ( ) const
 //  ================================================================
 {
     return FFlags() & fPageLongValue;
+}
+
+
+//  ================================================================
+INLINE BOOL CPAGE::FBBTBuffRootPage() const
+//  ================================================================
+{
+    if ( FFlags() & fPageBBTBuffRoot )
+    {
+        Assert( FFlags() & fPageBBTBuff );
+    }
+
+    return FFlags() & fPageBBTBuffRoot;
+}
+
+
+//  ================================================================
+INLINE BOOL CPAGE::FBBTBuffPage() const
+//  ================================================================
+{
+    return FFlags() & fPageBBTBuff;
 }
 
 
@@ -1613,7 +1642,7 @@ INLINE void CPAGE::SetITagState_( INT itagMicFree, INT ctagReserved )
     bool fResvTagFormatEnabled = FResvTagFormatEnabled();
     if ( fResvTagFormatEnabled || ( ppghdr->itagState >> PGHDR::SHF_CTAG_RESERVED ) > 0 )
     {
-        Assert( m_ifmp == ifmpNil || fResvTagFormatEnabled );   // UA_TODO: can this trigger if a build is rolled back?
+        Assert( m_ifmp == ifmpNil || fResvTagFormatEnabled );   // can this trigger if a build is rolled back?
         ppghdr->itagState = USHORT( ( ctagReserved << PGHDR::SHF_CTAG_RESERVED ) | itagMicFree );
     }
     else

@@ -43,7 +43,7 @@ class TFileFilterWrapper  //  cff
                         _In_opt_                const DWORD_PTR                 keyIOComplete,
                         _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override;
         ERR ErrIOIssue() override;
-        ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr ) override;
+        ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const IFileAPI::FileFlushMode ffm ) override;
 
     public:  //  IFileFilter
 
@@ -71,7 +71,9 @@ class TFileFilterWrapper  //  cff
                         _In_opt_                const DWORD_PTR                 keyIOComplete,
                         _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override;
         ERR ErrIssue( _In_ const IFileFilter::IOMode iom ) override;
-        ERR ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const IFileFilter::IOMode iom ) override;
+        ERR ErrFlush(   _In_ const IOFLUSHREASON            iofr,
+                        _In_ const IFileAPI::FileFlushMode  ffm,
+                        _In_ const IFileFilter::IOMode      iom ) override;
 
     private:
 
@@ -103,7 +105,7 @@ ERR TFileFilterWrapper<I>::ErrIORead(   _In_                    const TraceConte
     if ( pfnIOComplete || pfnIOHandoff )
     {
         const BOOL fHeap = pfnIOComplete != NULL;
-        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+        Alloc( piocomplete = new( fHeap ? CIOComplete::CPool::PvAllocate() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this,
                             ibOffset,
@@ -161,7 +163,7 @@ ERR TFileFilterWrapper<I>::ErrIOWrite(  _In_                    const TraceConte
     if ( pfnIOComplete || pfnIOHandoff )
     {
         const BOOL fHeap = pfnIOComplete != NULL;
-        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+        Alloc( piocomplete = new( fHeap ? CIOComplete::CPool::PvAllocate() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this, 
                             ibOffset,
@@ -196,9 +198,9 @@ ERR TFileFilterWrapper<I>::ErrIOIssue()
 }
 
 template< class I >
-ERR TFileFilterWrapper<I>::ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr )
+ERR TFileFilterWrapper<I>::ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const IFileAPI::FileFlushMode ffm )
 {
-    return m_piInner->ErrFlushFileBuffers( iofr );
+    return m_piInner->ErrFlushFileBuffers( iofr, ffm );
 }
 
 template< class I >
@@ -219,7 +221,7 @@ ERR TFileFilterWrapper<I>::ErrRead( _In_                    const TraceContext& 
     if ( pfnIOComplete || pfnIOHandoff )
     {
         const BOOL fHeap = pfnIOComplete != NULL;
-        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+        Alloc( piocomplete = new( fHeap ? CIOComplete::CPool::PvAllocate() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this,
                             ibOffset,
@@ -279,7 +281,7 @@ ERR TFileFilterWrapper<I>::ErrWrite(    _In_                    const TraceConte
     if ( pfnIOComplete || pfnIOHandoff )
     {
         const BOOL fHeap = pfnIOComplete != NULL;
-        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+        Alloc( piocomplete = new( fHeap ? CIOComplete::CPool::PvAllocate() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this, 
                             ibOffset,
@@ -315,9 +317,11 @@ ERR TFileFilterWrapper<I>::ErrIssue( _In_ const IFileFilter::IOMode iom )
 }
 
 template< class I >
-ERR TFileFilterWrapper<I>::ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const IFileFilter::IOMode  iom )
+ERR TFileFilterWrapper<I>::ErrFlush(    _In_ const IOFLUSHREASON            iofr,
+                                        _In_ const IFileAPI::FileFlushMode  ffm,
+                                        _In_ const IFileFilter::IOMode      iom )
 {
-    return m_piInner->ErrFlush( iofr, iom );
+    return m_piInner->ErrFlush( iofr, ffm, iom );
 }
 
 //  CFileFilterWrapper:  concrete TFileFilterWrapper<IFileFilter>.

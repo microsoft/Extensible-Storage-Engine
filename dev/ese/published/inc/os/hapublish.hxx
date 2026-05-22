@@ -8,6 +8,11 @@
 #include <ExDbFailureItem.h>
 #include "exdbmsg_ese.h"
 
+const DWORD bitHaPublishedEvent                          = 0x1;
+const DWORD bitHaPublishedCorruptionTag                  = 0x2;
+const DWORD bitHaPublishedIoHardTag                      = 0x4;
+const DWORD bitHaPublishedLogLogicallyInconsistentTag    = 0x2;
+
 #define Ese2HaId( id ) ( HADBFAILURE_EVENT_RANGE_START_ESE + ( id ) )
 
 #define OSUHAPublishEvent( p0, p1, p2, p3, p4, p5, p6, p7, p8, p9 ) \

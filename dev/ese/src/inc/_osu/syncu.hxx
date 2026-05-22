@@ -221,7 +221,7 @@ class CRITPOOL
         ~CRITPOOL( void );
         CRITPOOL& operator=( CRITPOOL& );  //  disallowed
 
-        BOOL FInit( const LONG cThread, const INT rank, const _TCHAR* szName );
+        BOOL FInit( const LONG cThread, const INT rank, const CHAR* szName );
         void Term( void );
 
         CCriticalSection& Crit( const T* const pt );
@@ -260,7 +260,7 @@ CRITPOOL<T>::~CRITPOOL( void )
 //  fTrue on success or fFalse on failure
 
 template<class T>
-BOOL CRITPOOL<T>::FInit( const LONG cThread, const INT rank, const _TCHAR* szName )
+BOOL CRITPOOL<T>::FInit( const LONG cThread, const INT rank, const CHAR* szName )
 {
     //  ensure that Term() was called or ErrInit() was never called
 
@@ -360,7 +360,7 @@ class RWLPOOL
         ~RWLPOOL( void );
         RWLPOOL& operator=( RWLPOOL& );  //  disallowed
 
-        BOOL FInit( const LONG cThread, const LONG cbObjectSize, const INT rank, const _TCHAR* szName );
+        BOOL FInit( const LONG cThread, const LONG cbObjectSize, const INT rank, const CHAR* szName );
         void Term( void );
 
         CReaderWriterLock& Rwl( const VOID* const pObj );
@@ -398,7 +398,7 @@ INLINE RWLPOOL::~RWLPOOL( void )
 //  initializes the reader writer lock pool for use by cThread threads, returning
 //  fTrue on success or fFalse on failure
 
-INLINE BOOL RWLPOOL::FInit( const LONG cThread, const LONG cbObjectSize, const INT rank, const _TCHAR* szName )
+INLINE BOOL RWLPOOL::FInit( const LONG cThread, const LONG cbObjectSize, const INT rank, const CHAR* szName )
 {
     //  ensure that Term() was called or ErrInit() was never called
 

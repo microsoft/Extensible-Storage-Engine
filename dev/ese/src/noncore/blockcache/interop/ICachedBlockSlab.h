@@ -253,6 +253,12 @@ namespace Internal
                     bool IsDirty();
 
                     /// <summary>
+                    /// Indicates the number of invalid slots in the slab.
+                    /// </summary>
+                    /// <returns>The number of invalid slots in the slab.</returns>
+                    int InvalidSlotCount();
+
+                    /// <summary>
                     /// Delegate used to indicate that a slab is saved.
                     /// </summary>
                     /// <param name="ex">An EsentErrorException or null if the save was successful.</param>

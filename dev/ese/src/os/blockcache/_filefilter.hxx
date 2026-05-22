@@ -96,7 +96,7 @@ class TFileFilter  //  ff
 
     public:  //  IFileAPI
 
-        ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr ) override;
+        ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const IFileAPI::FileFlushMode ffm ) override;
         void SetNoFlushNeeded() override;
 
         ERR ErrSetSize( _In_ const TraceContext&    tc,
@@ -162,7 +162,9 @@ class TFileFilter  //  ff
                         _In_opt_                const DWORD_PTR                 keyIOComplete,
                         _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override;
         ERR ErrIssue( _In_ const IFileFilter::IOMode iom ) override;
-        ERR ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const IFileFilter::IOMode iom ) override;
+        ERR ErrFlush(   _In_ const IOFLUSHREASON            iofr,
+                        _In_ const IFileAPI::FileFlushMode  ffm,
+                        _In_ const IFileFilter::IOMode      iom ) override;
 
     private:
 
@@ -403,6 +405,7 @@ class TFileFilter  //  ff
             return pff->ErrAttach( offsetsFirstWrite );
         }
         ERR ErrAttach( _In_ const COffsets& offsetsFirstWrite );
+        ERR ErrMarkAsNotCached();
         ERR ErrGetConfiguredCache();
         ERR ErrCacheOpenFailure(    _In_ const char* const                  szFunction,
                                     _In_ const ERR                          errFromCall,
@@ -783,7 +786,7 @@ class TFileFilter  //  ff
                         Error( JET_errSuccess );
                     }
 
-                    Alloc( prequest = new CRequest( volumeid, fileid, fileserial, fRead, offsets ) );
+                    Alloc( prequest = new CRequest( volumeid, fileid, fileserial, fRead, offsets, grbitQOS ) );
 
                     Call( ErrRequest( pfsconfig, fRead, grbitQOS, fMustCombineIO, &prequest, &fCombined ) );
 
@@ -827,6 +830,9 @@ class TFileFilter  //  ff
 
             private:
 
+#pragma push_macro( "new" )
+#undef new
+
                 class CRequest
                 {
                     public:
@@ -835,14 +841,29 @@ class TFileFilter  //  ff
                                     _In_ const FileId           fileid,
                                     _In_ const FileSerial       fileserial,
                                     _In_ const BOOL             fRead,
-                                    _In_ const COffsets&        offsets )
+                                    _In_ const COffsets&        offsets,
+                                    _In_ const OSFILEQOS        grbitQOS )
                             :   m_volumeid( volumeid ),
                                 m_fileid( fileid ),
                                 m_fileserial( fileserial ),
                                 m_fRead( fRead ),
-                                m_offsets( offsets )
+                                m_offsets( offsets ),
+                                m_grbitQOS( grbitQOS )
                         {
                             m_ilRequestsByIO.InsertAsPrevMost( this );
+                        }
+
+                        using CPool = TPool<CRequest>;
+
+                        void* operator new( _In_ const size_t cb )
+                        {
+                            return CPool::PvAllocate();
+                        }
+
+                        void operator delete( _In_opt_ void* const pv )
+                        {
+                            void* pvT = pv;
+                            CPool::Free( &pvT );
                         }
 
                         VolumeId Volumeid() const { return m_volumeid; }
@@ -850,6 +871,7 @@ class TFileFilter  //  ff
                         FileSerial Fileserial() const { return m_fileserial; }
                         BOOL FRead() const { return m_fRead; }
                         const COffsets& Offsets() const { return m_offsets; }
+                        OSFILEQOS GrbitQOS() const { return m_grbitQOS; }
 
                         COffsets OffsetsForIO() const
                         {
@@ -873,10 +895,13 @@ class TFileFilter  //  ff
                         const FileSerial                                                        m_fileserial;
                         const BOOL                                                              m_fRead;
                         const COffsets                                                          m_offsets;
+                        const OSFILEQOS                                                         m_grbitQOS;
                         typename CCountedInvasiveList<CRequest, OffsetOfIOs>::CElement          m_ileIOs;
                         CCountedInvasiveList<CRequest, OffsetOfRequestsByIO>                    m_ilRequestsByIO;
                         typename CCountedInvasiveList<CRequest, OffsetOfRequestsByIO>::CElement m_ileRequestsByIO;
                 };
+
+#pragma pop_macro( "new" )
 
             private:
 
@@ -905,7 +930,7 @@ class TFileFilter  //  ff
                             prequestIOPrev && !FConflicting( prequestIOPrev, prequestIO );
                             prequestIOPrev = IlIORequested().Prev( prequestIOPrev ) )
                     {
-                        if ( FCombinable( pfsconfig, grbitQOS, prequestIOPrev, prequestIO ) )
+                        if ( FCombinable( pfsconfig, prequestIOPrev, prequestIO ) )
                         {
                             if ( prequestIOPrev->OffsetsForIO().IbStart() > prequestIO->OffsetsForIO().IbStart() )
                             {
@@ -940,13 +965,13 @@ class TFileFilter  //  ff
                     //  determine if this request could be combined via IO gap coalescing
 
                     if (    IlIORequested().Prev( prequestIO ) &&
-                            FBridgeableGap( pfsconfig, grbitQOS, IlIORequested().Prev( prequestIO ), prequestIO ) )
+                            FBridgeableGap( pfsconfig, IlIORequested().Prev( prequestIO ), prequestIO ) )
                     {
                         fCombined = fTrue;
                     }
 
                     if (    IlIORequested().Next( prequestIO ) &&
-                            FBridgeableGap( pfsconfig, grbitQOS, prequestIO, IlIORequested().Next( prequestIO ) ) )
+                            FBridgeableGap( pfsconfig, prequestIO, IlIORequested().Next( prequestIO ) ) )
                     {
                         fCombined = fTrue;
                     }
@@ -1000,7 +1025,6 @@ class TFileFilter  //  ff
                 }
 
                 BOOL FCombinable(   _In_ IFileSystemConfiguration* const    pfsconfig, 
-                                    _In_ const OSFILEQOS                    grbitQOS,
                                     _In_ CRequest* const                    prequestIOA, 
                                     _In_ CRequest* const                    prequestIOB )
                 {
@@ -1051,7 +1075,7 @@ class TFileFilter  //  ff
 
                     if ( offsetsIOA.Cb() + offsetsIOB.Cb() > cbMaxSize )
                     {
-                        if ( !FOverrideMaxSize( grbitQOS, prequestIOA->FRead() ) )
+                        if ( !FOverrideMaxSize( prequestIOA ) && !FOverrideMaxSize( prequestIOB ) )
                         {
                             return fFalse;
                         }
@@ -1060,14 +1084,14 @@ class TFileFilter  //  ff
                     return fTrue;
                 }
 
-                BOOL FOverrideMaxSize(  _In_ const OSFILEQOS grbitQOS, _In_ const BOOL fRead )
+                BOOL FOverrideMaxSize( _In_ CRequest* const prequestIO )
                 {
-                    if ( fRead )
+                    if ( prequestIO->FRead() )
                     {
                         return fFalse;
                     }
 
-                    if ( !( grbitQOS & qosIOOptimizeOverrideMaxIOLimits ) )
+                    if ( !( prequestIO->GrbitQOS() & qosIOOptimizeOverrideMaxIOLimits ) )
                     {
                         return fFalse;
                     }
@@ -1121,7 +1145,6 @@ class TFileFilter  //  ff
                 }
 
                 BOOL FBridgeableGap(    _In_ IFileSystemConfiguration* const    pfsconfig,
-                                        _In_ const OSFILEQOS                    grbitQOS,
                                         _In_ CRequest* const                    prequestIOA, 
                                         _In_ CRequest* const                    prequestIOB )
                 {
@@ -1181,10 +1204,7 @@ class TFileFilter  //  ff
 
                     if ( offsetsIOA.Cb() + offsetsIOB.Cb() + cbGap > pfsconfig->CbMaxReadSize() )
                     {
-                        if ( !FOverrideMaxSize( grbitQOS, prequestIOA->FRead() ) )
-                        {
-                            return fFalse;
-                        }
+                        return fFalse;
                     }
 
                     return fTrue;
@@ -2039,7 +2059,16 @@ class TFileFilter  //  ff
 
             CLockDeadlockDetectionInfo::DisableOwnershipTracking();
             CLockDeadlockDetectionInfo::DisableDeadlockDetection();
-            m_rwlRegisterIFilePerfAPI.EnterAsReader();
+
+            if ( !m_rwlRegisterIFilePerfAPI.FTryEnterAsReader() )
+            {
+                //  ensure any previously requested IO is issued to avoid deadlock with registration
+
+                CallS( ErrIOIssue() );
+
+                m_rwlRegisterIFilePerfAPI.EnterAsReader();
+            }
+
             CLockDeadlockDetectionInfo::EnableDeadlockDetection();
             CLockDeadlockDetectionInfo::EnableOwnershipTracking();
         }
@@ -2090,6 +2119,9 @@ class TFileFilter  //  ff
     protected:
 
         //  IO completion context for an IFileFilter implementation.
+
+#pragma push_macro( "new" )
+#undef new
 
         class CIOComplete
             :   public TFileWrapper<I>::CIOComplete
@@ -2146,13 +2178,31 @@ class TFileFilter  //  ff
                     }
                 }
 
+                using CPool = TPool<CIOComplete>;
+
+                void* operator new( _In_ const size_t cb )
+                {
+                    return CPool::PvAllocate();
+                }
+
+                void* operator new( _In_ const size_t cb, _In_ const void* const pv )
+                {
+                    return (void*)pv;
+                }
+
+                void operator delete( _In_opt_ void* const pv )
+                {
+                    void* pvT = pv;
+                    CPool::Free( &pvT );
+                }
+
                 BOOL FAccessingHeader() const { return m_psemCachedFileHeader != NULL; }
 
                 void DoNotReleaseWriteBack()
                 {
                     m_fReleaseWriteback = fFalse;
                 }
- 
+
                 static void Complete_(  _In_                    const ERR               err,
                                         _In_                    const VolumeId          volumeid,
                                         _In_                    const FileId            fileid,
@@ -2295,6 +2345,9 @@ class TFileFilter  //  ff
                 volatile BOOL               m_fReleaseResources;
                 CIORequestPending           m_iorequestpending;
         };
+
+#pragma pop_macro( "new" )
+
 };
 
 template< class I >
@@ -2370,7 +2423,6 @@ TFileFilter<I>::~TFileFilter()
 template<class I>
 void TFileFilter<I>::Cleanup()
 {
-    CIOComplete::Cleanup();
     CThreadLocalStorageRepository::Cleanup();
     CThrottleContextRepository::Cleanup();
 }
@@ -2388,14 +2440,14 @@ ERR TFileFilter<I>::ErrGetPhysicalId(   _Out_ VolumeId* const   pvolumeid,
 }
 
 template< class I >
-ERR TFileFilter<I>::ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr )
+ERR TFileFilter<I>::ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const IFileAPI::FileFlushMode ffm )
 {
     ERR err = JET_errSuccess;
 
     const LONG64 ciosDelta = AtomicExchange( &m_cioUnflushed, 0 );
     AtomicAdd( (QWORD*)&m_cioFlushing, ciosDelta );
 
-    Call( ErrFlush( iofr, iomEngine ) );
+    Call( ErrFlush( iofr, ffm, iomEngine ) );
 
 HandleError:
     if ( err < JET_errSuccess )
@@ -2597,13 +2649,16 @@ ERR TFileFilter<I>::ErrIOIssue()
 template< class I >
 void TFileFilter<I>::RegisterIFilePerfAPI( _In_ IFilePerfAPI* const pfpapi )
 {
-    //  ensure any previously requested IO is issued to avoid deadlock during registration
-
-    CallS( ErrIOIssue() );
-
     //  disallow registration of IFilePerfAPI during any IO request
 
-    m_rwlRegisterIFilePerfAPI.EnterAsWriter();
+    if ( !m_rwlRegisterIFilePerfAPI.FTryEnterAsWriter() )
+    {
+        //  ensure any previously requested IO is issued to avoid deadlock during registration
+
+        CallS( ErrIOIssue() );
+
+        m_rwlRegisterIFilePerfAPI.EnterAsWriter();
+    }
 
     //  if we already registered an IFilePerfAPI then drop this one, otherwise register it
 
@@ -2821,7 +2876,9 @@ HandleError:
 }
 
 template< class I >
-ERR TFileFilter<I>::ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const IFileFilter::IOMode iom )
+ERR TFileFilter<I>::ErrFlush(   _In_ const IOFLUSHREASON            iofr,
+                                _In_ const IFileAPI::FileFlushMode  ffm,
+                                _In_ const IFileFilter::IOMode      iom )
 {
     ERR     err         = JET_errSuccess;
     BOOL    fFlush      = fFalse;
@@ -2833,7 +2890,7 @@ ERR TFileFilter<I>::ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const IFileFil
             iom == iomCacheWriteThrough ||
             iom == iomCacheWriteBack );
 
-    OSTrace( JET_tracetagBlockCache, OSFormat( "%s ErrFlushFileBuffers iom=%u", OSFormat( this ), iom ) );
+    OSTrace( JET_tracetagBlockCache, OSFormat( "%s ErrFlush ffm=%u iom=%u", OSFormat( this ), ffm, iom ) );
 
     switch ( iom )
     {
@@ -2866,7 +2923,7 @@ ERR TFileFilter<I>::ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const IFileFil
 
     if ( fFlush )
     {
-        Call( TFileWrapper<I>::ErrFlushFileBuffers( iofr ) );
+        Call( TFileWrapper<I>::ErrFlushFileBuffers( iofr, ffm ) );
     }
 
 HandleError:
@@ -2881,7 +2938,9 @@ ERR TFileFilter<I>::ErrBeginAccess( _In_    const COffsets&                 offs
 {
     ERR                     err             = JET_errSuccess;
     const BOOL              fNotYetAttached = !m_pcfh && !m_initOnceAttach.FIsInit();
-    const BOOL              fNeedsAttach    = fWrite && fNotYetAttached && m_pcfconfig && m_pcfconfig->FCachingEnabled();
+    const BOOL              fNeedsAttach    = ( fWrite && fNotYetAttached &&
+                                                m_fEverEligibleForCaching &&
+                                                m_pcfconfig && m_pcfconfig->FCachingEnabled() );
     COffsets                offsetsActual   = offsets;
     CMeteredSection::Group  group           = CMeteredSection::groupInvalidNil;
     CSemaphore*             psem            = NULL;
@@ -3156,6 +3215,13 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
     err = ErrGetConfiguredCache();
     if ( err < JET_errSuccess )
     {
+        //  silently ignore invalid path to cover the case when the storage doesn't exist, possibly intentionally
+
+        if ( err == JET_errInvalidPath )
+        {
+            Error( JET_errSuccess );
+        }
+
         Error( ErrCacheOpenFailure( "Open", err, JET_errSuccess ) );
     }
 
@@ -3229,7 +3295,7 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
                     NULL ) );
     fPresumeAttached = fTrue;
 
-    Call( ErrFlushFileBuffers( iofrBlockCache ) );
+    Call( ErrFlushFileBuffers( iofrBlockCache, ffmDataOnly ) );
 
     //  mark the file as attached by retaining the cached file header.  this will allow cache write through / write back
     //  to the cached file to occur
@@ -3255,7 +3321,37 @@ HandleError:
     }
     delete pcfh;
     OSMemoryPageFree( pvData );
+    if ( !m_pcfh )
+    {
+        CallS( ErrMarkAsNotCached() );
+    }
     return fPresumeAttached ? err : JET_errSuccess;
+}
+
+template< class I >
+ERR TFileFilter<I>::ErrMarkAsNotCached()
+{
+    ERR         err                                                 = JET_errSuccess;
+    WCHAR       wszCachedFile[ IFileSystemAPI::cchPathMax ]         = { 0 };
+    WCHAR       wszStreamCachedPath[ IFileSystemAPI::cchPathMax ]   = { 0 };
+
+    Call( TFileFilter<I>::ErrPath( wszCachedFile ) );
+    Call( ErrOSStrCbCopyW( wszStreamCachedPath, _cbrg( wszStreamCachedPath ), wszCachedFile ) );
+    Call( ErrOSStrCbAppendW( wszStreamCachedPath, _cbrg( wszStreamCachedPath ), CFileSystemFilter::c_wszStreamCached ) );
+    Call( m_pfsf->ErrFileDelete( wszStreamCachedPath ) );
+
+HandleError:
+    if ( err < JET_errSuccess )
+    {
+        switch ( err )
+        {
+            case JET_errInvalidPath:
+            case JET_errBufferTooSmall:
+                err = JET_errSuccess;
+                break;
+        }
+    }
+    return err;
 }
 
 template< class I >
@@ -3900,7 +3996,7 @@ ERR TFileFilter<I>::ErrCacheMiss(   _In_                    const TraceContext& 
     if ( pfnIOComplete || pfnIOHandoff )
     {
         const BOOL fHeap = pfnIOComplete != NULL;
-        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+        Alloc( piocomplete = new( fHeap ? CIOComplete::CPool::PvAllocate() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this,
                             iomCacheMiss,
@@ -4170,7 +4266,7 @@ ERR TFileFilter<I>::ErrWriteCommon( _In_                    const IFileFilter::I
     if ( pfnIOComplete || pfnIOHandoff )
     {
         const BOOL fHeap = pfnIOComplete != NULL;
-        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+        Alloc( piocomplete = new( fHeap ? CIOComplete::CPool::PvAllocate() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this, 
                             iom,

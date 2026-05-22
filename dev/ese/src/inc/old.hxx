@@ -6,7 +6,7 @@ class OLD_STATUS_
     //  make constructor protected so that this class may
     //  only be used as a base class
     protected:
-        OLD_STATUS_() : m_asig( CSyncBasicInfo( _T( "asigOLD" ) ) )
+        OLD_STATUS_() : m_asig( CSyncBasicInfo( "asigOLD" ) )
                                                         { Reset_(); }
 
     public:

@@ -50,7 +50,7 @@ LOG_STREAM::LOG_STREAM( INST * pinst, LOG * pLog )
       m_fCreateAsynchZeroFilled( fFalse ),
       m_errCreateAsynch( JET_errSuccess ),
       //    Asynchronous log file creation
-      m_asigCreateAsynchIOCompleted( CSyncBasicInfo( _T( "LOG::m_asigCreateAsynchIOCompleted" ) ) ),
+      m_asigCreateAsynchIOCompleted( CSyncBasicInfo( "LOG::m_asigCreateAsynchIOCompleted" ) ),
       m_critCreateAsynchIOExecuting( CLockBasicInfo( CSyncBasicInfo( "LOG::m_critCreateAsynchIOExecuting" ), rankAsynchIOExecuting, 0 ) ),
       m_lgposCreateAsynchTrigger( lgposMax ),
       m_critJetTmpLog( CLockBasicInfo( CSyncBasicInfo( szJetTmpLog ), rankJetTmpLog, 0 ) ),

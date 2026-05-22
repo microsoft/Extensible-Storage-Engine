@@ -47,7 +47,7 @@ namespace Internal
 
                         virtual void Issue( IOMode ioMode );
 
-                        virtual void Flush( IOMode ioMode );
+                        virtual void Flush( FileFlushMode fileFlushMode, IOMode ioMode );
                 };
 
                 template< class TM, class TN, class TW >
@@ -205,11 +205,13 @@ namespace Internal
                 }
 
                 template< class TM, class TN, class TW >
-                inline void FileFilterBase<TM, TN, TW>::Flush( IOMode ioMode )
+                inline void FileFilterBase<TM, TN, TW>::Flush( FileFlushMode fileFlushMode, IOMode ioMode )
                 {
                     ERR err = JET_errSuccess;
 
-                    Call( Pi->ErrFlush( (IOFLUSHREASON)0, (::IFileFilter::IOMode)ioMode ) );
+                    Call( Pi->ErrFlush( (IOFLUSHREASON)0,
+                                        (IFileAPI::FileFlushMode)fileFlushMode,
+                                        (::IFileFilter::IOMode)ioMode ) );
 
                     return;
 

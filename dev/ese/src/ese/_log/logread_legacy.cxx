@@ -528,7 +528,7 @@ INLINE BOOL FLGILogPatchDate( const WCHAR* wszPath, CPRINTFFILE **const ppcprint
 
         //  allocate a new trace file object
 
-        pcprintf = new CPRINTFFILE( wszPath );
+        pcprintf = new CPRINTFFILE( wszPath, CPRINTFFILE::FILEENCODING::ASCII );
         if ( !pcprintf )
         {
             return fFalse;
@@ -840,7 +840,7 @@ ERR LOG_READ_BUFFER::ErrLGCheckReadLastLogRecordFF_Legacy(
     ULONG           ulChecksumExpected;
     ULONG           ulChecksumActual;
 #ifdef ENABLE_LOGPATCH_TRACE
-    CPRINTFFILE     *pcprintfLogPatch = NULL;
+    CPRINTFFILE *   pcprintfLogPatch = NULL;
     WCHAR           wszLogPatchPath[ IFileSystemAPI::cchPathMax ];
 #endif  //  ENABLE_LOGPATCH_TRACE
 //

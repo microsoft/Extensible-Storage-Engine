@@ -238,6 +238,7 @@ class JetTestFixture
         
     protected:
         JetTestFixture();
+        JetTestFixture( JetUnitTestResult* presult ) : m_presult( presult ) {}
         virtual ~JetTestFixture();
 
         void Fail_( const char * const szFile, const INT line, const char * const szCondition );
@@ -245,7 +246,7 @@ class JetTestFixture
         virtual bool SetUp_() = 0;
         virtual void TearDown_() = 0;
 
-    private:
+    protected:
         JetUnitTestResult * m_presult;
 };
 
@@ -355,6 +356,9 @@ void Test##component##test::Run_()
 #define IfmpTest()                  ((IFMP)ifmpNil)
 
 #endif // !ENABLE_JET_UNIT_TEST
+
+// defined in both ese.dll and eselibwithtest.dll, but returning different answer
+BOOL FInEmbeddedUnitTest();
 
 #endif // JETTEST_HXX_INCLUDED
 

@@ -127,7 +127,7 @@ MSINTERNAL enum class MJET_PARAM
     AccessDeniedRetryPeriod = 53, // Number of milliseconds to retry when about to fail with AccessDenied
     EnableIndexChecking = 45, // Enable checking OS version for indexes (false by default).
     EnableIndexCleanup = 54, // Enable cleanup of out-of-date index entries (Windows 2003 through Windows 7); Does NLS version checking (Windows 2003 and later).
-    Flight_SmoothIoTestPermillage = 55, // The per mille of total (or one thousandths, or tenths of a percent) of IO should be made smooth.  Ex(s): 995(/1000) = 99.5% smooth, 10(/1000) = 1%, etc.  0 = disabled.
+    Flight_HierarchicalSpaceAllocFlagsEnabled = 55, // Whether we want to pass the space allocation flags along when asking for space to the parent of an object.
     ElasticWaypointLatency = 56, // Amount of extra elastic waypoint latency
     Flight_SynchronousLVCleanup = 57, // Perform synchronous cleanup (actual delete) of LVs instead of flag delete with cleanup happening later
     Flight_RBSRevertIOUrgentLevel = 58, // IO urgent level for reverting the databases using RBS. Used to decide how many outstanding I/Os will be allowed.
@@ -182,8 +182,8 @@ MSINTERNAL enum class MJET_PARAM
     AlternateDatabaseRecoveryPath = 113, // recovery-only - search for dirty-shutdown databases in specified location only
     Flight_ExtentPageCountCacheVerifyOnly = 114, // Verify values read from the Extent Page Count Cache rather than just returning them.
     Flight_EnablePgnoFDPLastSetTime = 115, // whether we want to enable setting PgnoPFDSetTime in the system table for a table entry.
-    Flight_EnableScanCheck2Flags = 116, // whether we want to enable logging flags in ScanCheck2 log record.
-    Flight_EnableExtentFreed2 = 117, // whether we want to enable logging ExtentFreed2 LR after the efv upgrade.
+    Flight_EnableFDPDeleteFlagCheckOnExtentFreedRedo = 116, // whether we want to check if FDP delete flag is set when we redo extent freed LR.
+    Flight_RBSRaiseCorruptionOnRBSFDPToBeDeleted = 117, // Whether we want to raise corruption event/failure item when we hit RBSFDPToBeDeleted error.
     Flight_RBSLargeRevertableDeletePages = 118, // Large revertable delete size for a table (in pages) beyond which we will track the deletes.
     Flight_RBSRevertableDeleteIfTooSoonTimeNull = 119, // If set, we will do a revertable table delete even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon due to time not being set. Note: If JET_bitRevertableTableDeleteIfTooSoon is set, this variant is ignored.
     IndexTupleIncrement = 132, // for tuple indexes, offset increment for each succesive tuple
@@ -222,6 +222,7 @@ MSINTERNAL enum class MJET_PARAM
     HungIOActions = 182, // A set of actions to be taken on IOs that appear hung.
     MinDataForXpress = 183, // Smallest amount of data that should be compressed with xpress compression.
     EnableShrinkDatabase = 184, // Release space back to the OS when deleting data. This may require an OS feature of Sparse Files, and is subject to change.
+    Flight_CacheTraceSamplingRatio = 185, // Trace all cache events for 1 out of JET_paramFlight_CacheTraceSamplingRatio pages.
     ProcessFriendlyName = 186, // Friendly name for this instance of the process (e.g. performance counter global instance name, event logs).
     DurableCommitCallback = 187, // callback for when log is flushed
     EnableSqm = 188, // Deprecated / ignored param.
@@ -241,7 +242,9 @@ MSINTERNAL enum class MJET_PARAM
     EnableBlockCache = 218, // Indicates that the ESE Block Cache is enabled.  This is sufficient to access files previously attached to the ESE Block Cache but not to attach new files.
     DeferredIndexPopulateRowsPerTransaction = 219, // Number of primary index rows to process in a single transaction when processing
     EnableBlockCacheDetach = 220, // Indicates that ESE Block Cache detach is enabled.  This will allow a file cached by the ESE Block Cache to be detached on open.
-    MaxValueInvalid = 221, // This is not a valid parameter. It can change from release to release!
+    Flight_UseCngAes256Implementation = 221, // Whether to use the CNG based implementation (rather than CAPI based one) for AES256 encryption
+    Flight_ContiguousExtentMoveShrinkEnabled = 222, // Whether we want to move contiguous pages to a contiguous destination extent during DB Shrink.
+    MaxValueInvalid = 223, // This is not a valid parameter. It can change from release to release!
 };
 
 }

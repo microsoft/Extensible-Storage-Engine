@@ -171,6 +171,7 @@ class TCacheBase  //  c
                         m_cp( cp ),
                         m_pfnComplete( pfnComplete ),
                         m_keyComplete( keyComplete ),
+                        m_pctWrite( max( 0, min( 100, pc->Pcconfig()->PctWrite() ) ) ),
                         m_cref( 1 ),
                         m_err( JET_errSuccess ),
                         m_grbitQOSComplete( 0 ),
@@ -197,7 +198,9 @@ class TCacheBase  //  c
                 CFTE* Pcfte() const { return m_pcfte; }
                 const COffsets& Offsets() const { return m_offsets; }
                 const BYTE* const PbData() const { return m_pbData; }
+                OSFILEQOS GrbitQOS() const { return m_grbitQOS; }
                 ICache::CachingPolicy Cp() const { return m_cp; }
+                double PctWrite() const { return m_pctWrite; }
                 BOOL FSync() const { return m_pfnComplete == NULL; }
 
                 ERR ErrRead(    _In_                    IFileFilter* const          pff,
@@ -495,6 +498,7 @@ class TCacheBase  //  c
                 const ICache::CachingPolicy         m_cp;
                 const ICache::PfnComplete           m_pfnComplete;
                 const DWORD_PTR                     m_keyComplete;
+                const double                        m_pctWrite;
                 FullTraceContext                    m_ftc;
                 volatile int                        m_cref;
                 ERR                                 m_err;

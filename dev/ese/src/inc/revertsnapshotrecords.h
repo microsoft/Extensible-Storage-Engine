@@ -20,7 +20,8 @@
 #define     rbsrectypeDbEmptyPages      7
 #define     rbsrectypeDbEmptyPages2     8
 #define     rbsrectypeRootPageMove      9
-#define     rbsrectypeMax               10
+#define     rbsrectypeRootPageMove2     10
+#define     rbsrectypeMax               11
 
 PERSISTED
 struct RBSRecord
@@ -83,6 +84,12 @@ struct RBSRootPageMoveRecord : public RBSRecord
 };
 
 PERSISTED
+struct RBSRootPageMove2Record : public RBSRootPageMoveRecord
+{
+    UnalignedLittleEndian<DBTIME>   m_dbtime;
+};
+
+PERSISTED
 struct RBSDbEmptyPages2Record : public RBSDbEmptyPagesRecord
 {
     UnalignedLittleEndian<ULONG>    m_fFlags;
@@ -129,6 +136,8 @@ CbRBSRecFixed( BYTE bRecType )
             return sizeof( RBSDbEmptyPages2Record );
         case rbsrectypeRootPageMove:
             return sizeof( RBSRootPageMoveRecord );
+        case rbsrectypeRootPageMove2:
+            return sizeof( RBSRootPageMove2Record );
         default:
            Assert( fFalse );
         case rbsrectypeNOP:

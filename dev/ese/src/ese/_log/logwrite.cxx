@@ -162,9 +162,9 @@ LOG_WRITE_BUFFER::LOG_WRITE_BUFFER( INST * pinst, LOG * pLog, ILogStream * pLogS
       // we always start writing to a new sector, so we never have a shadow sector to start with
       m_fHaveShadow( fFalse ),
       m_sigLogPaused( CSyncBasicInfo( "LOG_WRITE_BUFFER::sigLogPaused" ) ),
-      m_semLogSignal( CSyncBasicInfo( _T( "LOG::m_semLogSignal" ) ) ),
-      m_semLogWrite( CSyncBasicInfo( _T( "LOG::m_semLogWrite" ) ) ),
-      m_semWaitForLogBufferSpace( CSyncBasicInfo( _T( "LOG::m_semWaitForLogBufferSpace" ) ) ),
+      m_semLogSignal( CSyncBasicInfo( "LOG::m_semLogSignal" ) ),
+      m_semLogWrite( CSyncBasicInfo( "LOG::m_semLogWrite" ) ),
+      m_semWaitForLogBufferSpace( CSyncBasicInfo( "LOG::m_semWaitForLogBufferSpace" ) ),
       m_critLGWaitQ( CLockBasicInfo( CSyncBasicInfo( szLGWaitQ ), rankLGWaitQ, 0 ) ),
       m_tickNextLazyCommit( 0 ),
       m_lgposNextLazyCommit( lgposMin ),

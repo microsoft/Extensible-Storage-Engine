@@ -41,6 +41,7 @@ set(OS_SOURCES
     ${ESE_DEV}/src/os/dllentry.cxx
     ${ESE_DEV}/src/os/edbg.cxx
     ${ESE_DEV}/src/os/encrypt.cxx
+    ${ESE_DEV}/src/os/encrypt2.cxx
     ${ESE_DEV}/src/os/error.cxx
     ${ESE_DEV}/src/os/event.cxx
     ${ESE_DEV}/src/os/hapublish.cxx

@@ -152,6 +152,8 @@ namespace Internal
                     delegate void DetachFileStatus( int i, int c );
 
                     void DetachFile( String^ path, DetachFileStatus^ status );
+
+                    bool IsCachedFile( String^ path );
                 };
             }
         }

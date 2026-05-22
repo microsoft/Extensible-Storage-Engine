@@ -1004,7 +1004,7 @@ ERR ErrLGScanCheck(
 #endif  // !DEBUG
 
     const BOOL fScanCheck2Supported         = g_rgfmp[ifmp].FEfvSupported( JET_efvScanCheck2 );
-    const BOOL fScanCheck2FlagsSupported    = g_rgfmp[ ifmp ].FEfvSupported( JET_efvScanCheck2Flags ) && BoolParam( pinst, JET_paramFlight_EnableScanCheck2Flags );
+    const BOOL fScanCheck2FlagsSupported    = g_rgfmp[ ifmp ].FEfvSupported( JET_efvScanCheck2Flags );
     const BOOL fScanEnableFDPDelete         = g_rgfmp[ ifmp ].FEfvSupported( JET_efvRBSTooSoonDeletes ) && BoolParam( pinst, JET_paramFlight_EnableScanCheckFDPDeleteFlags );
 
     DATA data;
@@ -4869,7 +4869,7 @@ ERR ErrLGExtentFreed( LOG * const plog, const IFMP ifmp, const PGNO pgnoFirst, c
 
     // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
     DATA        rgdata[1];
-    const BOOL  fExtentFreed2Supported  = g_rgfmp[ ifmp ].FEfvSupported( JET_efvExtentFreed2 ) && BoolParam( PinstFromIfmp( ifmp ), JET_paramFlight_EnableExtentFreed2 );
+    const BOOL  fExtentFreed2Supported  = g_rgfmp[ ifmp ].FEfvSupported( JET_efvExtentFreed2 );
     ERR         err                     = JET_errSuccess;
 
     LREXTENTFREED* const plr            = fExtentFreed2Supported ? ( new LREXTENTFREED2() ) : ( new LREXTENTFREED() );
@@ -5169,7 +5169,7 @@ const char * SzLrtyp( LRTYP lrtyp )
 
 
 ERR ErrLrToLogCsvSimple(
-    CWPRINTFFILE * pcwpfCsvOut,
+    CPRINTFFILE * pcpfCsvOutW,
     LGPOS lgpos,
     const LR *plr,
     LOG * plog )
@@ -6853,7 +6853,7 @@ And here was the list of the log file after recovery
                                 szLgposLR, cbLR,
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2 );
                 OSStrCbAppendW( szLR, sizeof(szLR), rgwchBuf );
-                (*pcwpfCsvOut)( L"%s", szLR );
+                (*pcpfCsvOutW)( L"%s", szLR );
             }
             else if ( pLogRecordsCsvFormats[i] == szLogRecordDatabaseInfo )
             {
@@ -6871,7 +6871,7 @@ And here was the list of the log file after recovery
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2,
                                 szLRTyp, pChangeInfo[i].dbid, pChangeInfo[i].szDbPath, rgwchSignBuf );
                 OSStrCbAppendW( szLR, sizeof(szLR), rgwchBuf );
-                (*pcwpfCsvOut)( L"%s", szLR );
+                (*pcpfCsvOutW)( L"%s", szLR );
             }
             else if ( pLogRecordsCsvFormats[i] == szLogRecordPgChangeInfo )
             {
@@ -6883,7 +6883,7 @@ And here was the list of the log file after recovery
                                 szLRTyp, pChangeInfo[i].pgno, pChangeInfo[i].objid, pChangeInfo[i].dbid,
                                 pChangeInfo[i].dbtimePre, pChangeInfo[i].dbtimePost );
                 OSStrCbAppendW( szLR, sizeof(szLR), rgwchBuf );
-                (*pcwpfCsvOut)( L"%s", szLR );
+                (*pcpfCsvOutW)( L"%s", szLR );
 
             }
             else if ( pLogRecordsCsvFormats[i] == szLogRecordMiscelLrInfo )
@@ -6895,7 +6895,7 @@ And here was the list of the log file after recovery
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2,
                                 szLRTyp );
                 OSStrCbAppendW( szLR, sizeof(szLR), rgwchBuf );
-                (*pcwpfCsvOut)( L"%s", szLR );
+                (*pcpfCsvOutW)( L"%s", szLR );
             }
             else if ( pLogRecordsCsvFormats[i] == szLogRecordResizeDatabaseInfo ||
                       pLogRecordsCsvFormats[i] == szLogRecordTrimDatabaseInfo )
@@ -6907,14 +6907,14 @@ And here was the list of the log file after recovery
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2,
                                 szLRTyp, pChangeInfo[i].dbid );
                 OSStrCbAppendW( szLR, sizeof(szLR), rgwchBuf );
-                (*pcwpfCsvOut)( L"%s", szLR );
+                (*pcpfCsvOutW)( L"%s", szLR );
             }
             else
             {
                 AssertSz( fFalse, "Unknown CSV type!!!" );
             }
         
-            (*pcwpfCsvOut)( L"\r\n" );
+            (*pcpfCsvOutW)( L"\r\n" );
             // Only print out size with the first csv line for a log record (to avoid double counting)
             cbLR = 0;
         }

@@ -312,13 +312,13 @@ struct PrereadInfo
 
 
 ERR ErrBTIMultipageCleanup(
-        FUCB * const pfucb,
-        const BOOKMARK& bm,
-        BOOKMARK * const pbmNext,
-        RECCHECK * const preccheck,
-        MERGETYPE * const pmergetype,
-        const BOOL fRightMerges,
-        __inout_opt PrereadInfo * const pPrereadInfo = NULL );
+    FUCB * const pfucb,
+    const BOOKMARK& bm,
+    BOOKMARK * const pbmNext,
+    RECCHECK * const preccheck,
+    MERGETYPE * const pmergetype,
+    const BOOL fRightMerges,
+    __inout_opt PrereadInfo * const pPrereadInfo = NULL );
 
 ERR ErrBTPageMove(
     _In_ FUCB * const pfucb,
@@ -326,8 +326,14 @@ ERR ErrBTPageMove(
     _In_ const PGNO pgnoSource,
     _In_ const BOOL fLeafPage,
     _In_ const ULONG fSPAllocFlags,
-    __inout BOOKMARK * const pbmNext );
+    _Inout_ BOOKMARK * const pbmNext );
 VOID BTPerformPageMove( _In_ MERGEPATH * const pmergePath );
+
+ERR ErrBTContiguousExtentMove(
+    _In_ FUCB * const pfucb,
+    _In_ const BOOKMARK& bm,
+    _In_ const PGNO pgnoSourceFirst,
+    _Out_ CPG * const pcpgMoved );
 
 ERR ErrBTFindFragmentedRange(
     _In_ FUCB * const pfucb,

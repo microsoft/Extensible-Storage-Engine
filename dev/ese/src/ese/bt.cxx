@@ -11313,6 +11313,7 @@ LOCAL ERR ErrBTIGetNewPages( FUCB *pfucb, SPLITPATH *psplitPathLeaf, DIRFLAG dir
                     CpgDIRActiveSpaceRequestReserve( pfucb ) != cpgDIRReserveConsumed &&
                     ( ( psplit->fNewPageFlags & CPAGE::fPageLeaf ) || fVerticalToLeafSplit ) )
             {
+
                 //  If there is an active reserve request outstanding and this is a leaf page allocation,
                 //  indicate to space to consume the active reserve.
                 fSPAllocFlags |= ( fSPContinuous | fSPUseActiveReserve );
@@ -13521,9 +13522,10 @@ ERR ErrBTIMultipageCleanup(
     const BOOL                      fRightMerges,
     __inout_opt PrereadInfo * const pPrereadInfo )
 {
-    ERR             err;
+    ERR             err             = JET_errSuccess;
     MERGEPATH       *pmergePath     = NULL;
-    PIBTraceContextScope tcScope       = TcBTICreateCtxScope( pfucb, iorsBTMerge );
+    PIBTraceContextScope tcScope    = TcBTICreateCtxScope( pfucb, iorsBTMerge );
+    BOOL            fValidBmNext    = fFalse;
 
     if ( pmergetype )
     {
@@ -13534,27 +13536,12 @@ ERR ErrBTIMultipageCleanup(
     {
         //  btree is scheduled for deletion - don't bother attempting cleanup
         //
-        if ( NULL != pbmNext )
-        {
-            pbmNext->key.suffix.SetCb( 0 );
-            pbmNext->data.SetCb( 0 );
-        }
-
-        return JET_errSuccess;
+        goto HandleError;
     }
 
     //  get path RIW latched
     //
     Call( ErrBTICreateMergePath( pfucb, bm, pgnoNull, fTrue, &pmergePath, pPrereadInfo ) );
-    if ( wrnBTShallowTree == err )
-    {
-        if ( NULL != pbmNext )
-        {
-            pbmNext->key.suffix.SetCb( 0 );
-            pbmNext->data.SetCb( 0 );
-        }
-        goto HandleError;
-    }
 
     //  check if merge conditions hold
     //
@@ -13564,15 +13551,14 @@ ERR ErrBTIMultipageCleanup(
 
     if ( mergetypeEmptyTree == pmergePath->pmerge->mergetype )
     {
-        if ( NULL != pbmNext )
-        {
-            pbmNext->key.suffix.SetCb( 0 );
-            pbmNext->data.SetCb( 0 );
-        }
-
+        // This always releases pmergePath.
         err = ErrBTIMergeEmptyTree( pfucb, pmergePath );
-        return err;
+        pmergePath = NULL;
+
+        goto HandleError;
     }
+
+    fValidBmNext = fTrue;
 
     //  release pages not involved in merge
     //
@@ -13668,6 +13654,17 @@ ERR ErrBTIMultipageCleanup(
 
 HandleError:
     BTIReleaseMergePaths( pmergePath );
+
+    if ( ( pbmNext != NULL ) && ( !fValidBmNext || ( err < JET_errSuccess ) ) )
+    {
+        pbmNext->Reset();
+    }
+
+    if ( err == errBTShallowTree )
+    {
+        err = JET_errSuccess;
+    }
+
     return err;
 }
 
@@ -13933,7 +13930,7 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
     {
         //  tree is too shallow to bother doing merges on
         //
-        Error( ErrERRCheck( wrnBTShallowTree ) );
+        Error( ErrERRCheck( errBTShallowTree ) );
     }
 
     BOOL    fLeftEdgeOfBtree    = fTrue;
@@ -13999,7 +13996,7 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
             const MERGEPATH * const pmergePathParent        = (*ppmergePath)->pmergePathParent;
 
             //  if root page was also a leaf page or the internal page we're looking for, we would have
-            //  err'd out above with wrnBTShallowTree
+            //  err'd out above with errBTShallowTree
             Assert( NULL != pmergePathParent );
             Assert( !( pcsr->Cpage().FRootPage() ) );
 
@@ -14084,15 +14081,13 @@ HandleError:
 #ifdef DEBUG
     if ( err >= JET_errSuccess )
     {
-        if ( err != wrnBTShallowTree )
-        {
-            Assert( !!(*ppmergePath)->csr.Cpage().FLeafPage() == !!fLeafPage );
-        }
-        else
-        {
-            Assert( (*ppmergePath)->csr.Cpage().FRootPage() );
-        }
+        Assert( !!(*ppmergePath)->csr.Cpage().FLeafPage() == !!fLeafPage );
     }
+    else if ( err == errBTShallowTree )
+    {
+        Assert( (*ppmergePath)->csr.Cpage().FRootPage() );
+    }
+
 #endif
 
     return err;
@@ -14103,7 +14098,7 @@ HandleError:
 LOCAL VOID BTIMergeCopyNextBookmark( FUCB       * const pfucb,
                                      MERGEPATH  * const pmergePathLeaf,
                                      BOOKMARK   * const pbmNext,
-                                     const BOOL         fRightMerges )
+                                     const BOOL fRightMerges )
 //  ================================================================
 //
 //  Copies next bookmark to seek for online defrag.
@@ -14136,8 +14131,7 @@ LOCAL VOID BTIMergeCopyNextBookmark( FUCB       * const pfucb,
     //
     if ( pcsr->Pgno() == pgnoNull )
     {
-        pbmNext->key.suffix.SetCb( 0 );
-        pbmNext->data.SetCb( 0 );
+        pbmNext->Reset();
         return;
     }
 
@@ -15760,9 +15754,9 @@ LOCAL VOID BTIUpdatePagePointer(
 
 //  ================================================================
 LOCAL VOID BTIMovePageCopyNextBookmark(
-            _In_        const FUCB * const pfucb,
+            _In_        const FUCB      * const pfucb,
             _In_        const MERGEPATH * const pmergePath,
-            __inout     BOOKMARK * const pbmNext )
+            _Inout_     BOOKMARK        * const pbmNext )
 //  ================================================================
 //
 // copies the bookmark from the right-hand page for a move
@@ -15777,12 +15771,9 @@ LOCAL VOID BTIMovePageCopyNextBookmark(
     Assert( pbmNext );
     Assert( NULL != pbmNext->key.suffix.Pv() );
 
-    if( pgnoNull == pmergePath->pmerge->csrRight.Pgno())
+    if ( pgnoNull == pmergePath->pmerge->csrRight.Pgno() )
     {
-        pbmNext->key.prefix.SetCb( 0 );
-        pbmNext->key.suffix.SetCb( 0 );
-        pbmNext->data.SetCb( 0 );
-        Assert( pbmNext->key.FNull() );
+        pbmNext->Reset();
     }
     else
     {
@@ -16060,6 +16051,7 @@ LOCAL ERR ErrBTIPageMove(
     {
         Call( ErrBTIMergeLatchSiblingPages( pfucb, pmergePath ) );
     }
+
     Call( ErrBTIPageMoveAllocatePage( pfucb, pmergePath, fSPAllocFlags, dirflag ) );
 
     BTIMergeReleaseUnneededPages( pmergePath );
@@ -16139,7 +16131,7 @@ ERR ErrBTPageMove(
     _In_ const PGNO pgnoSource,
     _In_ const BOOL fLeafPage,
     _In_ const ULONG fSPAllocFlags,
-    __inout BOOKMARK * const pbmNext )
+    _Inout_ BOOKMARK * const pbmNext )
 //  ================================================================
 {
     Assert( pfucb );
@@ -16160,17 +16152,6 @@ ERR ErrBTPageMove(
     }
 
     Call( ErrBTICreateMergePath( pfucb, bm, pgnoSource, fLeafPage, &pmergePath ) );
-    if ( wrnBTShallowTree == err )
-    {
-        if ( pbmNext )
-        {
-            pbmNext->key.prefix.SetCb( 0 );
-            pbmNext->key.suffix.SetCb( 0 );
-            pbmNext->data.SetCb( 0 );
-        }
-
-        goto HandleError;
-    }
 
     Call( ErrBTINewMerge( pmergePath ) );
     pmergePath->pmerge->mergetype               = mergetypePageMove;
@@ -16194,6 +16175,12 @@ ERR ErrBTPageMove(
 HandleError:
     BTIReleaseMergePaths( pmergePath );
     Assert( !Pcsr( pfucb )->FLatched( ) );
+
+    if ( ( pbmNext != NULL ) && ( err < JET_errSuccess ) )
+    {
+        pbmNext->Reset();
+    }
+
     return err;
 }
 
@@ -16259,6 +16246,148 @@ VOID BTIPerformMerge( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
         }
     }
 }
+
+//  ================================================================
+ERR ErrBTContiguousExtentMove(
+    _In_ FUCB * const pfucb,
+    _In_ const BOOKMARK& bm,
+    _In_ const PGNO pgnoSourceFirst,
+    _Out_ CPG * const pcpgMoved )
+//  ================================================================
+{
+    Assert( pfucb );
+    Assert( !FFUCBSpace( pfucb ) );
+    Assert( !Pcsr( pfucb )->FLatched() );
+    Assert( !bm.key.FNull() );
+    Assert( pgnoSourceFirst != pgnoNull );
+
+    ERR err = JET_errSuccess;
+    PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTMerge );
+    MERGEPATH * pmergePath = NULL;
+    EXTENTINFO extinfoOE;
+    BOOKMARK_BUFFER bmbCurr, bmbNext;
+    CPG cpgToMove = 0;
+    BOOL fActiveSpaceRequestReserveCreated = fFalse;
+
+    // We cannot keep whole portions of the data tree, as well as the space trees, locked during this operation.
+    // Therefore, we are going to run the discovery code below using the extent returned previously and without
+    // any locks, and we will, later, stop the extent move operation.
+    //
+
+    // Latch the path, from root to leaf.
+    Call( ErrBTICreateMergePath( pfucb, bm, pgnoSourceFirst, fTrue, &pmergePath ) );
+    Assert( pmergePath->csr.Cpage().PgnoThis() == pgnoSourceFirst );
+
+    // Get OE extent that hosts this page.
+    Call( ErrSPGetOwningExtent( pfucb, pgnoSourceFirst, &extinfoOE ) );
+    Assert( extinfoOE.FContainsPgno( pgnoSourceFirst ) );
+
+    // Find a contiguous run based on the pgnos found in the parent-of-leaf.
+    // Note that this will destroy the merge path, as the iline will be modified.
+    for ( MERGEPATH * const pmergePathParent = pmergePath->pmergePathParent;
+          pmergePathParent->csr.ILine() < pmergePathParent->csr.Cpage().Clines();
+          pmergePathParent->csr.IncrementILine() )
+    {
+        NDGet( pfucb, &pmergePathParent->csr );
+
+        Assert( sizeof( PGNO ) == pfucb->kdfCurr.data.Cb() );
+        const PGNO pgnoToMove = *( (UnalignedLittleEndian< PGNO > *)pfucb->kdfCurr.data.Pv() );
+        Assert( pgnoToMove != pgnoNull );
+        Assert( ( cpgToMove != 0 ) || ( pgnoToMove == pgnoSourceFirst ) ); // Cursor must be positioned in the first pgno.
+        Assert( ( cpgToMove != 1 ) || ( pgnoToMove == pmergePath->csr.Cpage().PgnoNext() ) ); // Second page is the right sibling of the first.
+
+        // Consider it part of a run if the page is within the same extent.
+        if ( extinfoOE.FContainsPgno( pgnoToMove ) )
+        {
+            cpgToMove++;
+        }
+        else
+        {
+            break;
+        }
+    }
+    Assert( cpgToMove > 0 );
+
+    // Release latch path.
+    BTIReleaseMergePaths( pmergePath );
+    pmergePath = NULL;
+
+    // If we have only one page to move, fallback to single page move.
+    // If we have multiple pages to move, reserve the exact space needed and move one by one.
+    // Note that, because we don't keep everything latched, things might have changed underneath us, so
+    // do not try to enforce that the page layout hasn't change. Otherwise, we could end up with fragmented
+    // extents if we often stop too early. The exception is for the first page, which can bail out before
+    // any space is allocated, if we pass in an expected pgno (pgnoSourceFirst, in this case).
+    const BOOL fSinglePageMove = ( cpgToMove == 1 );
+    Call( bmbCurr.ErrAllocAndCopyKeyData( bm.key, bm.data ) );
+    Call( bmbNext.ErrAllocBuffer() );
+    bmbNext.NullifyAndSetPvsToBuffer();
+    for ( CPG cpgMoved = 0; ( cpgMoved < cpgToMove ) && !bmbCurr.Bm().FNull(); cpgMoved++ )
+    {
+        const BOOL fFirstPage = ( cpgMoved == 0 );
+        const BOOL fUseActiveSpaceRequestReserve = !fSinglePageMove;
+        const BOOL fCreateActiveSpaceRequestReserve = ( fUseActiveSpaceRequestReserve && fFirstPage );
+
+        if ( fCreateActiveSpaceRequestReserve )
+        {
+            DIRSetActiveSpaceRequestReserve( pfucb, cpgToMove - 1 );
+            fActiveSpaceRequestReserveCreated = fTrue;
+        }
+
+        err = ErrBTPageMove(
+                pfucb,
+                bmbCurr.Bm(),
+                fFirstPage ? pgnoSourceFirst : pgnoNull,
+                fTrue,
+                fUseActiveSpaceRequestReserve ?
+                    ( fSPUseActiveReserve | ( fCreateActiveSpaceRequestReserve ? ( fSPContinuous | fSPExactExtent ) : fSPNoFlags ) ) :
+                    fSPNoFlags,
+                bmbNext.Pbm() );
+
+        Call( err );
+
+        ( *pcpgMoved )++;
+
+        bmbNext.CopyInto( &bmbCurr );
+        bmbNext.NullifyAndSetPvsToBuffer();
+    }
+
+HandleError:
+    Assert( !Pcsr( pfucb )->FLatched() );
+
+    if ( fActiveSpaceRequestReserveCreated )
+    {
+        DIRResetActiveSpaceRequestReserve( pfucb );
+    }
+
+    bmbCurr.FreeBuffer();
+    bmbNext.FreeBuffer();
+    BTIReleaseMergePaths( pmergePath );
+
+#ifdef DEBUG
+    FMP * const pfmp = PfmpFromIfmp( pfucb->ifmp );
+    if ( pfmp->FExclusiveBySession( pfucb->ppib ) )
+    {
+        Expected( pfmp->FShrinkIsRunning() );
+        Assert( err != JET_errRecordNotFound );
+        Assert( err != errBTShallowTree );
+        if ( err >= JET_errSuccess )
+        {
+            Assert( *pcpgMoved > 0 );
+            Assert( *pcpgMoved == cpgToMove );
+        }
+    }
+#endif
+
+    // Because this function is best effort only, we'll return success if at least one page has been moved.
+    if ( ( err > JET_errSuccess ) || ( ( err < JET_errSuccess ) && ( *pcpgMoved > 0 ) ) )
+    {
+        err = JET_errSuccess;
+    }
+
+    return err;
+}
+
 
 //  processes one page for merge or empty page operation
 //  depending on the operation selection in pmergePath->flags

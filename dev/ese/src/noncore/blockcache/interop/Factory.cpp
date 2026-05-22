@@ -517,6 +517,11 @@ namespace Internal
                             return factory->DetachFile( path, status );
                         }
 
+                        static bool IsCachedFile( String^ path )
+                        {
+                            return factory->IsCachedFile( path );
+                        }
+
                     private:
 
                         ref class OSLayer : IDisposable

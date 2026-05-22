@@ -21,7 +21,7 @@
 //  Power-of-2 related helpers.
 
 template<class T>
-inline bool FPowerOf2( T x )
+constexpr inline bool FPowerOf2( T x )
 {
     return ( ( 0 < x ) && ( 0 == ( x & ( x - 1 ) ) ) );
 }
@@ -38,7 +38,7 @@ inline ULONG Log2( ULONG x )
 inline ULONG Log2( unsigned __int64 x )
 {
     ULONG log2;
-    BYTE ret = _BitScanReverse64( &log2, x );
+    BYTE ret = _BitScanReverse64( ( OS_WIN_ULONG * )&log2, x );
     return ret > 0 ? log2 : -1; // log( 0 ) is undefined, represented by -1
 }
 
@@ -67,6 +67,13 @@ inline USHORT UsBits( const DWORD dw )
     ret = ret & 0x3f;
 
     return (USHORT)ret;
+}
+
+inline ULONG Log2OfPowerOf2( ULONG x )
+{
+    ULONG index;
+    _BitScanForward( &index, x );
+    return index;
 }
 
 #pragma warning (push)

@@ -148,6 +148,17 @@ namespace Internal
                             }
                         }
 
+                        /// <summary>
+                        /// Update Number.
+                        /// </summary>
+                        property Internal::Ese::BlockCache::Interop::UpdateNumber UpdateNumber
+                        {
+                            Internal::Ese::BlockCache::Interop::UpdateNumber get()
+                            {
+                                return (Internal::Ese::BlockCache::Interop::UpdateNumber)this->pcbl->Updno();
+                            }
+                        }
+
                         /// <inheritdoc/>
                         static bool operator==( CachedBlock^ a, CachedBlock^ b )
                         {
@@ -182,7 +193,8 @@ namespace Internal
                                 ^ this->IsPinned.GetHashCode()
                                 ^ this->IsDirty.GetHashCode()
                                 ^ this->WasEverDirty.GetHashCode()
-                                ^ this->WasPurged.GetHashCode();
+                                ^ this->WasPurged.GetHashCode()
+                                ^ this->UpdateNumber.GetHashCode();
                         }
 
                         /// <inheritdoc/>
@@ -219,6 +231,11 @@ namespace Internal
                             }
 
                             if ( this->WasPurged != other->WasPurged )
+                            {
+                                return false;
+                            }
+
+                            if ( this->UpdateNumber != other->UpdateNumber )
                             {
                                 return false;
                             }

@@ -1169,6 +1169,8 @@ class DATA
         VOID    DeltaCb     ( INT i );
         VOID    Nullify     ();
 
+        std::string ToString();
+
 #ifdef DEBUG
     public:
                 DATA        ();
@@ -1256,8 +1258,31 @@ INLINE VOID DATA::CopyInto( DATA& dataDest ) const
 INLINE VOID DATA::Nullify()
 //  ================================================================
 {
-    m_pv = 0;
+    m_pv = NULL;
     m_cb = 0;
+}
+
+
+//  ================================================================
+INLINE std::string DATA::ToString()
+//  ================================================================
+{
+    std::string str;
+    str.reserve( Cb() * 3 );
+    char hex[ 4 ];
+    BYTE* pb = (BYTE*) Pv();
+
+    for ( int i = 0; i < Cb(); i++ )
+    {
+        sprintf_s( hex, "%02x ", pb[ i ] );
+        str.append( hex );
+    }
+
+    return str;
+
+    // Force includes the function even if there are no calls to it.
+    // This allows the function to be available for debugging in VS.
+#pragma comment(linker, "/include:" __FUNCDNAME__)
 }
 
 
@@ -1344,6 +1369,8 @@ class KEY
 
         VOID    Advance     ( INT cb );
         VOID    Nullify     ();
+
+        std::string ToString();
 
 #ifdef DEBUG
     public:
@@ -1439,6 +1466,21 @@ INLINE VOID KEY::Nullify()
 
 
 //  ================================================================
+INLINE std::string KEY::ToString()
+//  ================================================================
+{
+    std::string str = prefix.ToString();
+    str += '.';
+    str += suffix.ToString();
+    return str;
+
+    // Force includes the function even if there are no calls to it.
+    // This allows the function to be available for debugging in VS.
+#pragma comment(linker, "/include:" __FUNCDNAME__)
+}
+
+
+//  ================================================================
 INLINE USHORT KEY::CbLimitKeyMost( const USHORT usT )
 //  ================================================================
 {
@@ -1517,6 +1559,9 @@ class BOOKMARK
         DATA    data;
 
         VOID    Nullify     ();
+        VOID    Reset       ();
+        BOOL    FNull       () const;
+
 #ifdef DEBUG
     public:
         VOID    Invalidate  ();
@@ -1532,6 +1577,24 @@ INLINE VOID BOOKMARK::Nullify()
     key.Nullify();
     data.Nullify();
 }
+
+//  ================================================================
+INLINE VOID BOOKMARK::Reset()
+//  ================================================================
+{
+    key.prefix.SetCb( 0 );
+    key.suffix.SetCb( 0 );
+    data.SetCb( 0 );
+}
+
+//  ================================================================
+INLINE BOOL BOOKMARK::FNull() const
+//  ================================================================
+{
+    Assert( data.FNull() || !key.FNull() );
+    return key.FNull() && data.FNull();
+}
+
 
 #ifdef DEBUG
 
@@ -1557,60 +1620,159 @@ INLINE VOID BOOKMARK::AssertValid() const
 
 
 //  ================================================================
-class BOOKMARK_COPY : public BOOKMARK
+class BOOKMARK_BUFFER
 //  ================================================================
 //
-//  copy of a bookmark's content to the heap.
+//  a buffer to hold a bookmark's content in the heap.
 //
 //-
 {
     public:
-        BOOKMARK_COPY();
-        ~BOOKMARK_COPY();
-        ERR ErrCopyKey( const KEY& keySrc );
-        ERR ErrCopyKeyData( const KEY& keySrc, const DATA& dataSrc );
-        VOID FreeCopy();
+        // ctor/dtor.
+        BOOKMARK_BUFFER();
+        ~BOOKMARK_BUFFER();
+
+        // Disallow copy.
+        BOOKMARK_BUFFER& operator=( const BOOKMARK_BUFFER& ) = delete;
+
+    public:
+        // Functional methods.
+        ERR ErrAllocBuffer();
+        VOID FreeBuffer();
+        VOID CopyKeyData( const KEY& keySrc, const DATA& dataSrc );
+        ERR ErrAllocAndCopyKey( const KEY& keySrc );
+        ERR ErrAllocAndCopyKeyData( const KEY& keySrc, const DATA& dataSrc );
+        VOID CopyInto( BOOKMARK_BUFFER* const pbmDest ) const;
+        VOID NullifyAndSetPvsToBuffer();
+        const BOOKMARK& Bm() const;
+        BOOKMARK* Pbm();
 
     private:
+        BOOKMARK m_bm;
         BYTE* m_pb;
 };
 
 //  ================================================================
-INLINE BOOKMARK_COPY::BOOKMARK_COPY()
+INLINE BOOKMARK_BUFFER::BOOKMARK_BUFFER()
 //  ================================================================
 {
     m_pb = NULL;
-    OnDebug( Invalidate() );
+    OnDebug( m_bm.Invalidate() );
 }
 
 //  ================================================================
-INLINE BOOKMARK_COPY::~BOOKMARK_COPY()
+INLINE BOOKMARK_BUFFER::~BOOKMARK_BUFFER()
 //  ================================================================
 {
-    FreeCopy();
+    FreeBuffer();
 }
 
 //  ================================================================
-INLINE ERR BOOKMARK_COPY::ErrCopyKey( const KEY& keySrc )
+INLINE ERR BOOKMARK_BUFFER::ErrAllocBuffer()
+//  ================================================================
+{
+    ERR err = JET_errSuccess;
+
+    Assert( m_pb == NULL );
+    Alloc( m_pb = (BYTE *)RESBOOKMARK.PvRESAlloc() );
+    m_bm.Nullify();
+    ASSERT_VALID( &m_bm );
+
+HandleError:
+    return err;
+}
+
+//  ================================================================
+INLINE VOID BOOKMARK_BUFFER::FreeBuffer()
+//  ================================================================
+{
+    OnDebug( m_bm.Invalidate() );
+    if ( m_pb == NULL )
+    {
+        return;
+    }
+
+    RESBOOKMARK.Free( m_pb );
+    m_pb = NULL;
+}
+
+//  ================================================================
+INLINE VOID BOOKMARK_BUFFER::CopyKeyData( const KEY& keySrc, const DATA& dataSrc )
+//  ================================================================
+{
+    ASSERT_VALID( &keySrc );
+    ASSERT_VALID( &dataSrc );
+    Assert( m_pb != NULL );
+
+    m_bm.Nullify();
+
+    if ( keySrc.FNull() && dataSrc.FNull() )
+    {
+        return;
+    }
+
+    // Make sure we are able to hold our key in RESBOOKMARK (never expected to fail).
+    const DWORD_PTR cb = keySrc.Cb() + dataSrc.Cb();
+    DWORD_PTR cbMax = 0;
+    CallS( RESBOOKMARK.ErrGetParam( JET_resoperSize, &cbMax ) );
+    EnforceSz( cb <= cbMax, "BookmarkBufferTooSmall" );
+
+    BYTE* pb = m_pb;
+
+    // Copy key prefix.
+    if ( !keySrc.prefix.FNull() )
+    {
+        m_bm.key.prefix.SetPv( pb );
+        m_bm.key.prefix.SetCb( keySrc.prefix.Cb() );
+        UtilMemCpy( pb, keySrc.prefix.Pv(), m_bm.key.prefix.Cb() );
+        pb += m_bm.key.prefix.Cb();
+    }
+
+    // Copy key suffix.
+    if ( !keySrc.suffix.FNull() )
+    {
+        m_bm.key.suffix.SetPv( pb );
+        m_bm.key.suffix.SetCb( keySrc.suffix.Cb() );
+        UtilMemCpy( pb, keySrc.suffix.Pv(), m_bm.key.suffix.Cb() );
+        pb += m_bm.key.suffix.Cb();
+    }
+
+    // Copy data.
+    if ( !dataSrc.FNull() )
+    {
+        m_bm.data.SetPv( pb );
+        m_bm.data.SetCb( dataSrc.Cb() );
+        UtilMemCpy( pb, dataSrc.Pv(), m_bm.data.Cb() );
+        pb += m_bm.data.Cb();
+    }
+
+    Assert( (DWORD_PTR)( pb - m_pb ) == cb );
+    ASSERT_VALID( &m_bm );
+}
+
+//  ================================================================
+INLINE ERR BOOKMARK_BUFFER::ErrAllocAndCopyKey( const KEY& keySrc )
 //  ================================================================
 {
     DATA dataSrc;
     dataSrc.Nullify();
-    return ErrCopyKeyData( keySrc, dataSrc );
+    return ErrAllocAndCopyKeyData( keySrc, dataSrc );
 }
 
 //  ================================================================
-INLINE ERR BOOKMARK_COPY::ErrCopyKeyData( const KEY& keySrc, const DATA& dataSrc )
+INLINE ERR BOOKMARK_BUFFER::ErrAllocAndCopyKeyData( const KEY& keySrc, const DATA& dataSrc )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
+
+    Assert( m_pb == NULL );
+
     ASSERT_VALID( &keySrc );
     ASSERT_VALID( &dataSrc );
-    Assert( m_pb == NULL );
 
     if ( keySrc.FNull() && dataSrc.FNull() )
     {
-        Nullify();
+        m_bm.Nullify();
         goto HandleError;
     }
 
@@ -1624,57 +1786,50 @@ INLINE ERR BOOKMARK_COPY::ErrCopyKeyData( const KEY& keySrc, const DATA& dataSrc
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
-    // Allocate memory.
-    Alloc( m_pb = (BYTE *)RESBOOKMARK.PvRESAlloc() );
-    Nullify();
-    BYTE* pb = m_pb;
-
-    // Copy key prefix.
-    if ( !keySrc.prefix.FNull() )
+    if ( m_pb == NULL )
     {
-        key.prefix.SetPv( pb );
-        key.prefix.SetCb( keySrc.prefix.Cb() );
-        UtilMemCpy( pb, keySrc.prefix.Pv(), key.prefix.Cb() );
-        pb += key.prefix.Cb();
+        Call( ErrAllocBuffer() );
     }
 
-    // Copy key suffix.
-    if ( !keySrc.suffix.FNull() )
-    {
-        key.suffix.SetPv( pb );
-        key.suffix.SetCb( keySrc.suffix.Cb() );
-        UtilMemCpy( pb, keySrc.suffix.Pv(), key.suffix.Cb() );
-        pb += key.suffix.Cb();
-    }
-
-    // Copy data.
-    if ( !dataSrc.FNull() )
-    {
-        data.SetPv( pb );
-        data.SetCb( dataSrc.Cb() );
-        UtilMemCpy( pb, dataSrc.Pv(), data.Cb() );
-        pb += data.Cb();
-    }
-
-    Assert( (DWORD_PTR)( pb - m_pb ) == cb );
-    ASSERT_VALID( this );
+    CopyKeyData( keySrc, dataSrc );
 
 HandleError:
     return err;
 }
 
 //  ================================================================
-INLINE VOID BOOKMARK_COPY::FreeCopy()
+INLINE VOID BOOKMARK_BUFFER::CopyInto( BOOKMARK_BUFFER* const pbmDest ) const
 //  ================================================================
 {
-    OnDebug( Invalidate() );
-    if ( m_pb == NULL )
-    {
-        return;
-    }
+    pbmDest->CopyKeyData( m_bm.key, m_bm.data );
+}
 
-    RESBOOKMARK.Free( m_pb );
-    m_pb = NULL;
+//  ================================================================
+INLINE VOID BOOKMARK_BUFFER::NullifyAndSetPvsToBuffer()
+//  ================================================================
+{
+    Assert( m_pb != NULL );
+    ASSERT_VALID( &m_bm );
+
+    m_bm.Nullify();
+
+    m_bm.key.prefix.SetPv( m_pb );
+    m_bm.key.suffix.SetPv( m_pb );
+    m_bm.data.SetPv( m_pb );
+}
+
+//  ================================================================
+INLINE const BOOKMARK& BOOKMARK_BUFFER::Bm() const
+//  ================================================================
+{
+    return m_bm;
+}
+
+//  ================================================================
+INLINE BOOKMARK* BOOKMARK_BUFFER::Pbm()
+//  ================================================================
+{
+    return &m_bm;
 }
 
 
@@ -1838,7 +1993,7 @@ INLINE INT CmpKeyShortest( const KEY& key1, const KEY& key2 )
     INT         cbCompare       = pkeySmallestPrefix->prefix.Cb();
     INT         cmp             = 0;
 
-    if ( pb1 == pb2 || ( cmp = memcmp( pb1, pb2, cbCompare)) == 0 )
+    if ( pb1 == pb2 || ( cmp = memcmp( pb1, pb2, cbCompare ) ) == 0 )
     {
         pb1             = (BYTE *)pkeySmallestPrefix->suffix.Pv();
         pb2             += cbCompare;
@@ -3260,12 +3415,12 @@ INLINE ERR SigToSz( const SIGNATURE * const psig, __out_bcount(cbSigBuffer) PSTR
     LOGTIME tm = psig->logtimeCreate;
     const char * szSigFormat = "Create time:%02d/%02d/%04d %02d:%02d:%02d.%3.3d Rand:%lu Computer:%s";
 
-    ErrOSStrCbFormatA( szSigBuffer, cbSigBuffer, szSigFormat,
-                        (SHORT) tm.bMonth, (SHORT) tm.bDay, (SHORT) tm.bYear + 1900,
-                        (SHORT) tm.bHours, (SHORT) tm.bMinutes, (SHORT) tm.bSeconds,
-                        (SHORT) tm.Milliseconds(),
-                        ULONG(psig->le_ulRandom),
-                        psig->szComputerName );
+    OSStrCbFormatA( szSigBuffer, cbSigBuffer, szSigFormat,
+                    (SHORT) tm.bMonth, (SHORT) tm.bDay, (SHORT) tm.bYear + 1900,
+                    (SHORT) tm.bHours, (SHORT) tm.bMinutes, (SHORT) tm.bSeconds,
+                    (SHORT) tm.Milliseconds(),
+                    ULONG(psig->le_ulRandom),
+                    psig->szComputerName );
     return(JET_errSuccess);
 }
 
@@ -3465,7 +3620,7 @@ INLINE ERR DBFILEHDR::DumpLite( CPRINTF* pcprintf, const char * const szNewLine,
     (*pcprintf)( "Revert Page Count: %u%s", (ULONG) le_ulRevertPageCount, szNewLine );
 
     lgpos = le_lgposCommitBeforeRevert;
-    (*pcprintf)( "Last Commit Before Revert: (0x%X,%X,%X)  ", lgpos.lGeneration, lgpos.isec, lgpos.ib );
+    (*pcprintf)( "Last Commit Before Revert: (0x%X,%X,%X)  %s", lgpos.lGeneration, lgpos.isec, lgpos.ib, szNewLine );
 
     return JET_errSuccess;
 }
@@ -3968,8 +4123,8 @@ public:
         m_state( stateStart ),
         m_thread( 0 ),
         m_errFreeze ( JET_errSuccess ),
-        m_asigSnapshotThread( CSyncBasicInfo( _T( "asigSnapshotThread" ) ) ),
-        m_asigSnapshotStarted( CSyncBasicInfo( _T( "asigSnapshotStarted" ) ) ),
+        m_asigSnapshotThread( CSyncBasicInfo( "asigSnapshotThread" ) ),
+        m_asigSnapshotStarted( CSyncBasicInfo( "asigSnapshotStarted" ) ),
         m_fFreezeAllInstances ( fFalse ),
         m_ipinstCurrent ( 0 ),
         m_fFlags ( 0 )
@@ -3995,8 +4150,8 @@ private:
         m_state( stateStart ),
         m_thread( 0 ),
         m_errFreeze ( JET_errSuccess ),
-        m_asigSnapshotThread( CSyncBasicInfo( _T( "asigSnapshotThread" ) ) ),
-        m_asigSnapshotStarted( CSyncBasicInfo( _T( "asigSnapshotStarted" ) ) ),
+        m_asigSnapshotThread( CSyncBasicInfo( "asigSnapshotThread" ) ),
+        m_asigSnapshotStarted( CSyncBasicInfo( "asigSnapshotStarted" ) ),
         m_fFreezeAllInstances ( fFalse ),
         m_ipinstCurrent ( 0 ),
         m_fFlags ( 0 )
@@ -5032,6 +5187,9 @@ public:
     BOOL                m_fTermInProgress;
     BOOL                m_fTermAbruptly;
     INST_STINIT         m_fSTInit;
+    //  Note: This status is not cleaned up if we fail in middle of Redo, Undo and this fact
+    //  is used at end of JetInitEx() to log what mode we failed in.  So do not reset this on
+    //  error paths
     INT                 m_perfstatusEvent;  //  Redo, Undo, Runtime/Do-time, and Term.
     
     BOOL                m_fBackupAllowed;
@@ -5232,6 +5390,8 @@ public:
 
     CIsamSequenceDiagLog        m_isdlInit;
     CIsamSequenceDiagLog        m_isdlTerm;
+
+    volatile DWORD              m_grbitHaFailureTags;
 
 private:
     ERR ErrAPIAbandonEnter_( const LONG lOld );
@@ -5874,3 +6034,6 @@ INLINE ERR ErrFromCStatsErr( const CStats::ERR err )
         return ErrERRCheck( JET_errInternalError );
     }
 }
+
+#define PARAM_AES256_IMPLEMENTATION         ( BoolParam( JET_paramFlight_UseCngAes256Implementation ) ? AES256_CNG_IMPLEMENTATION : AES256_CAPI_IMPLEMENTATION )
+#define OTHER_AES256_IMPLEMENTATION         ( BoolParam( JET_paramFlight_UseCngAes256Implementation ) ? AES256_CAPI_IMPLEMENTATION : AES256_CNG_IMPLEMENTATION )

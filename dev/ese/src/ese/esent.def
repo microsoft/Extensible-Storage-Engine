@@ -322,6 +322,9 @@ EXPORTS
 	ALIAS1(JetDupSession,8)
 	ALIAS2(JetDupSession,8)
 
+	ALIAS1(JetDupSession2,12)
+	ALIAS2(JetDupSession2,12)
+
 	ALIAS1(JetEnableMultiInstanceA,12)
 	ALIAS2(JetEnableMultiInstanceA,12)
 	ALIAS1(JetEnableMultiInstanceW,12)

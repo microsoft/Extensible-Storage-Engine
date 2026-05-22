@@ -304,9 +304,14 @@ ERR ErrDIROpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, LEVEL level )
     CheckPIB( ppib );
 
 #ifdef DEBUG
+    // We may be opening a proxy cursor using a system PIB.
+    // (e.g. if concurrent index create is processing an RCE created by a DBTASK such as FINALIZETASK).
+    // We don't call ErrDBOpenDatabase() for any DBTASKs, so the CheckDBID() call below needs to be skipped for that case.
+    // See VSO# 241238: AssertFail: "FPIBUserOpenedDatabase( ppib, rgfmp[ifmp].Dbid() )" from VER::ErrVERModify
     INST *pinst = PinstFromPpib( ppib );
     if ( !pinst->FRecovering()
         && pinst->m_fSTInit == fSTInitDone
+        && !ppib->FSystemCallback()         // system PIBs may not call ErrDBOpenDatabase()
         && !Ptls()->FIsTaskThread()
         && !Ptls()->fIsRCECleanup )
     {
@@ -1856,7 +1861,7 @@ ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit 
         else
             ppib->ResetFReadOnlyTrx();
 
-        PIBSetTrxBegin0( ppib );
+        ppib->PIBSetTrxBegin0();
     }
     else if( prceNil != ppib->prceNewest )
     {

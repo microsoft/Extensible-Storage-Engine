@@ -9,6 +9,8 @@
 #define _UNICODE
 #endif
 #else
+// We never really compile without JET_UNICODE, right?
+#error 1
 #undef UNICODE
 #undef _UNICODE
 #endif
@@ -17,7 +19,6 @@
 #include <winnls.h>
 #include <string.h>
 #include <stdlib.h>
-#include <tchar.h>
 
 #if (ESENT_WINXP)
 #undef JET_VERSION
@@ -2461,7 +2462,7 @@ namespace Isam
             MJET_INDEXCREATE ic;
 
             ic.IndexName = MakeManagedString( _indexCreate.szIndexName );
-            ic.Key = MakeManagedString( _indexCreate.szKey, (_indexCreate.cbKey / sizeof(_TCHAR)) - 1 ); // -1 to keep just 1 null-terminator. the next conversion back to an unmanaged string will result in 2 null-terminators (managed strings arent null-terminated)
+            ic.Key = MakeManagedString( _indexCreate.szKey, (_indexCreate.cbKey / sizeof(wchar_t)) - 1 ); // -1 to keep just 1 null-terminator. the next conversion back to an unmanaged string will result in 2 null-terminators (managed strings arent null-terminated)
             ic.KeyLengthMax = _indexCreate.cbKeyMost;
             ic.Grbit = (MJET_GRBIT) _indexCreate.grbit;
             ic.Density = _indexCreate.ulDensity;
@@ -3360,7 +3361,7 @@ namespace Isam
         virtual MJET_INSTANCE MJetCreateInstance(String^ name)
         {
             ::JET_INSTANCE _inst = 0;
-            _TCHAR * _szInstanceName = 0;
+            wchar_t * _szInstanceName = 0;
 
             try
             {
@@ -3384,8 +3385,8 @@ namespace Isam
         {
             ::JET_INSTANCE _inst = 0;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
-            _TCHAR * _szInstanceName = 0;
-            _TCHAR * _szDisplayName = 0;
+            wchar_t * _szInstanceName = 0;
+            wchar_t * _szDisplayName = 0;
 
             try
             {
@@ -3479,7 +3480,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             unsigned long _paramid = (unsigned long) paramid;
             JET_API_PTR _plParam = (JET_API_PTR)param;
-            _TCHAR * _sz = 0;
+            wchar_t * _sz = 0;
 
             try
             {
@@ -3544,7 +3545,7 @@ namespace Isam
             unsigned long _paramid = (unsigned long) paramid;
             JET_API_PTR _plParam = 0;
             const int _cbMax = 1024;
-            _TCHAR _sz[_cbMax];
+            wchar_t _sz[_cbMax];
 
             Call( ::JetGetSystemParameter( _inst, _sesid, _paramid, &_plParam, _sz, _cbMax ) );
             param = (System::Int64) _plParam;
@@ -3773,8 +3774,8 @@ namespace Isam
         {
             ::JET_INSTANCE _inst = GetUnmanagedInst( instance );
             ::JET_SESID _sesid;
-            _TCHAR * _szUserName = 0;
-            _TCHAR * _szPassword = 0;
+            wchar_t * _szUserName = 0;
+            wchar_t * _szPassword = 0;
             try
             {
                 _szUserName = GetUnmanagedString(user);
@@ -3856,8 +3857,8 @@ namespace Isam
             MJET_WRN% wrn)
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
-            _TCHAR * _szFilename = 0;
-            _TCHAR * _szConnect = 0;
+            wchar_t * _szFilename = 0;
+            wchar_t * _szConnect = 0;
             ::JET_DBID _dbid;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
 
@@ -3904,7 +3905,7 @@ namespace Isam
             MJET_WRN% wrn)
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
-            _TCHAR * _szFilename = 0;
+            wchar_t * _szFilename = 0;
             const unsigned long _cpgMax = (unsigned long)maxPages;
             ::JET_DBID _dbid;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
@@ -3929,7 +3930,7 @@ namespace Isam
             MJET_GRBIT grbit)
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
-            _TCHAR * _szFilename = 0;
+            wchar_t * _szFilename = 0;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
             MJET_WRN wrn;
             try
@@ -3960,7 +3961,7 @@ namespace Isam
             MJET_GRBIT grbit)
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
-            _TCHAR * _szFilename = 0;
+            wchar_t * _szFilename = 0;
             const unsigned long _cpgMax = (unsigned long)maxPages;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
             MJET_WRN wrn;
@@ -3981,7 +3982,7 @@ namespace Isam
         virtual MJET_WRN MJetDetachDatabase(MJET_SESID sesid, String^ file)
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
-            _TCHAR * _szFilename = 0;
+            wchar_t * _szFilename = 0;
             MJET_WRN wrn;
 
             try
@@ -4004,7 +4005,7 @@ namespace Isam
             MJET_GRBIT grbit)
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
-            _TCHAR * _szFilename = 0;
+            wchar_t * _szFilename = 0;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
             MJET_WRN wrn;
             try
@@ -4040,7 +4041,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR _szName[JET_cbNameMost+1];
+            wchar_t _szName[JET_cbNameMost+1];
 
             memset( _szName, 0, sizeof( _szName ) );
 
@@ -4081,7 +4082,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR _szName[JET_cbNameMost+1];
+            wchar_t _szName[JET_cbNameMost+1];
 
             memset( _szName, 0, sizeof( _szName ) );
 
@@ -4126,7 +4127,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_OBJECTINFO _objectinfo;
-            _TCHAR * _szObject = 0;
+            wchar_t * _szObject = 0;
 
             _objectinfo.cbStruct = sizeof( _objectinfo );
 
@@ -4155,8 +4156,8 @@ namespace Isam
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_OBJECTINFO _objectinfo;
             ::JET_OBJTYP _objtyp = ( ::JET_OBJTYP ) objtyp;
-            _TCHAR * _szContainer = 0;
-            _TCHAR * _szObject = 0;
+            wchar_t * _szContainer = 0;
+            wchar_t * _szObject = 0;
 
             _objectinfo.cbStruct = sizeof( _objectinfo );
 
@@ -4217,7 +4218,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_OBJTYP _objtyp = ( ::JET_OBJTYP ) objtyp;
-            _TCHAR * _szContainer = 0;
+            wchar_t * _szContainer = 0;
             ::JET_OBJECTLIST _objectlist;
 
             _objectlist.cbStruct = sizeof( _objectlist );
@@ -4246,8 +4247,8 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_OBJTYP _objtyp = ( ::JET_OBJTYP ) objtyp;
-            _TCHAR * _szContainer = 0;
-            _TCHAR * _szObject = 0;
+            wchar_t * _szContainer = 0;
+            wchar_t * _szObject = 0;
             ::JET_OBJECTLIST _objectlist;
 
             _objectlist.cbStruct = sizeof( _objectlist );
@@ -4360,7 +4361,7 @@ namespace Isam
         virtual MJET_LOGINFOMISC MJetGetLogFileInfo(String^ logfile)
         {
             ::JET_LOGINFOMISC2 _loginfomisc;
-            _TCHAR * _szLogfile = 0;
+            wchar_t * _szLogfile = 0;
             try
             {
                 _szLogfile = GetUnmanagedString(logfile);
@@ -4416,7 +4417,7 @@ namespace Isam
         virtual MJET_DBINFO MJetGetDatabaseFileInfo(String^ database)
         {
             ::JET_DBINFOMISC _dbinfomisc;
-            _TCHAR * _szDatabase = 0;
+            wchar_t * _szDatabase = 0;
             try
             {
                 _szDatabase = GetUnmanagedString(database);
@@ -4436,7 +4437,7 @@ namespace Isam
         virtual MJET_DBINFO MJetGetDatabaseFileInfo(String^ database)
         {
             ::JET_DBINFOMISC4 _dbinfomisc4;
-            _TCHAR * _szDatabase = 0;
+            wchar_t * _szDatabase = 0;
             try
             {
                 _szDatabase = GetUnmanagedString(database);
@@ -4455,7 +4456,7 @@ namespace Isam
         virtual MJET_DBINFO MJetGetDatabaseFileInfo(String^ database)
         {
             ::JET_DBINFOMISC7 _dbinfomisc7;
-            _TCHAR * _szDatabase = 0;
+            wchar_t * _szDatabase = 0;
             try
             {
                 _szDatabase = GetUnmanagedString(database);
@@ -4594,7 +4595,7 @@ namespace Isam
             MJET_GRBIT grbit)
         {
             ::JET_INSTANCE _instance = GetUnmanagedInst( instance );
-            _TCHAR * _szDatabase = 0;
+            wchar_t * _szDatabase = 0;
 
             unsigned long _genFirstDivergedLog   = (unsigned long) genFirstDivergedLog;
             ::JET_GRBIT _grbit = (JET_GRBIT) grbit;
@@ -4621,7 +4622,7 @@ namespace Isam
             MJET_GRBIT grbit)
         {
             ::JET_INSTANCE _instance = GetUnmanagedInst( instance );
-            _TCHAR * _szDatabase = 0;
+            wchar_t * _szDatabase = 0;
             unsigned long _genMinRequired = (unsigned long) genMinRequired;
             unsigned long _genFirstDivergedLog   = (unsigned long) genFirstDivergedLog;
             unsigned long _genMaxRequired = (unsigned long) genMaxRequired;
@@ -4649,7 +4650,7 @@ namespace Isam
             MJET_GRBIT grbit)
         {
             ::JET_INSTANCE _instance = GetUnmanagedInst( instance );
-            _TCHAR * _szDatabase = 0;
+            wchar_t * _szDatabase = 0;
             unsigned long _pgnoStart = (unsigned long) pgnoStart;
             unsigned long _cpg = (unsigned long) cpg;
             ::JET_GRBIT _grbit = (JET_GRBIT) grbit;
@@ -4685,7 +4686,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
-            _TCHAR * _szTableName = 0;
+            wchar_t * _szTableName = 0;
             unsigned long _lPages = pages;
             unsigned long _lDensity = density;
             ::JET_TABLEID _tableid;
@@ -4768,7 +4769,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
-            _TCHAR * _szTableName = 0;
+            wchar_t * _szTableName = 0;
             try
             {
                 _szTableName = GetUnmanagedString(name);
@@ -4790,8 +4791,8 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
-            _TCHAR * _szName = 0;
-            _TCHAR * _szNameNew = 0;
+            wchar_t * _szName = 0;
+            wchar_t * _szNameNew = 0;
 
             try
             {
@@ -4819,7 +4820,7 @@ namespace Isam
 
             _columnbase.cbStruct = sizeof( _columnbase );
 
-            Call( JetGetTableColumnInfo( _sesid, _tableid, (_TCHAR *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
+            Call( JetGetTableColumnInfo( _sesid, _tableid, (wchar_t *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
             return MakeManagedColumnbase( _columnbase );
         }
 #endif
@@ -4835,7 +4836,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_COLUMNBASE _columnbase;
-            _TCHAR * _szTable = 0;
+            wchar_t * _szTable = 0;
             ::JET_COLUMNID _columnid = ::JET_COLUMNID( colid );
 
             _columnbase.cbStruct = sizeof( _columnbase );
@@ -4847,7 +4848,7 @@ namespace Isam
             {
                 _szTable = GetUnmanagedString( table );
 
-                Call( ::JetGetColumnInfo( _sesid, _dbid, _szTable, (_TCHAR *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoByColid ) );
+                Call( ::JetGetColumnInfo( _sesid, _dbid, _szTable, (wchar_t *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoByColid ) );
                 MJET_COLUMNID columnid = MakeManagedColumnid( _columnid, (MJET_COLTYP)_columnbase.coltyp, ( 1252 == _columnbase.cp ));
                 columnName = MJetGetColumnName( sesid, dbid, table, columnid );
             }
@@ -4863,7 +4864,7 @@ namespace Isam
             try
             {
                 _szTable = GetUnmanagedString( table );
-                Call( ::JetGetColumnInfo( _sesid, _dbid, _szTable, (_TCHAR *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
+                Call( ::JetGetColumnInfo( _sesid, _dbid, _szTable, (wchar_t *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
             }
             __finally
             {
@@ -4884,7 +4885,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_COLUMNBASE _columnbase;
-            _TCHAR * _szTable = 0;
+            wchar_t * _szTable = 0;
             ::JET_COLUMNID _columnid = GetUnmanagedColumnid( columnid );
 
             _columnbase.cbStruct = sizeof( _columnbase );
@@ -4894,7 +4895,7 @@ namespace Isam
             try
             {
                 _szTable = GetUnmanagedString( table );
-                Call( ::JetGetColumnInfo( _sesid, _dbid, _szTable, (_TCHAR *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoByColid ) );
+                Call( ::JetGetColumnInfo( _sesid, _dbid, _szTable, (wchar_t *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoByColid ) );
                 columnName = MJetGetColumnName( sesid, dbid, table, columnid );
             }
             __finally
@@ -4909,7 +4910,7 @@ namespace Isam
             try
             {
                 _szTable = GetUnmanagedString( table );
-                Call( ::JetGetColumnInfo( _sesid, _dbid, _szTable, (_TCHAR *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
+                Call( ::JetGetColumnInfo( _sesid, _dbid, _szTable, (wchar_t *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
             }
             __finally
             {
@@ -4932,7 +4933,7 @@ namespace Isam
 
             _columnbase.cbStruct = sizeof( _columnbase );
 
-            Call( JetGetTableColumnInfo( _sesid, _tableid, (_TCHAR *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
+            Call( JetGetTableColumnInfo( _sesid, _tableid, (wchar_t *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
             return MakeManagedColumnbase( _columnbase );
         }
 #endif
@@ -4944,7 +4945,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
             ::JET_COLUMNBASE _columnbase;
-            _TCHAR * _szColumn = 0;
+            wchar_t * _szColumn = 0;
 
             _columnbase.cbStruct = sizeof( _columnbase );
 
@@ -4971,8 +4972,8 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_COLUMNBASE _columnbase;
-            _TCHAR * _szTable = 0;
-            _TCHAR * _szColumn = 0;
+            wchar_t * _szTable = 0;
+            wchar_t * _szColumn = 0;
 
             _columnbase.cbStruct = sizeof( _columnbase );
 
@@ -5002,7 +5003,7 @@ namespace Isam
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_GRBIT _grbit = sortByColumnid ? JET_ColInfoListSortColumnid : JET_ColInfoList;
             ::JET_COLUMNLIST _columnlist;
-            _TCHAR * _szTable = 0;
+            wchar_t * _szTable = 0;
 
             _columnlist.cbStruct = sizeof( _columnlist );
 
@@ -5050,7 +5051,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR * _szColumnName = 0;
+            wchar_t * _szColumnName = 0;
             ::JET_COLUMNDEF _columndef = GetUnmanagedColumndef( definition );
             ::JET_COLUMNID _columnid;
             void * _pvDefault = 0;
@@ -5088,7 +5089,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR * _szColumnName = 0;
+            wchar_t * _szColumnName = 0;
 
             try
             {
@@ -5110,7 +5111,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR * _szColumnName = 0;
+            wchar_t * _szColumnName = 0;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
             try
             {
@@ -5133,8 +5134,8 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR * _szName = 0;
-            _TCHAR * _szNameNew = 0;
+            wchar_t * _szName = 0;
+            wchar_t * _szNameNew = 0;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
 
             try
@@ -5163,8 +5164,8 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
-            _TCHAR * _szTableName = 0;
-            _TCHAR * _szColumnName = 0;
+            wchar_t * _szTableName = 0;
+            wchar_t * _szColumnName = 0;
             void * _pvDefault = 0;
             int _cbDefault;
 
@@ -5191,7 +5192,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
             ::JET_INDEXLIST _indexlist;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szIndex = 0;
 
             _indexlist.cbStruct = sizeof( _indexlist );
 
@@ -5218,8 +5219,8 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_INDEXLIST _indexlist;
-            _TCHAR * _szTable = 0;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szTable = 0;
+            wchar_t * _szIndex = 0;
 
             _indexlist.cbStruct = sizeof( _indexlist );
 
@@ -5261,7 +5262,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::JET_INDEXLIST _indexlist;
-            _TCHAR * _szTable = 0;
+            wchar_t * _szTable = 0;
 
             _indexlist.cbStruct = sizeof( _indexlist );
 
@@ -5284,7 +5285,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
             unsigned long _ulDensity = 0;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szIndex = 0;
 
             try
             {
@@ -5309,8 +5310,8 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             unsigned long _ulDensity = 0;
-            _TCHAR * _szTable = 0;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szTable = 0;
+            wchar_t * _szIndex = 0;
 
             try
             {
@@ -5333,7 +5334,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
             ::LCID _lcid;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szIndex = 0;
 
             try
             {
@@ -5358,8 +5359,8 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             ::LCID _lcid;
-            _TCHAR * _szTable = 0;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szTable = 0;
+            wchar_t * _szIndex = 0;
 
             try
             {
@@ -5401,7 +5402,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
             unsigned short _cbKeyMost = 0;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szIndex = 0;
 
             try
             {
@@ -5426,8 +5427,8 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
             unsigned short _cbKeyMost = 0;
-            _TCHAR * _szTable = 0;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szTable = 0;
+            wchar_t * _szIndex = 0;
 
             try
             {
@@ -5452,7 +5453,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szIndex = 0;
             ULONG _cbData = 4*1024;
             void * _pvData = NULL;
             ::JET_ERR _err = JET_errSuccess;
@@ -5501,8 +5502,8 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
-            _TCHAR * _szTable = 0;
-            _TCHAR * _szIndex = 0;
+            wchar_t * _szTable = 0;
+            wchar_t * _szIndex = 0;
             ULONG _cbData = 4*1024;
             void * _pvData = NULL;
             ::JET_ERR _err = JET_errSuccess;
@@ -5556,9 +5557,9 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
-            _TCHAR * _szName = 0;
-            _TCHAR * _szKey = 0;
-            unsigned long _cbKey = (key->Length + 1) * sizeof(_TCHAR);
+            wchar_t * _szName = 0;
+            wchar_t * _szKey = 0;
+            unsigned long _cbKey = (key->Length + 1) * sizeof(wchar_t);
             unsigned long _lDensity = density;
 
             try
@@ -5643,7 +5644,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR * _szName = 0;
+            wchar_t * _szName = 0;
 
             try
             {
@@ -5796,7 +5797,7 @@ namespace Isam
             ::JET_SESID _sesid      = GetUnmanagedSesid( sesid );
             ::JET_DBID  _dbid       = GetUnmanagedDbid( dbid );
             const int   _cwchBuffer     = 1024;
-            _TCHAR      _rgwchBuffer[_cwchBuffer];
+            wchar_t      _rgwchBuffer[_cwchBuffer];
 
             Call( ::JetGetDatabaseInfo( _sesid, _dbid, _rgwchBuffer, sizeof( _rgwchBuffer ), JET_DbInfoFilename ) );
             return MakeManagedString( _rgwchBuffer );
@@ -5827,8 +5828,8 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
-            _TCHAR * _szFilename = 0;
-            _TCHAR * _szConnect = 0;
+            wchar_t * _szFilename = 0;
+            wchar_t * _szConnect = 0;
             ::JET_DBID _dbid;
 
             try
@@ -5905,7 +5906,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
-            _TCHAR * _szName = 0;
+            wchar_t * _szName = 0;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
             ::JET_TABLEID _tableid;
             void * _pvParameters = 0;
@@ -5956,7 +5957,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
             ::JET_DBID _dbid = GetUnmanagedDbid( dbid );
-            _TCHAR * _szName = 0;
+            wchar_t * _szName = 0;
             ::JET_TABLEID _tableid;
 
             tableid = *(new MJET_TABLEID());
@@ -6479,12 +6480,12 @@ namespace Isam
                     ::JET_COLUMNBASE _columnbase = { sizeof( ::JET_COLUMNBASE ) };
 
 #if (ESENT_WINXP)
-                    Call( ::JetGetTableColumnInfo( _sesid, _tableid, (_TCHAR *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoByColid ) );
+                    Call( ::JetGetTableColumnInfo( _sesid, _tableid, (wchar_t *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoByColid ) );
 
                     columns[ _iEnumColumn ].Columnid = MakeManagedColumnid( _columnid, (MJET_COLTYP)_columnbase.coltyp, ( 1252 == _columnbase.cp ) );
                     columns[ _iEnumColumn ].ColumnName = MJetGetColumnName( tableid, columns[ _iEnumColumn ].Columnid );
 #else
-                    Call( ::JetGetTableColumnInfo( _sesid, _tableid, (_TCHAR *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
+                    Call( ::JetGetTableColumnInfo( _sesid, _tableid, (wchar_t *)&_columnid, &_columnbase, sizeof( _columnbase ), JET_ColInfoBaseByColid ) );
 
                     columns[ _iEnumColumn ].Columnid = MakeManagedColumnid( _columnbase.columnid, (MJET_COLTYP)_columnbase.coltyp, ( 1252 == _columnbase.cp ) );
                     columns[ _iEnumColumn ].ColumnName = MakeManagedString( _columnbase.szBaseColumnName );
@@ -6752,7 +6753,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
 
-            _TCHAR _szName[JET_cbNameMost+1];
+            wchar_t _szName[JET_cbNameMost+1];
             Call( ::JetGetCurrentIndex( _sesid, _tableid, _szName, _countof( _szName ) ) );
 
             String ^ name = MakeManagedString( _szName );
@@ -6765,7 +6766,7 @@ namespace Isam
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
-            _TCHAR * _szIndexName = 0;
+            wchar_t * _szIndexName = 0;
 
             try
             {
@@ -6788,7 +6789,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
-            _TCHAR * _szIndexName = 0;
+            wchar_t * _szIndexName = 0;
 
             try
             {
@@ -6812,7 +6813,7 @@ namespace Isam
             ::JET_SESID _sesid = GetUnmanagedSesid( tableid.Sesid );
             ::JET_TABLEID _tableid = GetUnmanagedTableid( tableid );
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
-            _TCHAR * _szIndexName = 0;
+            wchar_t * _szIndexName = 0;
             unsigned long _itagSequence = (unsigned long)itag;
 
             try
@@ -6833,7 +6834,7 @@ namespace Isam
         JET_ERR JET_API MJetSetCurrentIndex4(
         JET_SESID       sesid,
         JET_TABLEID     tableid,
-        const _TCHAR        *szIndexName,
+        const wchar_t        *szIndexName,
         JET_INDEXID     *pindexid,
         JET_GRBIT       grbit,
         unsigned long   itagSequence );
@@ -7198,8 +7199,8 @@ namespace Isam
 
         JET_ERR JET_API MJetCompact(
         JET_SESID       sesid,
-        const _TCHAR        *szDatabaseSrc,
-        const _TCHAR        *szDatabaseDest,
+        const wchar_t        *szDatabaseSrc,
+        const wchar_t        *szDatabaseDest,
         JET_PFNSTATUS   pfnStatus,
         JET_CONVERT     *pconvert,
         JET_GRBIT       grbit );
@@ -7218,7 +7219,7 @@ namespace Isam
         {
             ::JET_SESID     _sesid              = GetUnmanagedSesid( sesid );
             ::JET_DBID      _dbid               = GetUnmanagedDbid( dbid );
-            _TCHAR *            _szTableName        = 0;
+            wchar_t *            _szTableName        = 0;
             ::JET_GRBIT     _grbit              = ( ::JET_GRBIT ) grbit;
             unsigned long   _cPasses            = passes;
             unsigned long   _cSeconds           = seconds;
@@ -7254,7 +7255,7 @@ namespace Isam
         {
             ::JET_SESID     _sesid              = GetUnmanagedSesid( sesid );
             ::JET_DBID      _dbid               = GetUnmanagedDbid( dbid );
-            _TCHAR *            _szTableName        = 0;
+            wchar_t *            _szTableName        = 0;
             ::JET_GRBIT     _grbit              = ( ::JET_GRBIT ) grbit;
             unsigned long   _cPasses            = passes;
             unsigned long   _cSeconds           = seconds;
@@ -7307,8 +7308,8 @@ namespace Isam
 
         JET_ERR JET_API MJetDefragment3(
         JET_SESID       vsesid,
-        const _TCHAR        *szDatabaseName,
-        const _TCHAR        *szTableName,
+        const wchar_t        *szDatabaseName,
+        const wchar_t        *szTableName,
         unsigned long   *pcPasses,
         unsigned long   *pcSeconds,
         JET_CALLBACK    callback,
@@ -7367,8 +7368,8 @@ namespace Isam
             MJET_GRBIT grbit)
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
-            _TCHAR * _szDbFilename = 0;
-            _TCHAR * _szSLVFilename = 0;
+            wchar_t * _szDbFilename = 0;
+            wchar_t * _szSLVFilename = 0;
             ::JET_GRBIT _grbit = ( ::JET_GRBIT ) grbit;
 
             try
@@ -7430,7 +7431,7 @@ namespace Isam
             Int64 pages)
         {
             ::JET_SESID _sesid = GetUnmanagedSesid( sesid );
-            _TCHAR * _szDatabase = 0;
+            wchar_t * _szDatabase = 0;
             unsigned long _cpg = (unsigned long)pages;;
             unsigned long _cpgReal;
 
@@ -7816,18 +7817,18 @@ namespace Isam
         /*
         UNDONE
 
-        JET_ERR JET_API MJetBackup( const _TCHAR *szBackupPath, JET_GRBIT grbit, JET_PFNSTATUS pfnStatus );
+        JET_ERR JET_API MJetBackup( const wchar_t *szBackupPath, JET_GRBIT grbit, JET_PFNSTATUS pfnStatus );
         JET_ERR JET_API MJetBackupInstance( JET_INSTANCE    instance,
-        const _TCHAR        *szBackupPath,
+        const wchar_t        *szBackupPath,
         JET_GRBIT       grbit,
         JET_PFNSTATUS   pfnStatus );
 
-        JET_ERR JET_API MJetRestore(const _TCHAR *sz, JET_PFNSTATUS pfn );
-        JET_ERR JET_API MJetRestore2(const _TCHAR *sz, const _TCHAR *szDest, JET_PFNSTATUS pfn );
+        JET_ERR JET_API MJetRestore(const wchar_t *sz, JET_PFNSTATUS pfn );
+        JET_ERR JET_API MJetRestore2(const wchar_t *sz, const wchar_t *szDest, JET_PFNSTATUS pfn );
 
         JET_ERR JET_API MJetRestoreInstance(    JET_INSTANCE instance,
-        const _TCHAR *sz,
-        const _TCHAR *szDest,
+        const wchar_t *sz,
+        const wchar_t *szDest,
         JET_PFNSTATUS pfn );
         */
 
@@ -7919,20 +7920,20 @@ namespace Isam
         unsigned long   cbMax,
         unsigned long   *pcbActual );
 
-        JET_ERR JET_API MJetOpenFile( const _TCHAR *szFilename,
+        JET_ERR JET_API MJetOpenFile( const wchar_t *szFilename,
         JET_HANDLE  *phfFile,
         unsigned long *pulFileSizeLow,
         unsigned long *pulFileSizeHigh );
 
         JET_ERR JET_API MJetOpenFileInstance(   JET_INSTANCE instance,
-        const _TCHAR *szFilename,
+        const wchar_t *szFilename,
         JET_HANDLE  *phfFile,
         unsigned long *pulFileSizeLow,
         unsigned long *pulFileSizeHigh );
 
         JET_ERR JET_API MJetOpenFileSectionInstance(
         JET_INSTANCE instance,
-        _TCHAR *szFile,
+        wchar_t *szFile,
         JET_HANDLE *phFile,
         long iSection,
         long cSections,
@@ -7989,24 +7990,24 @@ namespace Isam
 
         JET_ERR JET_API MJetEndExternalBackupInstance2( JET_INSTANCE instance, JET_GRBIT grbit );
 
-        JET_ERR JET_API MJetExternalRestore(    _TCHAR *szCheckpointFilePath,
-        _TCHAR *szLogPath,
+        JET_ERR JET_API MJetExternalRestore(    wchar_t *szCheckpointFilePath,
+        wchar_t *szLogPath,
         JET_RSTMAP *rgstmap,
         long crstfilemap,
-        _TCHAR *szBackupLogPath,
+        wchar_t *szBackupLogPath,
         long genLow,
         long genHigh,
         JET_PFNSTATUS pfn );
 
-        JET_ERR JET_API MJetExternalRestore2(   _TCHAR *szCheckpointFilePath,
-        _TCHAR *szLogPath,
+        JET_ERR JET_API MJetExternalRestore2(   wchar_t *szCheckpointFilePath,
+        wchar_t *szLogPath,
         JET_RSTMAP *rgstmap,
         long crstfilemap,
-        _TCHAR *szBackupLogPath,
+        wchar_t *szBackupLogPath,
         JET_LOGINFO * pLogInfo,
-        _TCHAR *szTargetInstanceName,
-        _TCHAR *szTargetInstanceLogPath,
-        _TCHAR *szTargetInstanceCheckpointPath,
+        wchar_t *szTargetInstanceName,
+        wchar_t *szTargetInstanceLogPath,
+        wchar_t *szTargetInstanceCheckpointPath,
         JET_PFNSTATUS pfn );
 
         JET_ERR JET_API MJetRegisterCallback(
@@ -8600,7 +8601,7 @@ namespace Isam
                 _indexcreate.cbStruct = sizeof( _indexcreate );
                 _indexcreate.szIndexName = GetUnmanagedString( indexcreate.IndexName );
                 _indexcreate.szKey = GetUnmanagedString( indexcreate.Key );
-                _indexcreate.cbKey = ( unsigned long )( indexcreate.Key->Length + 1 ) * sizeof(_TCHAR);
+                _indexcreate.cbKey = ( unsigned long )( indexcreate.Key->Length + 1 ) * sizeof(wchar_t);
                 _indexcreate.grbit = ( ::JET_GRBIT ) indexcreate.Grbit;
                 _indexcreate.ulDensity = ( unsigned long )indexcreate.Density;
                 _indexcreate.err = 0;
@@ -8707,7 +8708,7 @@ namespace Isam
                 _indexcreate.cbStruct = sizeof( _indexcreate );
                 _indexcreate.szIndexName = GetUnmanagedString( indexcreate.IndexName );
                 _indexcreate.szKey = GetUnmanagedString( indexcreate.Key );
-                _indexcreate.cbKey = ( unsigned long )( indexcreate.Key->Length + 1 ) * sizeof(_TCHAR);
+                _indexcreate.cbKey = ( unsigned long )( indexcreate.Key->Length + 1 ) * sizeof(wchar_t);
                 _indexcreate.grbit = ( ::JET_GRBIT ) indexcreate.Grbit;
                 _indexcreate.ulDensity = ( unsigned long )indexcreate.Density;
                 _indexcreate.err = 0;
@@ -9097,8 +9098,8 @@ namespace Isam
         {
             FreeUnmanagedString( _dbutil.szDatabase );
             FreeUnmanagedString( _dbutil.szBackup );
-            FreeUnmanagedString( (_TCHAR *)_dbutil.szTable );
-            FreeUnmanagedString( (_TCHAR *)_dbutil.szIndex );
+            FreeUnmanagedString( (wchar_t *)_dbutil.szTable );
+            FreeUnmanagedString( (wchar_t *)_dbutil.szIndex );
             FreeUnmanagedString( _dbutil.szIntegPrefix );
         }
 
@@ -11589,7 +11590,7 @@ HandleError:
         JET_ERR JET_API MJetSetCurrentIndex4(
         JET_SESID       sesid,
         JET_TABLEID     tableid,
-        const _TCHAR        *szIndexName,
+        const wchar_t        *szIndexName,
         JET_INDEXID     *pindexid,
         JET_GRBIT       grbit,
         unsigned long   itagSequence );
@@ -11794,8 +11795,8 @@ HandleError:
 
         JET_ERR JET_API MJetCompact(
         JET_SESID       sesid,
-        const _TCHAR        *szDatabaseSrc,
-        const _TCHAR        *szDatabaseDest,
+        const wchar_t        *szDatabaseSrc,
+        const wchar_t        *szDatabaseDest,
         JET_PFNSTATUS   pfnStatus,
         JET_CONVERT     *pconvert,
         JET_GRBIT       grbit );
@@ -11836,8 +11837,8 @@ HandleError:
 
         JET_ERR JET_API MJetDefragment3(
         JET_SESID       vsesid,
-        const _TCHAR        *szDatabaseName,
-        const _TCHAR        *szTableName,
+        const wchar_t        *szDatabaseName,
+        const wchar_t        *szTableName,
         unsigned long   *pcPasses,
         unsigned long   *pcSeconds,
         JET_CALLBACK    callback,
@@ -12093,18 +12094,18 @@ HandleError:
         /*
         UNDONE
 
-        JET_ERR JET_API MJetBackup( const _TCHAR *szBackupPath, JET_GRBIT grbit, JET_PFNSTATUS pfnStatus );
+        JET_ERR JET_API MJetBackup( const wchar_t *szBackupPath, JET_GRBIT grbit, JET_PFNSTATUS pfnStatus );
         JET_ERR JET_API MJetBackupInstance( JET_INSTANCE    instance,
-        const _TCHAR        *szBackupPath,
+        const wchar_t        *szBackupPath,
         JET_GRBIT       grbit,
         JET_PFNSTATUS   pfnStatus );
 
-        JET_ERR JET_API MJetRestore(const _TCHAR *sz, JET_PFNSTATUS pfn );
-        JET_ERR JET_API MJetRestore2(const _TCHAR *sz, const _TCHAR *szDest, JET_PFNSTATUS pfn );
+        JET_ERR JET_API MJetRestore(const wchar_t *sz, JET_PFNSTATUS pfn );
+        JET_ERR JET_API MJetRestore2(const wchar_t *sz, const wchar_t *szDest, JET_PFNSTATUS pfn );
 
         JET_ERR JET_API MJetRestoreInstance(    JET_INSTANCE instance,
-        const _TCHAR *sz,
-        const _TCHAR *szDest,
+        const wchar_t *sz,
+        const wchar_t *szDest,
         JET_PFNSTATUS pfn );
         */
 
@@ -12167,20 +12168,20 @@ HandleError:
         unsigned long   cbMax,
         unsigned long   *pcbActual );
 
-        JET_ERR JET_API MJetOpenFile( const _TCHAR *szFilename,
+        JET_ERR JET_API MJetOpenFile( const wchar_t *szFilename,
         JET_HANDLE  *phfFile,
         unsigned long *pulFileSizeLow,
         unsigned long *pulFileSizeHigh );
 
         JET_ERR JET_API MJetOpenFileInstance(   JET_INSTANCE instance,
-        const _TCHAR *szFilename,
+        const wchar_t *szFilename,
         JET_HANDLE  *phfFile,
         unsigned long *pulFileSizeLow,
         unsigned long *pulFileSizeHigh );
 
         JET_ERR JET_API MJetOpenFileSectionInstance(
         JET_INSTANCE instance,
-        _TCHAR *szFile,
+        wchar_t *szFile,
         JET_HANDLE *phFile,
         long iSection,
         long cSections,
@@ -12237,24 +12238,24 @@ HandleError:
 
         JET_ERR JET_API MJetEndExternalBackupInstance2( JET_INSTANCE instance, JET_GRBIT grbit );
 
-        JET_ERR JET_API MJetExternalRestore(    _TCHAR *szCheckpointFilePath,
-        _TCHAR *szLogPath,
+        JET_ERR JET_API MJetExternalRestore(    wchar_t *szCheckpointFilePath,
+        wchar_t *szLogPath,
         JET_RSTMAP *rgstmap,
         long crstfilemap,
-        _TCHAR *szBackupLogPath,
+        wchar_t *szBackupLogPath,
         long genLow,
         long genHigh,
         JET_PFNSTATUS pfn );
 
-        JET_ERR JET_API MJetExternalRestore2(   _TCHAR *szCheckpointFilePath,
-        _TCHAR *szLogPath,
+        JET_ERR JET_API MJetExternalRestore2(   wchar_t *szCheckpointFilePath,
+        wchar_t *szLogPath,
         JET_RSTMAP *rgstmap,
         long crstfilemap,
-        _TCHAR *szBackupLogPath,
+        wchar_t *szBackupLogPath,
         JET_LOGINFO * pLogInfo,
-        _TCHAR *szTargetInstanceName,
-        _TCHAR *szTargetInstanceLogPath,
-        _TCHAR *szTargetInstanceCheckpointPath,
+        wchar_t *szTargetInstanceName,
+        wchar_t *szTargetInstanceLogPath,
+        wchar_t *szTargetInstanceCheckpointPath,
         JET_PFNSTATUS pfn );
 
         JET_ERR JET_API MJetRegisterCallback(

@@ -26,6 +26,11 @@ namespace Internal
                     Invalid = (UInt16)::updnoInvalid,
 
                     /// <summary>
+                    /// The first update.
+                    /// </summary>
+                    First = (UInt16)::updnoFirst,
+
+                    /// <summary>
                     /// The maximum UpdateNumber.
                     /// </summary>
                     MaxValue = (UInt16)::updnoMax,

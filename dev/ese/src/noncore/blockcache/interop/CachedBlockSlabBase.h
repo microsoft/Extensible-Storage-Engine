@@ -66,6 +66,8 @@ namespace Internal
 
                         virtual bool IsDirty();
 
+                        virtual int InvalidSlotCount();
+
                         virtual void Save( ICachedBlockSlab::SlabSaved^ slabSaved );
                 };
 
@@ -427,6 +429,12 @@ namespace Internal
                 inline bool CachedBlockSlabBase<TM, TN, TW>::IsDirty()
                 {
                     return Pi->FDirty() ? true : false;
+                }
+
+                template<class TM, class TN, class TW>
+                inline int CachedBlockSlabBase<TM, TN, TW>::InvalidSlotCount()
+                {
+                    return Pi->CInvalidSlot();
                 }
 
                 template<class TM, class TN, class TW>

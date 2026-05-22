@@ -148,7 +148,7 @@ COSTimerTaskEntry::COSTimerTaskEntry(
         m_pvTaskGroupContext( (VOID *)pvTaskGroupContext ),
         m_pvTaskRuntimeContext( NULL ),
         m_semExec( CSyncBasicInfo( "COSTimerTaskEntry::m_semExec" ) ),
-        m_critSchedule( CLockBasicInfo( CSyncBasicInfo( _T( "m_critSchedule" ) ), rankTimerTaskEntry, 0 ) ),
+        m_critSchedule( CLockBasicInfo( CSyncBasicInfo( "m_critSchedule" ), rankTimerTaskEntry, 0 ) ),
         m_idSchedule( 0 ),
         m_idRun( 0 ),
         m_tidExec( DWORD( ~0 ) ),
@@ -319,7 +319,7 @@ typedef CInvasiveList< COSTimerTaskEntry, COSTimerTaskEntry::OffsetOfILE > COSTi
 
 COSTimerTaskEntryList g_ilTimerTaskList;
 
-CCriticalSection g_critTimerTaskList( CLockBasicInfo( CSyncBasicInfo( _T( "g_critTimerTaskList" ) ), rankTimerTaskList, 0 ) );
+CCriticalSection g_critTimerTaskList( CLockBasicInfo( CSyncBasicInfo( "g_critTimerTaskList" ), rankTimerTaskList, 0 ) );
 
 
 //  creates a task timer object

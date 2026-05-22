@@ -36,6 +36,7 @@ class ResMgrEmulatorNegativeTest : public UNITTEST
         ERR ErrDumpStatsNoInit_();
         ERR ErrDumpStatsNoExecute_();
         ERR ErrDumpStatsTerm_();
+        ERR ErrSubSamplingInvalidParams_();
 };
 
 ResMgrEmulatorNegativeTest ResMgrEmulatorNegativeTest::s_instance;
@@ -62,6 +63,7 @@ ERR ResMgrEmulatorNegativeTest::ErrTest()
     TestCall( ErrDumpStatsNoInit_() );
     TestCall( ErrDumpStatsNoExecute_() );
     TestCall( ErrDumpStatsTerm_() );
+    TestCall( ErrSubSamplingInvalidParams_() );
 
 HandleError:
     return err;
@@ -271,6 +273,31 @@ ERR ResMgrEmulatorNegativeTest::ErrDumpStatsTerm_()
 HandleError:
 
     emulator.Term();
+    BFFTLTerm( pbfftlc );
+
+    return err;
+}
+
+//  ================================================================
+ERR ResMgrEmulatorNegativeTest::ErrSubSamplingInvalidParams_()
+//  ================================================================
+{
+    ERR err = JET_errSuccess;
+
+    printf( "\t%s\r\n", __FUNCTION__ );
+
+    PageEvictionEmulator& emulator = PageEvictionEmulator::GetEmulatorObj();
+    BFFTLContext* pbfftlc = NULL;
+    BFTRACE bftrace = { 0 };
+    bftrace.traceid = bftidInvalid;
+    PageEvictionAlgorithmLRUTest algorithm;
+
+    TestCall( ErrBFFTLInit( &bftrace, fBFFTLDriverTestMode, &pbfftlc ) );
+
+    TestCheck( emulator.ErrSetSamplingParameters( 0, 0 ) == JET_errInvalidParameter );
+
+HandleError:
+
     BFFTLTerm( pbfftlc );
 
     return err;

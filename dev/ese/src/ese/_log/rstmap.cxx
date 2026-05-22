@@ -547,6 +547,7 @@ ERR ErrRstmapSoftCheckDBFiles( INST *pinst, RSTMAP * pDbMapEntry )
                             pinst,
                             pinst->m_pfsapi,
                             wszDatabase,
+                            JET_filetypeDatabase,
                             (BYTE*)pdbfilehdrDb,
                             g_cbPage,
                             OffsetOf( DBFILEHDR_FIX, le_cbPageSize ),

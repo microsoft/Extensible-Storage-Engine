@@ -6,6 +6,8 @@
 
 // Required for std::move()
 #include <utility>
+// Required for wprintf
+#include <stdio.h>
 
 class TRACEINFO
 {

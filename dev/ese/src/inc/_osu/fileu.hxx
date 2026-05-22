@@ -28,6 +28,7 @@ typedef struct tagDbHeaderReader
 {
     ShadowedHeaderRequest       shadowedHeaderRequest;      // in
     const WCHAR*                wszFileName;                // in
+    ULONG                       filetype;                   // in 
     BYTE*                       pbHeader;                   // in
     DWORD                       cbHeader;                   // in
     LONG                        ibPageSize;                 // in
@@ -58,6 +59,7 @@ ERR ErrUtilReadShadowedHeader(
     const INST* const               pinst,
     IFileSystemAPI* const           pfsapi,
     const WCHAR* const              wszFilePath,
+    _In_ const ULONG                filetype,
     __out_bcount( cbHeader ) BYTE*  pbHeader,
     const DWORD                     cbHeader,
     const LONG                      ibPageSize,
@@ -69,6 +71,7 @@ ERR ErrUtilReadShadowedHeader(
     const INST* const               pinst,
     IFileSystemAPI* const           pfsapi,
     IFileAPI* const                 pfapi,
+    _In_ const ULONG                filetype,
     __out_bcount( cbHeader ) BYTE*  pbHeader,
     const DWORD                     cbHeader,
     const LONG                      ibPageSize,

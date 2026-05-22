@@ -92,55 +92,55 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( 0 == cbAllocated );
 
     // Beyond EOF sparse segments only.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, 0, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 0 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 0 == (*parrsparseseg)[0].ibLast );
 
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 0 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 1 == (*parrsparseseg)[0].ibLast );
 
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, 1000, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 0 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 1000 == (*parrsparseseg)[0].ibLast );
 
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 1, 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 1 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 1 == (*parrsparseseg)[0].ibLast );
 
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 1, 2, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 1 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 2 == (*parrsparseseg)[0].ibLast );
 
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 1, 1000, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 1 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 1000 == (*parrsparseseg)[0].ibLast );
 
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 1000, 1000, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 1000 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 1000 == (*parrsparseseg)[0].ibLast );
 
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 1000, 1001, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 1000 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 1001 == (*parrsparseseg)[0].ibLast );
 
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 1000, 2000, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 1000 == (*parrsparseseg)[0].ibFirst );
@@ -196,12 +196,12 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( qwOnDiskSize == qwSize );
 
     // When the entire file is allocated, there should be no sparse segments.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 0 == parrsparseseg->Size() );
 
     // Also check if the region does not start at the beginning.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 65536, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 0 == parrsparseseg->Size() );
 
@@ -223,7 +223,7 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( qwOnDiskSize == cbExpectedSize );
 
     // We should only see the single 64k block.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( (128*1024) == (*parrsparseseg)[0].ibFirst );
@@ -276,80 +276,80 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( 0 == cbAllocated );
 
     // It will be at offset 64k, until 192k
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 65536 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( (64+128)*1024 - 1 == (*parrsparseseg)[0].ibLast );
 
     // The sparse range is [64k,192k]. Asking for [64k,128k] and [128k,192k] should return just that range.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 65536, 131072 - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 65536 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 131072 - 1 == (*parrsparseseg)[0].ibLast );
 
     // The sparse range is [64k,192k]. Asking for [64k,128k] and [128k,192k] should return just that range.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 131072, (192*1024) - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 131072 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 192*1024 - 1 == (*parrsparseseg)[0].ibLast );
 
     // Query up to immediately before.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, (64*1024) - 1, parrsparseseg ) );
     OSTestCheck( 0 == parrsparseseg->Size() );
 
     // Query up to immediately before.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 10, (64*1024) - 1, parrsparseseg ) );
     OSTestCheck( 0 == parrsparseseg->Size() );
 
     // Query up to the first byte.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, (64*1024), parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( (64*1024) == (*parrsparseseg)[0].ibLast );
 
     // Query up to the second byte.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, (64*1024) + 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( (64*1024) + 1 == (*parrsparseseg)[0].ibLast );
 
     // Query up to one byte shy of the last.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, (192*1024) - 2, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( (192*1024) - 2 == (*parrsparseseg)[0].ibLast );
 
     // Query up to the last byte.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, (192*1024) - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( (192*1024) - 1 == (*parrsparseseg)[0].ibLast );
 
     // Query up to one byte past the last.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, (192*1024), parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( (192*1024) - 1 == (*parrsparseseg)[0].ibLast );
 
     // Segment is fully contained.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, (64*1024) + 10, (192*1024) - 10, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) + 10 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( (192*1024) - 10 == (*parrsparseseg)[0].ibLast );
 
     // Segment is partially contained.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, (64*1024) + 10, (192*1024) + 10, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) + 10 == (*parrsparseseg)[0].ibFirst );
@@ -371,14 +371,14 @@ ERR TestSparseFile::ErrTest()
     // Specifying a range that goes beyond EOF:
     // It believes that anything beyond EOF is 'sparse', and in a way it is: There is no
     // backing storage at the moment, and the FS will allocate storage for a write.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, cbTotal - 65536, cbTotal + 65536 - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( cbTotal == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( cbTotal + 65536 - 1 == (*parrsparseseg)[0].ibLast );
 
     // Truly sparse + EOF.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, cbTotal + 65536 - 1, parrsparseseg ) );
     OSTestCheck( 2 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) == (*parrsparseseg)[0].ibFirst );
@@ -387,7 +387,7 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( cbTotal + 65536 - 1 == (*parrsparseseg)[1].ibLast );
 
     // Truly sparse + EOF.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, (64*1024) + 10, cbTotal + 65536 - 1, parrsparseseg ) );
     OSTestCheck( 2 == parrsparseseg->Size() );
     OSTestCheck( (64*1024) + 10 == (*parrsparseseg)[0].ibFirst );
@@ -408,21 +408,21 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( 0 == cbAllocated );
 
     // It will be at offset ibAlmostEnd.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, ibAlmostEnd - 65536, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( ibAlmostEnd == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( qwSize - 1 == (*parrsparseseg)[0].ibLast );
 
     // It will be at offset ibAlmostEnd.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, ibAlmostEnd, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( ibAlmostEnd == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( qwSize - 1 == (*parrsparseseg)[0].ibLast );
 
     // There are two different sparse regions. We should see both of them:
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 131072, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 2 == parrsparseseg->Size() );
     OSTestCheck( 131072 == (*parrsparseseg)[0].ibFirst );
@@ -435,21 +435,21 @@ ERR TestSparseFile::ErrTest()
     //
 
     // Specifying a range that goes beyond EOF will not be well defined.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, ibAlmostEnd - 65536, cbTotal + 65536 - 1, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( ibAlmostEnd == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( cbTotal + 65536 - 1 == (*parrsparseseg)[0].ibLast );
 
     // Specifying unaligned ranges:
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 65*1024 + 1, 100*1024, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 65*1024 + 1 == (*parrsparseseg)[0].ibFirst );
     OSTestCheck( 100*1024 == (*parrsparseseg)[0].ibLast );
 
     // Specifying unaligned start/end (but outside of the sparse region):
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 1, 200*1024, parrsparseseg ) );
     OSTestCheck( 1 == parrsparseseg->Size() );
     OSTestCheck( 64*1024 == (*parrsparseseg)[0].ibFirst );
@@ -467,7 +467,7 @@ ERR TestSparseFile::ErrTest()
     //  Sparse = { [64k,192k], [512k,576k], [960k,1024k] }.
 
     // There are multiple regions. We should see all of them.
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 3 == parrsparseseg->Size() );
     OSTestCheck( 64*1024 == (*parrsparseseg)[0].ibFirst );
@@ -478,7 +478,7 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( cbTotal - 1 == (*parrsparseseg)[2].ibLast );
 
     // There are multiple regions. We should see all of them (+ EOF).
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, cbTotal + 10, parrsparseseg ) );
     OSTestCheck( 3 == parrsparseseg->Size() );
     OSTestCheck( 64*1024 == (*parrsparseseg)[0].ibFirst );
@@ -489,7 +489,7 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( cbTotal + 10 == (*parrsparseseg)[2].ibLast );
 
     // There are multiple regions. We should see all of them (start from middle of first one).
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 131072, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 3 == parrsparseseg->Size() );
     OSTestCheck( 131072 == (*parrsparseseg)[0].ibFirst );
@@ -500,7 +500,7 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( cbTotal - 1 == (*parrsparseseg)[2].ibLast );
 
     // The query range stopping at the beginning of the last sparse region should not get confused:
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 131072, ibAlmostEnd - 1, parrsparseseg ) );
     OSTestCheck( 2 == parrsparseseg->Size() );
     OSTestCheck( 131072 == (*parrsparseseg)[0].ibFirst );
@@ -509,7 +509,7 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( 576*1024 - 1 == (*parrsparseseg)[1].ibLast );
 
     // The query range stopping in the middle of the last sparse region should not get confused:
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 131072, cbTotal - 32768 - 1, parrsparseseg ) );
     OSTestCheck( 3 == parrsparseseg->Size() );
     OSTestCheck( 131072 == (*parrsparseseg)[0].ibFirst );
@@ -520,7 +520,7 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( cbTotal-32768 - 1 == (*parrsparseseg)[2].ibLast );
 
     // The query range stopping in the middle of the sparse region in the middle of the file should not get confused:
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 131072, (512+32)*1024 - 1, parrsparseseg ) );
     OSTestCheck( 2 == parrsparseseg->Size() );
     OSTestCheck( 131072 == (*parrsparseseg)[0].ibFirst );
@@ -529,7 +529,7 @@ ERR TestSparseFile::ErrTest()
     OSTestCheck( (512+32)*1024 - 1 == (*parrsparseseg)[1].ibLast );
 
     // The query range starting at the beginning of an allocated region should not get confused:
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, (128+64)*1024, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 2 == parrsparseseg->Size() );
     OSTestCheck( 512*1024 == (*parrsparseseg)[0].ibFirst );
@@ -545,7 +545,7 @@ ERR TestSparseFile::ErrTest()
     //  Sparse = { [0k,192k], [512k,576k], [960k,1024k] }.
 
     // The query range starting at the beginning of an allocated regionshould not get confused:
-    OSTestCheck( CArray<SparseFileSegment>::ERR::errSuccess == parrsparseseg->ErrSetSize( 0 ) );
+    parrsparseseg->Clear();
     OSTestCheckErr( ErrIORetrieveSparseSegmentsInRegion( pfapi, 0, cbTotal - 1, parrsparseseg ) );
     OSTestCheck( 3 == parrsparseseg->Size() );
     OSTestCheck( 0 == (*parrsparseseg)[0].ibFirst );

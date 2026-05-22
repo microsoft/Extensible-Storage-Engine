@@ -1178,13 +1178,15 @@ ERR ErrLGGetAfterImage(
         if ( ibOffsetOld < 0 )
         {
             AssertSz( fFalse, "Buffer underrun detected in ErrLGGetAfterImage: ibOffsetOld < 0" );
-            Call( ErrERRCheck( JET_errLogFileCorrupt ) );
+            OSUHAEmitFailureTag( PinstFromIfmp( ifmp ), HaDbFailureTagLogLogicallyInconsistent, L"6d68938e-f163-4a3a-b742-683e6bfbbef1" );
+            Call( ErrERRCheck( JET_errLogCorrupted ) );
         }
         
         if ( pbOld + ibOffsetOld < pbOldCur )
         {
             AssertSz( fFalse, "Buffer underrun detected in ErrLGGetAfterImage, pbOld + ibOffsetOld < pbOldCur" );
-            Call( ErrERRCheck( JET_errLogFileCorrupt ) );
+            OSUHAEmitFailureTag( PinstFromIfmp( ifmp ), HaDbFailureTagLogLogicallyInconsistent, L"e6959992-a3c5-4849-9eea-49185cd840c9" );
+            Call( ErrERRCheck( JET_errLogCorrupted ) );
         }
         
         cbSkip = pbOld + ibOffsetOld - pbOldCur;
@@ -1192,7 +1194,8 @@ ERR ErrLGGetAfterImage(
              (INT_PTR)cbSkip < 0 )
         {
             AssertSz( fFalse, "Buffer corruption detected in ErrLGGetAfterImage" );
-            Call( ErrERRCheck( JET_errLogFileCorrupt ) );
+            OSUHAEmitFailureTag( PinstFromIfmp( ifmp ), HaDbFailureTagLogLogicallyInconsistent, L"0d959afa-737b-4697-933d-8432d92b1ef0" );
+            Call( ErrERRCheck( JET_errLogCorrupted ) );
         }
         
         UtilMemCpy( pbNewCur, pbOldCur, cbSkip );
@@ -1214,7 +1217,8 @@ ERR ErrLGGetAfterImage(
              cbDataNew < 0)
         {
             AssertSz( fFalse, "Stack corruption detected in ErrLGGetAfterImage after UtilMemCpy called" );
-            Call( ErrERRCheck( JET_errLogFileCorrupt ) );
+            OSUHAEmitFailureTag( PinstFromIfmp( ifmp ), HaDbFailureTagLogLogicallyInconsistent, L"bc55b9ec-ad44-4821-be93-8513e3b6bcf4" );
+            Call( ErrERRCheck( JET_errLogCorrupted ) );
         }
         
         if ( diffhdr2.FInsert() )
@@ -1252,12 +1256,14 @@ ERR ErrLGGetAfterImage(
         if ( pbDiffCur > pbDiffMax )
         {
             AssertSz( fFalse, "Buffer overrun detected in ErrLGGetAfterImage, pbDiffCur > pbDiffMax" );
-            Call( ErrERRCheck( JET_errLogFileCorrupt ) );
+            OSUHAEmitFailureTag( PinstFromIfmp( ifmp ), HaDbFailureTagLogLogicallyInconsistent, L"91c1d32d-3430-485e-b4c4-ed57145a8460" );
+            Call( ErrERRCheck( JET_errLogCorrupted ) );
         }
         if ( pbOldCur > pbOld + cbOld )
         {
             AssertSz( fFalse, "Buffer overrun detected in ErrLGGetAfterImage, pbOldCur > pbOld + cbOld" );
-            Call( ErrERRCheck( JET_errLogFileCorrupt ) );
+            OSUHAEmitFailureTag( PinstFromIfmp( ifmp ), HaDbFailureTagLogLogicallyInconsistent, L"bee21012-3b13-4655-9918-7e1d30312bce" );
+            Call( ErrERRCheck( JET_errLogCorrupted ) );
         }
     }
 
@@ -1268,7 +1274,8 @@ ERR ErrLGGetAfterImage(
     if ( pbNewCur + cbT - pbNew > g_rgfmp[ ifmp ].CbPage() )
     {
         AssertSz( fFalse, "Buffer overrun detected in ErrLGGetAfterImage: data generated is larger than a page" );
-        Call( ErrERRCheck( JET_errLogFileCorrupt ) );
+        OSUHAEmitFailureTag( PinstFromIfmp( ifmp ), HaDbFailureTagLogLogicallyInconsistent, L"b8e53971-65f2-492d-b0a6-07bd404ba4bd" );
+        Call( ErrERRCheck( JET_errLogCorrupted ) );
     }
     
     UtilMemCpy( pbNewCur, pbOldCur, cbT );

@@ -271,6 +271,16 @@ VOID PIB::AssertNoDeferredRceid() const
     AssertRTL( m_redblacktreeRceidDeferred.FEmpty() );
 }
 
+#ifdef DEBUG
+//  ================================================================
+ERR PIB::FDeferredRceid( const RCEID& rceid )
+//  ================================================================
+{
+    Assert( rceidNull != rceid );
+    return ( CRedBlackTree<RCEID,PGNO>::ERR::errSuccess == m_redblacktreeRceidDeferred.ErrFind( rceid ));
+}
+#endif
+
 //  ================================================================
 ERR PIB::ErrRegisterRceid( const RCEID rceid, RCE * const prce)
 //  ================================================================
@@ -345,6 +355,10 @@ void PIB::DecrementLevel()
     m_trxidstack.Pop();
     --m_level;
     Assert(m_level >= 0);
+    if ( m_level == 0 )
+    {
+        m_fDupedTransaction = fFalse;
+    }
 }
     
 //  ================================================================
@@ -959,6 +973,39 @@ ERR VTAPI ErrIsamResetSessionContext( JET_SESID sesid )
     CallR( ppib->ErrPIBCheckCorrectSessionContext() );
 
     ppib->PIBResetSessionContext( fTrue );
+
+    return JET_errSuccess;
+}
+
+ERR PIB::ErrDupReadOnlyTransaction( PIB *ppibCopyFrom )
+{
+    ERR err = JET_errSuccess;
+    Assert( ppibCopyFrom->FReadOnlyTrx() );
+    Assert( ppibCopyFrom->Level() == 1 );
+    Assert( Level() == 0 );
+
+    // Copy all the user context, like commit-context/cache-priority/tracing-context
+    CallR( ErrSetClientCommitContextGeneric( ppibCopyFrom->PvClientCommitContextGeneric(), ppibCopyFrom->CbClientCommitContextGeneric() ) );
+    m_fCommitContextContainsCustomerData = ppibCopyFrom->m_fCommitContextContainsCustomerData;
+    m_fCommitContextNeedPreCommitCallback = ppibCopyFrom->m_fCommitContextNeedPreCommitCallback;
+    m_pctCachePriority = ppibCopyFrom->m_pctCachePriority;
+    m_grbitUserIoPriority = ppibCopyFrom->m_grbitUserIoPriority;
+    m_qosIoPriority = ppibCopyFrom->m_qosIoPriority;
+    m_utc.DeepCopy( ppibCopyFrom->m_utc );
+    static_assert( JET_sesparamCommitContextNeedPreCommitCallback /* last known */ + 1 == JET_sesparamMaxValueInvalid, "Please make sure you add duping of new sesparam here and update assert" );
+
+    // Now set session context so the new session can be moved if needed to another thread
+    CallS( ErrPIBSetSessionContext( ppibCopyFrom->dwTrxContext ) );
+    PIBSetTrxContext();
+
+    SetFReadOnlyTrx();
+
+    PIBSetTrxBegin0( ppibCopyFrom );
+
+    CallS( ErrLGBeginTransaction( this ) );
+    VERBeginTransaction( this, ppibCopyFrom->m_trxidstack.Peek0() );
+
+    m_fDupedTransaction = fTrue;
 
     return JET_errSuccess;
 }

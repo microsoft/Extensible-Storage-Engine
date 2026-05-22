@@ -11,6 +11,16 @@
 BOOL    g_fDBGPerfOutput = fFalse;
 #endif  /* DEBUG || PERFDUMP */
 
+//  This is here, because jettest.cxx is only compiled in eselibwithtest.dll
+
+#ifndef ENABLE_JET_UNIT_TEST
+
+BOOL FInEmbeddedUnitTest()
+{
+    return fFalse;
+}
+
+#endif // ENABLE_JET_UNIT_TEST
 
 #ifdef DEBUG
 
@@ -561,8 +571,8 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         else
         {
             // allow for improper usage in test (e.g.: terminating the instance
-            // with an outstanding transaction).
-            if ( !FNegTest( fInvalidUsage ) )
+            // with an outstanding transaction) or instance unavailable.
+            if ( !FNegTest( fInvalidUsage ) && !FInstanceUnavailable() )
             {
                 FCBAssertAllClean( this );
             }

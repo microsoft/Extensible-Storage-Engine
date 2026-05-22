@@ -419,11 +419,13 @@ if ( $#rgsEvents != $#rgcEventFieldCounts ){
 #   -----------------------------------------------------------------------------------------------------------------------------------------
 
 # It walks through the .mc file looking for four insert markers ...
-#   A. ESE_ETW_AUTOGEN_TASK_LIST_BEGIN - The <task name="xxx" value="yyy" /> entries.
-#   B. ESE_ETW_AUTOGEN_TEMPLATE_LIST_BEGIN - The templates and where we process the rest of the hEtwPregenData for the template
+#   A. ESE_ETW_AUTOGEN_KEYWORD_LIST_BEGIN -  The <keyword name=xxx mask=yyy /> entries are parsed to generate the enum
+#      OSEventTraceKeywordGUID.
+#   B. ESE_ETW_AUTOGEN_TASK_LIST_BEGIN - The <task name="xxx" value="yyy" /> entries.
+#   C. ESE_ETW_AUTOGEN_TEMPLATE_LIST_BEGIN - The templates and where we process the rest of the hEtwPregenData for the template
 #      arguments.
-#   C. ESE_ETW_AUTOGEN_EVENT_LIST_BEGIN - The <event ...> entries.
-#   D. ESE_ETW_AUTOGEN_STRING_LIST_BEGIN - The event's matching <string ...> entries.
+#   D. ESE_ETW_AUTOGEN_EVENT_LIST_BEGIN - The <event ...> entries.
+#   E. ESE_ETW_AUTOGEN_STRING_LIST_BEGIN - The event's matching <string ...> entries.
 #
 
 
@@ -440,15 +442,23 @@ my $fInTaskList = 0;
 my $fInTemplateList = 0;
 my $fInEventList = 0;
 my $fInStringList = 0;
+my $fInKeywordList = 0;
 
 my $fPastFirst = 0;
 my $fCurrInsertDone = 0;
+
+my $keyword = {};
+my $fCurrParsingKeyword = 0;
 
 while( $szMcLine = <hEtwBaseMc> ) {
 
 	#	We pass through almost all lines, without any alteration.
 
 	# We have to pass through to new.mc all these marker lines, as we need it the next time this script runs as well. ;)
+	if ( $szMcLine =~ /<!--ESE_ETW_AUTOGEN_KEYWORD_LIST_BEGIN-->/ ){
+		# Line is passed through later
+		$fInKeywordList = 1;
+	}
 	if ( $szMcLine =~ /<!--ESE_ETW_AUTOGEN_TASK_LIST_BEGIN-->/ ){
 		print hEtwNewMc $szMcLine;
 		$fInTaskList = 1;
@@ -466,7 +476,51 @@ while( $szMcLine = <hEtwBaseMc> ) {
 		$fInStringList = 1;
 	}
 
-	if ( $fInTaskList ){
+	if ( $fInKeywordList ){
+
+		if ( $szMcLine =~ /<keyword\s*$/ ){
+			if ( $fCurrParsingKeyword ){
+				die "ERROR: Starting to parse a keyword without having completed the previous parsing.\n";
+			}
+			$keyword = {};
+			$keyword->{Name} = -1;
+			$keyword->{Mask} = -1;
+			$fCurrParsingKeyword = 1;
+		}
+
+		elsif ( $szMcLine =~ /\/>/ ){
+			# Keywords should have a mask and a name
+			if ( !$fCurrParsingKeyword ){
+				die "ERROR: Cannot complete the parsing of a keyword without starting it.\n";
+			}
+			if ( $keyword->{Name} == -1 ){
+				die "ERROR: Parsed a keyword without a name in $szEtwBaseMc.\n";
+			}
+			if ( $keyword->{Mask} == -1 ){
+				die "ERROR: Keyword $keyword->{Name} does not have a mask in $szEtwBaseMc.\n";
+			}
+			push @rgsKeywords, $keyword;
+			$fCurrParsingKeyword = 0;
+		}
+
+		elsif ( $szMcLine =~ /mask="0x[0-9]*"\s*$/ ){
+			@MaskParsing = split /\s*"\s*/, $szMcLine;
+			$keyword->{Mask} = @MaskParsing[1];
+		}
+
+		elsif ( $szMcLine =~ /name=".*"\s*$/ ){
+			@NameParsing = split /\s*"\s*/, $szMcLine;
+			$keyword->{Name} = @NameParsing[1];
+		}
+
+		if ( $szMcLine =~ /<!--ESE_ETW_AUTOGEN_KEYWORD_LIST_END-->/ ){
+			$fInKeywordList = 0;
+		}
+
+		# pass the $line through unaltered for printing
+		print hEtwNewMc $szMcLine;
+
+	} elsif ( $fInTaskList ){
 
 		if ( !$fCurrInsertDone ){
 
@@ -617,6 +671,12 @@ while( $szMcLine = <hEtwBaseMc> ) {
 
 }
 
+if ( $iPrintLevel >= 2 ){
+	print "Keywords found in $szEtwBaseMc \n";
+	for $i ( 0 ... $#rgsKeywords ){
+		print "\t\tEtwKeyword[$i]       = { $rgsKeywords[$i]{Name}, $rgsKeywords[$i]{Mask} }\n";
+	}
+}
 
 #   -----------------------------------------------------------------------------------------------------------------------------------------
 #
@@ -652,9 +712,21 @@ for $i ( 0 .. $#rgsEvents ){
 
 }
 
-print hOsEventTraceHxxHdrIns <<__OSEVENTTRACEHXXEPILOG__;
+print hOsEventTraceHxxHdrIns <<__OSEVENTTRACEHXXMIDDLE__;
 
     etguidOsTraceBase   // general tags autogen'd before this one
+};
+
+enum OSEventTraceKeywordGUID : ULONGLONG
+{
+__OSEVENTTRACEHXXMIDDLE__
+
+for $i ( 0 .. $#rgsKeywords ){
+	# example:  _etguidKeywordBfResMgr = 0x00000400,
+	print hOsEventTraceHxxHdrIns "    _etguidKeyword$rgsKeywords[$i]{Name} = $rgsKeywords[$i]{Mask},\n";
+}
+
+print hOsEventTraceHxxHdrIns <<__OSEVENTTRACEHXXEPILOG__;
 };
 
 __OSEVENTTRACEHXXEPILOG__

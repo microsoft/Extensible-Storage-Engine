@@ -112,7 +112,7 @@ INLINE ERR CCacheFactory::ErrCreate(    _In_    IFileSystemFilter* const        
 
     //  flush the caching file
 
-    Call( (*ppffCaching)->ErrFlushFileBuffers( iofrBlockCache ) );
+    Call( (*ppffCaching)->ErrFlushFileBuffers( iofrBlockCache, ffmAll ) );
 
     //  get the block cache configuration
 

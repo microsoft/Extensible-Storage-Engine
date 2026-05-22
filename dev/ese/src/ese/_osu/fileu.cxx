@@ -196,79 +196,63 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
     //
     for ( cbPageCandidate = cbPageCandidateMin ; cbPageCandidate <= cbPageCandidateMax && cbAlloc > 0 ; cbPageCandidate *= 2 )
     {
-        if ( FRangeContains( ibRead, cbRead, 0 * cbPageCandidate, cbPageCandidate ) ||
-                ( cbAlloc >= cbPageCandidate &&
-                    pfapiRead->ErrIORead( *tcHeader, QWORD( 0 * cbPageCandidate ), cbPageCandidate, pbRead + 0 * cbPageCandidate, qos ) >= JET_errSuccess ) )
+        for ( int i = 0; i < 2; i++ )
         {
-            ChecksumPage(   pbRead + 0 * cbPageCandidate,
-                            cbPageCandidate,
-                            databaseHeader,
-                            0,
-                            &checksumExpected,
-                            &checksumActual );
-            if (    checksumActual == checksumExpected ||
-                    BoolParam( JET_paramDisableBlockVerification ) )
+            if ( FRangeContains( ibRead, cbRead, i * cbPageCandidate, cbPageCandidate ) ||
+                    ( cbAlloc >= ( i + 1 ) * cbPageCandidate &&
+                        pfapiRead->ErrIORead( *tcHeader, QWORD( i * cbPageCandidate ), cbPageCandidate, pbRead + i * cbPageCandidate, qos ) >= JET_errSuccess ) )
             {
-                if ( ibPageSize >= 0 )
+                ChecksumPage(   pbRead + i * cbPageCandidate,
+                                cbPageCandidate,
+                                databaseHeader,
+                                0,
+                                &checksumExpected,
+                                &checksumActual );
+                if (    checksumActual == checksumExpected ||
+                        BoolParam( JET_paramDisableBlockVerification ) )
                 {
-                    if ( cbPageCandidate >= ibPageSize + sizeof( UnalignedLittleEndian<ULONG> ) )
+                    const ULONG filetype = *( ( UnalignedLittleEndian<ULONG>* )( pbRead + i * cbPageCandidate + offsetof( DBFILEHDR, le_filetype ) ) );
+                    if ( pdbHdrReader->filetype == JET_filetypeUnknown )
                     {
-                        ULONG cbPageHeader = *( (UnalignedLittleEndian<ULONG> *)( pbRead + 0 * cbPageCandidate + ibPageSize ) );
-                        if ( FValidCbPage( cbPageHeader ) )
+                    }
+                    else if ( filetype == pdbHdrReader->filetype )
+                    {
+                    }
+                    else if ( filetype == JET_filetypeTempDatabase && pdbHdrReader->filetype == JET_filetypeDatabase )
+                    {
+                    }
+                    else if ( BoolParam( JET_paramDisableBlockVerification ) )
+                    {
+                    }
+                    else
+                    {
+                        Error( ErrERRCheck( JET_errFileInvalidType ) );
+                    }
+
+                    ULONG& cbPageOutput = i == 0 ? cbPagePrimary : cbPageSecondary;
+                    if ( ibPageSize >= 0 )
+                    {
+                        if ( cbPageCandidate >= ibPageSize + sizeof( UnalignedLittleEndian<ULONG> ) )
                         {
-                            if ( cbPageHeader == 0 )
+                            ULONG cbPageHeader = *( (UnalignedLittleEndian<ULONG> *)( pbRead + i * cbPageCandidate + ibPageSize ) );
+                            if ( FValidCbPage( cbPageHeader ) )
                             {
-                                cbPageHeader = g_cbPageDefault;
-                            }
-                            if ( cbPageHeader == cbPageCandidate )
-                            {
-                                cbPagePrimary = cbPageCandidate;
-                                MergeRange( &ibRead, &cbRead, 0 * cbPageCandidate, cbPageCandidate );
+                                if ( cbPageHeader == 0 )
+                                {
+                                    cbPageHeader = g_cbPageDefault;
+                                }
+                                if ( cbPageHeader == cbPageCandidate )
+                                {
+                                    cbPageOutput = cbPageCandidate;
+                                    MergeRange( &ibRead, &cbRead, i * cbPageCandidate, cbPageCandidate );
+                                }
                             }
                         }
                     }
-                }
-                else
-                {
-                    cbPagePrimary = cbPageCandidate;
-                }
-            }
-        }
-        if ( FRangeContains( ibRead, cbRead, 1 * cbPageCandidate, cbPageCandidate ) ||
-                ( cbAlloc >= 2 * cbPageCandidate &&
-                    pfapiRead->ErrIORead( *tcHeader, QWORD( 1 * cbPageCandidate ), cbPageCandidate, pbRead + 1 * cbPageCandidate, qos ) >= JET_errSuccess ) )
-        {
-            ChecksumPage(   pbRead + 1 * cbPageCandidate,
-                            cbPageCandidate,
-                            databaseHeader,
-                            0,
-                            &checksumExpected,
-                            &checksumActual );
-            if (    checksumActual == checksumExpected ||
-                    BoolParam( JET_paramDisableBlockVerification ) )
-            {
-                if ( ibPageSize >= 0 )
-                {
-                    if ( cbPageCandidate >= ibPageSize + sizeof( UnalignedLittleEndian<ULONG> ) )
+                    else
                     {
-                        ULONG cbPageHeader = *( (UnalignedLittleEndian<ULONG> *)( pbRead + 1 * cbPageCandidate + ibPageSize ) );
-                        if ( FValidCbPage( cbPageHeader ) )
-                        {
-                            if ( cbPageHeader == 0 )
-                            {
-                                cbPageHeader = g_cbPageDefault;
-                            }
-                            if ( cbPageHeader == cbPageCandidate )
-                            {
-                                cbPageSecondary = cbPageCandidate;
-                                MergeRange( &ibRead, &cbRead, 1 * cbPageCandidate, cbPageCandidate );
-                            }
-                        }
+                        cbPageOutput = cbPageCandidate;
                     }
-                }
-                else
-                {
-                    cbPageSecondary = cbPageCandidate;
                 }
             }
         }
@@ -488,6 +472,7 @@ LOCAL ERR ErrUtilIReadShadowedHeader(
         const INST* const               pinst,
         IFileSystemAPI* const           pfsapi,
         const WCHAR* const              wszFileName,
+        _In_ const ULONG                filetype,
         __out_bcount( cbHeader ) BYTE*  pbHeader,
         const DWORD                     cbHeader,
         const LONG                      ibPageSize,
@@ -509,6 +494,7 @@ LOCAL ERR ErrUtilIReadShadowedHeader(
     {
         headerRequestGoodOnly,  // shadowedHeaderRequest
         wszFileName,            // wszFileName
+        filetype,               // filetype
         pbHeader,               // pbHeader
         cbHeader,               // cbHeader
         ibPageSize,             // ibPageSize
@@ -584,6 +570,7 @@ ERR ErrUtilReadShadowedHeader(
     const INST* const               pinst,
     IFileSystemAPI* const           pfsapi,
     const WCHAR* const              wszFilePath,
+    _In_ const ULONG                filetype,
     __out_bcount( cbHeader ) BYTE*  pbHeader,
     const DWORD                     cbHeader,
     const LONG                      ibPageSize,
@@ -601,7 +588,7 @@ ERR ErrUtilReadShadowedHeader(
                                         IFileAPI::fmfCached :
                                         IFileAPI::fmfNone ) ),
                                 &pfapi ) );
-    Call( ErrUtilReadShadowedHeader( pinst, pfsapi, pfapi, pbHeader, cbHeader, ibPageSize, urhf, pcbHeaderActual, pShadowedHeaderStatus ) );
+    Call( ErrUtilReadShadowedHeader( pinst, pfsapi, pfapi, filetype, pbHeader, cbHeader, ibPageSize, urhf, pcbHeaderActual, pShadowedHeaderStatus ) );
 
 HandleError:
     delete pfapi;
@@ -616,6 +603,7 @@ ERR ErrUtilReadShadowedHeader(
     const INST* const               pinst,
     IFileSystemAPI* const           pfsapi,
     IFileAPI* const                 pfapi,
+    _In_ const ULONG                filetype,
     __out_bcount( cbHeader ) BYTE*  pbHeader,
     const DWORD                     cbHeader,
     const LONG                      ibPageSize,
@@ -641,6 +629,7 @@ ERR ErrUtilReadShadowedHeader(
     Call( ErrUtilIReadShadowedHeader(   pinst,
                                         pfsapi,
                                         wszFilePath,
+                                        filetype,
                                         pbHeader,
                                         cbHeader,
                                         ibPageSize,

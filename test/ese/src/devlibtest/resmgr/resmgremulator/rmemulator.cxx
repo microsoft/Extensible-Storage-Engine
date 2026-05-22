@@ -154,7 +154,9 @@ PageEvictionEmulator::PageEvictionEmulator() :
     m_pbfftlContext( NULL ),
     m_pipeaImplementation( NULL ),
     m_cbPage( 0 ),
-    m_cpgChunk( 0 )
+    m_cpgChunk( 0 ),
+    m_dwSamplingRatio( 1 ),
+    m_dwSamplingSeed( 0 )
 {
     m_arrayDirtyPageOps.SetEntryDefault( NULL );
     ResetConfig();
@@ -542,6 +544,21 @@ ERR PageEvictionEmulator::ErrSetLifetimeHistoRes( const TICK dtickLifetimeHistoR
     }
 
     m_dtickLifetimeHistoRes = dtickLifetimeHistoRes;
+
+    return JET_errSuccess;
+}
+
+ERR PageEvictionEmulator::ErrSetSamplingParameters( const DWORD dwSamplingRatio,
+                                                    const DWORD dwSamplingSeed )
+{
+    Enforce( m_state == PageEvictionEmulator::peesUninitialized );
+    if ( ( dwSamplingRatio < 1 ) )
+    {
+        return JET_errInvalidParameter;
+    }
+
+    m_dwSamplingRatio = dwSamplingRatio;
+    m_dwSamplingSeed = dwSamplingSeed;
 
     return JET_errSuccess;
 }
@@ -1739,6 +1756,18 @@ void PageEvictionEmulator::DumpHistogram_( CPerfectHistogramStats& histogram,
     Enforce( errStats == CStats::ERR::errSuccess );
 }
 
+
+inline bool PageEvictionEmulator::FSamplePage( const IFMPPGNO& ifmppgno )
+{
+    if ( m_dwSamplingRatio == 1 )
+    {
+        return true;
+    }
+    // Subsampling the set of pages on which to replay the trace.
+    // Based on Waldspurger, C. A., Park, N., Garthwaite, A., & SOMEONE, I. (2015). Efficient MRC construction with SHARDS. In FAST 15
+    return ( ( ifmppgno.Hash() + m_dwSamplingSeed ) % m_dwSamplingRatio ) == 0;
+}
+
 void PageEvictionEmulator::TouchPage_( PAGEENTRY* const ppge, const BFTRACE::BFTouch_& bftouch )
 {
     Enforce( ppge->ppage != NULL ); //  Page must be cached from our end.
@@ -1950,6 +1979,12 @@ ERR PageEvictionEmulator::ErrProcessTraceCache_( BFTRACE& bftrace )
 
     BFTRACE::BFCache_ bfcache = bftrace.bfcache;
     const IFMPPGNO ifmppgno( bfcache.ifmp, bfcache.pgno );
+
+    if ( !FSamplePage( ifmppgno ) )
+    {
+        goto HandleError;
+    }
+
     PAGEENTRY* const ppge = PpgeGetEntry_( ifmppgno );
     PageEvictionEmulator::STATS& stats = m_stats[ ifmppgno.ifmp ];
 
@@ -2097,6 +2132,12 @@ ERR PageEvictionEmulator::ErrProcessTraceTouch_( BFTRACE& bftrace )
 
     BFTRACE::BFTouch_ bftouch = bftrace.bftouch;
     const IFMPPGNO ifmppgno( bftouch.ifmp, bftouch.pgno );
+
+    if ( !FSamplePage( ifmppgno ) )
+    {
+        goto HandleError;
+    }
+
     PAGEENTRY* const ppge = PpgeGetEntry_( ifmppgno );
     PageEvictionEmulator::STATS& stats = m_stats[ ifmppgno.ifmp ];
 
@@ -2229,6 +2270,12 @@ ERR PageEvictionEmulator::ErrProcessTraceSuperCold_( const BFTRACE& bftrace )
 
     const BFTRACE::BFSuperCold_& bfsupercold = bftrace.bfsupercold;
     const IFMPPGNO ifmppgno( bfsupercold.ifmp, bfsupercold.pgno );
+
+    if ( !FSamplePage( ifmppgno ) )
+    {
+        goto HandleError;
+    }
+
     PAGEENTRY* const ppge = PpgeGetEntry_( ifmppgno );
 
     m_stats[ ifmppgno.ifmp ].cSuperColdedReal++;
@@ -2262,6 +2309,12 @@ ERR PageEvictionEmulator::ErrProcessTraceEvict_( BFTRACE& bftrace )
     }
 
     const IFMPPGNO ifmppgno( bfevict.ifmp, bfevict.pgno );
+
+    if ( !FSamplePage( ifmppgno ) )
+    {
+        goto HandleError;
+    }
+
     PAGEENTRY* const ppgeOriginal = PpgeGetEntry_( ifmppgno );
 
     m_stats[ ifmppgno.ifmp ].cEvictionsReal++;
@@ -2373,6 +2426,11 @@ ERR PageEvictionEmulator::ErrProcessTraceDirty_( const BFTRACE& bftrace )
     LGPOS lgposModify( bftrace.bfdirty.lgenModify, bftrace.bfdirty.isecModify, bftrace.bfdirty.ibModify );
     const IFMPPGNO ifmppgno( bftrace.bfdirty.ifmp, bftrace.bfdirty.pgno );
 
+    if ( !FSamplePage( ifmppgno ) )
+    {
+        return JET_errSuccess;
+    }
+
     //  We had a tracing bug in the engine, in which the lgposModify of the dirty operation
     //  would be logged as the current lgposModify of the page, prior to it being stamped
     //  with the new lgposModify associated to that particular dirty operation. Assume the new
@@ -2409,6 +2467,12 @@ ERR PageEvictionEmulator::ErrProcessTraceWrite_( const BFTRACE& bftrace )
     const BFTRACE::BFWrite_& bfwrite = bftrace.bfwrite;
     bool fReplayTrace = false;
     const IFMPPGNO ifmppgno( bfwrite.ifmp, bfwrite.pgno );
+
+    if ( !FSamplePage( ifmppgno ) )
+    {
+        return JET_errSuccess;
+    }
+
     PAGEENTRY* const ppge = PpgeGetEntry_( ifmppgno );
 
     m_stats[ ifmppgno.ifmp ].cWritesReal++;
@@ -2460,6 +2524,11 @@ ERR PageEvictionEmulator::ErrProcessTraceSetLgposModify_( const BFTRACE& bftrace
 
     LGPOS lgposModify( bftrace.bfsetlgposmodify.lgenModify, bftrace.bfsetlgposmodify.isecModify, bftrace.bfsetlgposmodify.ibModify );
     const IFMPPGNO ifmppgno( bftrace.bfsetlgposmodify.ifmp, bftrace.bfsetlgposmodify.pgno );
+
+    if ( !FSamplePage( ifmppgno ) )
+    {
+        return JET_errSuccess;
+    }
 
     Enforce( lgposModify.FIsSet() );
 

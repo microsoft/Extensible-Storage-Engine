@@ -23,7 +23,8 @@ class TFileWrapper  //  fw
 
         IFileAPI::FileModeFlags Fmf() const;
 
-        ERR ErrFlushFileBuffers( const IOFLUSHREASON iofr );
+        ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const IFileAPI::FileFlushMode ffm );
+        LONG64 CioNonFlushed() const;
         void SetNoFlushNeeded();
 
         ERR ErrPath( _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) WCHAR* const wszAbsPath );
@@ -104,8 +105,6 @@ class TFileWrapper  //  fw
 
         ERR ErrDiskId( ULONG_PTR* const pulDiskId ) const;
 
-        LONG64 CioNonFlushed() const;
-
         BOOL FSeekPenalty() const;
 
 #ifdef DEBUG
@@ -118,6 +117,9 @@ class TFileWrapper  //  fw
     protected:
 
         //  IO completion context for an IFileAPI implementation.
+
+#pragma push_macro( "new" )
+#undef new
 
         class CIOComplete
         {
@@ -146,19 +148,30 @@ class TFileWrapper  //  fw
                         m_fIOCompleteCalled( fFalse ),
                         m_cref( 1 )
                 {
-                    (void)ErrRegister( this );
                 }
 
-                static void Cleanup()
+                using CPool = TPool<CIOComplete>;
+
+                void* operator new( _In_ const size_t cb )
                 {
-                    s_iocompleteHash.Term();
+                    return CPool::PvAllocate();
                 }
 
-            protected:
+                void* operator new( _In_ const size_t cb, _In_ const void* const pv )
+                {
+                    return (void*)pv;
+                }
+
+                void operator delete( _In_opt_ void* const pv )
+                {
+                    void* pvT = pv;
+                    CPool::Free( &pvT );
+                }
+
+        protected:
 
                 virtual ~CIOComplete()
                 {
-                    Unregister( this );
                 }
 
                 virtual void CleanupBeforeAsyncIOCompletion()
@@ -169,47 +182,18 @@ class TFileWrapper  //  fw
 
                 TICK DtickIOElapsed()
                 { 
-                    TICK                    dtick   = 0;
+                    TICK    dtick   = 0;
 
-                    //  determine if this is still a valid io context.  this covers for a design flaw in pfnIOHandoff
-                    //  where the interface presumes that the value assigned to pvIOContext will exist forever.  note
-                    //  that this same flaw can cause us to accidentally look at a pvIOContext that has already been
-                    //  reused
+                    //  if the pvIOContext is null then we are the source of the information, otherwise call down
+                    //  to the inner IFileAPI implementation
 
-                    CIOCompleteKey          key( this );
-                    CIOCompleteHash::CLock  lock;
-                    CIOCompleteEntry        entry;
-
-                    s_iocompleteHash.ReadLockKey( key, &lock );
-
-                    const BOOL              fValid  = ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrRetrieveEntry( &lock, &entry ) ) == JET_errSuccess;
-                    CMeteredSection::Group  group   = CMeteredSection::groupInvalidNil;
-            
-                    if ( fValid )
+                    if ( !m_pvIOContext )
                     {
-                        group = m_ms.Enter();
+                        dtick = (DWORD)min( lMax, CmsecHRTFromHrtStart( m_hrtStart ) );
                     }
-
-                    s_iocompleteHash.ReadUnlockKey( &lock );
-
-                    if ( fValid )
+                    else
                     {
-                        //  if the pvIOContext is null then we are the source of the information, otherwise call down
-                        //  to the inner IFileAPI implementation
-
-                        if ( !m_pvIOContext )
-                        {
-                            dtick = (DWORD)min( lMax, CmsecHRTFromHrtStart( m_hrtStart ) );
-                        }
-                        else
-                        {
-                            dtick = m_pfapiInner->DtickIOElapsed( m_pvIOContext );
-                        }
-                    }
-
-                    if ( group != CMeteredSection::groupInvalidNil )
-                    {
-                        m_ms.Leave( group );
+                        dtick = m_pfapiInner->DtickIOElapsed( m_pvIOContext );
                     }
 
                     return dtick;
@@ -396,51 +380,6 @@ class TFileWrapper  //  fw
 
             private:
 
-                static ERR ErrEnsureInitIOCompleteHash() { return s_initOnceIocompleteHash.Init( ErrInitIOCompleteHash_, NULL ); };
-                static ERR ErrInitIOCompleteHash_( _In_ void* unused ) { return ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrInit( 5.0, 1.0 ) ); }
-
-                static ERR ErrRegister( _In_ CIOComplete* const piocomplete )
-                {
-                    ERR                     err     = JET_errSuccess;
-                    CIOCompleteKey          key( piocomplete );
-                    CIOCompleteEntry        entry( piocomplete );
-                    CIOCompleteHash::CLock  lock;
-                    BOOL                    fLocked = fFalse;
-
-                    Call( ErrEnsureInitIOCompleteHash() );
-
-                    s_iocompleteHash.WriteLockKey( key, &lock );
-                    fLocked = fTrue;
-                    Call( ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrInsertEntry( &lock, entry ) ) );
-
-                HandleError:
-                    if ( fLocked )
-                    {
-                        s_iocompleteHash.WriteUnlockKey( &lock );
-                    }
-                    return err;
-                }
-
-                static void Unregister( _In_ CIOComplete* const piocomplete )
-                {
-                    CIOCompleteHash::CLock  lock;
-                    CIOCompleteEntry        entry;
-
-                    s_iocompleteHash.WriteLockKey( CIOCompleteKey( piocomplete ), &lock );
-                    if ( ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrRetrieveEntry( &lock, &entry ) ) == JET_errSuccess )
-                    {
-                        CallS( ErrToErr<CIOCompleteHash>( s_iocompleteHash.ErrDeleteEntry( &lock ) ) );
-                    }
-                    s_iocompleteHash.WriteUnlockKey( &lock );
-
-                    piocomplete->m_ms.Partition();
-                }
-
-            private:
-
-                static CInitOnce< ERR, decltype( &ErrInitIOCompleteHash_ ), void* > s_initOnceIocompleteHash;
-                static CIOCompleteHash                                              s_iocompleteHash;
-
                 typename CInvasiveList<CIOComplete, OffsetOfILE>::CElement          m_ile;
                 const BOOL                                                          m_fIsHeapAlloc;
                 IFileAPI* const                                                     m_pfapi;
@@ -458,6 +397,8 @@ class TFileWrapper  //  fw
                 volatile int                                                        m_cref;
                 CMeteredSection                                                     m_ms;
         };
+
+#pragma pop_macro( "new" )
 
     protected:
 
@@ -478,12 +419,6 @@ class TFileWrapper  //  fw
         I* const        m_piInner;
         const BOOL      m_fReleaseOnClose;
 };
-
-template< class I >
-CInitOnce< ERR, decltype( &TFileWrapper<I>::CIOComplete::ErrInitIOCompleteHash_ ), void* > TFileWrapper<I>::CIOComplete::s_initOnceIocompleteHash;
-
-template< class I >
-CIOCompleteHash TFileWrapper<I>::CIOComplete::s_iocompleteHash( rankIOCompleteHash );
 
 template< class I >
 TFileWrapper<I>::TFileWrapper( _In_ I* const pi )
@@ -516,9 +451,15 @@ IFileAPI::FileModeFlags TFileWrapper<I>::Fmf() const
 }
 
 template< class I >
-ERR TFileWrapper<I>::ErrFlushFileBuffers( const IOFLUSHREASON iofr )
+ERR TFileWrapper<I>::ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr, _In_ const IFileAPI::FileFlushMode ffm )
 {
-    return m_piInner->ErrFlushFileBuffers( iofr );
+    return m_piInner->ErrFlushFileBuffers( iofr, ffm );
+}
+
+template< class I >
+LONG64 TFileWrapper<I>::CioNonFlushed() const
+{
+    return m_piInner->CioNonFlushed();
 }
 
 template< class I >
@@ -634,7 +575,7 @@ ERR TFileWrapper<I>::ErrIORead( const TraceContext&                 tc,
     if ( pfnIOComplete || pfnIOHandoff )
     {
         const BOOL fHeap = pfnIOComplete != NULL;
-        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+        Alloc( piocomplete = new( fHeap ? CIOComplete::CPool::PvAllocate() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this,
                             ibOffset,
@@ -692,7 +633,7 @@ ERR TFileWrapper<I>::ErrIOWrite(    const TraceContext&             tc,
     if ( pfnIOComplete || pfnIOHandoff )
     {
         const BOOL fHeap = pfnIOComplete != NULL;
-        Alloc( piocomplete = new( fHeap ? new Buffer<CIOComplete>() : _malloca( sizeof( CIOComplete ) ) )
+        Alloc( piocomplete = new( fHeap ? CIOComplete::CPool::PvAllocate() : _malloca( sizeof( CIOComplete ) ) )
             CIOComplete(    fHeap,
                             this, 
                             ibOffset,
@@ -788,12 +729,6 @@ template< class I >
 ERR TFileWrapper<I>::ErrDiskId( ULONG_PTR* const pulDiskId ) const
 {
     return m_piInner->ErrDiskId( pulDiskId );
-}
-
-template< class I >
-LONG64 TFileWrapper<I>::CioNonFlushed() const
-{
-    return m_piInner->CioNonFlushed();
 }
 
 template< class I >
@@ -899,6 +834,4 @@ class CFileWrapper : public TFileWrapper<IFileAPI>
         }
 
         virtual ~CFileWrapper() {}
-
-        static void Cleanup() { CIOComplete::Cleanup(); }
 };

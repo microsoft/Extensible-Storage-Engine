@@ -623,8 +623,7 @@ VOID LogPrereaderBase::LGPDBEnable( const DBID dbid )
     //  Otherwise, we need to allocate all the data structures.
     if ( FLGPDBEnabled( dbid ) )
     {
-        const CArray<PageRef>::ERR errSetSize = m_rgArrayPagerefs[ dbid ].ErrSetSize( 0 );
-        Assert( errSetSize == CArray<PageRef>::ERR::errSuccess );
+        m_rgArrayPagerefs[ dbid ].Clear();
         Assert( FLGPDBEnabled( dbid ) );
     }
     else

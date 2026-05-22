@@ -279,21 +279,19 @@ ERR ErrLGFindHighestMatchingLogMajors( _In_ const LogVersion& lgvFromLogHeader, 
 }
 
 //  create a formatted string at end of a given buffer
+//  Explicitly NOT part of the OSStr API because it's very
+//  inefficient in the wrong context (like a loop on a big string
 
-void __cdecl OSStrCbAppendFormatW ( __inout_bcount(cbBuffer) PWSTR wszBuffer, size_t cbBuffer, __format_string PCWSTR cwszFormat, ... )
+void __cdecl AppendFormatW ( __inout_bcount(cbBuffer) PWSTR wszBuffer, size_t cbBuffer, __format_string PCWSTR cwszFormat, ... )
 {
     va_list alist;
     va_start( alist, cwszFormat );
     const size_t cbUsed = LOSStrLengthW( wszBuffer ) * sizeof(WCHAR);
     Assert( cbUsed < cbBuffer );    // did someone pass in an unit buffer?
     Assert( ( cbUsed % sizeof(WCHAR) ) == 0 );
-    HRESULT hr = StringCbVPrintfW( wszBuffer + ( cbUsed / sizeof(WCHAR) ), cbBuffer - cbUsed, cwszFormat, alist );
-#ifdef DEBUG
-    CallS( ErrFromStrsafeHr( hr ) );
-#endif
+    OSStrCbVFormatW( wszBuffer + ( cbUsed / sizeof(WCHAR) ), cbBuffer - cbUsed, cwszFormat, alist );
     va_end( alist );
 }
-
 
 //  A nice formatting of the JET_paramEngineFormatValue setting ... the problem is we have an enum possibly combined with a
 //  flag and so it is hard to translate / easily lookup if we just print it either as decimal or hex (because the EFV values 
@@ -343,22 +341,22 @@ void FormatEfvSetting( const JET_ENGINEFORMATVERSION efvFullParam, _Out_writes_b
     BOOL fNeedOr = fFalse;
     if ( efvBaseValue != 0 )
     {
-        OSStrCbAppendFormatW( wszEfvSetting, cbEfvSetting, L"%d", efvBaseValue );
+        AppendFormatW( wszEfvSetting, cbEfvSetting, L"%d", efvBaseValue );
         fNeedOr = fTrue;
     }
     if ( fJET_efvUseEngineDefault )
     {
-        OSStrCbAppendFormatW( wszEfvSetting, cbEfvSetting, L"%hs%hs", fNeedOr ? " | " : "", "JET_efvUseEngineDefault" );
+        AppendFormatW( wszEfvSetting, cbEfvSetting, L"%hs%hs", fNeedOr ? " | " : "", "JET_efvUseEngineDefault" );
         fNeedOr = fTrue;
     }
     if ( fJET_efvUsePersistedFormat )
     {
-        OSStrCbAppendFormatW( wszEfvSetting, cbEfvSetting, L"%hs%hs", fNeedOr ? " | " : "", "JET_efvUsePersistedFormat" );
+        AppendFormatW( wszEfvSetting, cbEfvSetting, L"%hs%hs", fNeedOr ? " | " : "", "JET_efvUsePersistedFormat" );
         fNeedOr = fTrue;
     }
     if ( fJET_efvAllowHigherPersistedFormat )
     {
-        OSStrCbAppendFormatW( wszEfvSetting, cbEfvSetting, L"%hs%hs", fNeedOr ? " | " : "", "JET_efvAllowHigherPersistedFormat" );
+        AppendFormatW( wszEfvSetting, cbEfvSetting, L"%hs%hs", fNeedOr ? " | " : "", "JET_efvAllowHigherPersistedFormat" );
         fNeedOr = fTrue;
     }
     OSStrCbAppendW( wszEfvSetting, cbEfvSetting, L")" );

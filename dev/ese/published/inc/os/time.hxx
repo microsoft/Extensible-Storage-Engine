@@ -33,6 +33,10 @@ void OSTimeSetTimeInjection( const DWORD eTimeInjNegWrapMode, const TICK dtickTi
 
 TICK TickOSTimeCurrent();
 
+//  returns the current timer tick count (1000 Hz) factoring out time the computer was hibernating or asleep
+
+TICK TickOSTimeInterruptCurrent();
+
 //  performs an overflow aware comparison of two absolute tick counts
 
 INLINE LONG TickCmp( TICK tick1, TICK tick2 )

@@ -537,13 +537,13 @@ ERR ErrDUMPLog( INST *pinst, _In_ PCWSTR wszLog, const LONG lgenStart, const LON
     const ULONG     cchLogPath      = LOSStrLengthW( wszLog );
     const WCHAR *   wszLogExt       = NULL;
     ULONG           cLogDigits = 0;
-    CWPRINTFFILE cpfCsvOut( wszCsvDataFile );
+    CPRINTFFILE     cpfCsvOutW( wszCsvDataFile, CPRINTFFILE::FILEENCODING::UTF16 );
     DIRLOGGENERATIONINFO dirloginfo = { 0 };
     LONG            lgenStartSanitised = 0;
     LONG            lgenEndSanitised = 0;
 
     logdumpOp.m_opts = 0;
-    Assert( logdumpOp.m_pcwpfCsvOut == NULL );
+    Assert( logdumpOp.m_pcpfCsvOutW == NULL );
 
     if ( cchLogPath >= IFileSystemAPI::cchPathMax )
     {
@@ -570,14 +570,14 @@ ERR ErrDUMPLog( INST *pinst, _In_ PCWSTR wszLog, const LONG lgenStart, const LON
         if ( grbit & JET_bitDBUtilOptionDumpLogInfoCSV )
         {
             Assert( wszCsvDataFile ); // otherwise we won't be printing to any file.
-            logdumpOp.m_pcwpfCsvOut = &cpfCsvOut;
+            logdumpOp.m_pcpfCsvOutW = &cpfCsvOutW;
 
             DUMPPrintF( "\n      Csv file: %ws\n", wszCsvDataFile );
-            if (JET_errSuccess != logdumpOp.m_pcwpfCsvOut->m_errLast)
+            if (JET_errSuccess != logdumpOp.m_pcpfCsvOutW->m_errLast)
             {
                 DUMPPrintF( "\n      Cannot open csv file (%ws). Error %d.\n",
-                        wszCsvDataFile, logdumpOp.m_pcwpfCsvOut->m_errLast);
-                Call( ErrERRCheck( logdumpOp.m_pcwpfCsvOut->m_errLast ) );
+                        wszCsvDataFile, logdumpOp.m_pcpfCsvOutW->m_errLast);
+                Call( ErrERRCheck( logdumpOp.m_pcpfCsvOutW->m_errLast ) );
             }
         }
         else if ( grbit & JET_bitDBUtilOptionDumpVerboseLevel1 )
@@ -760,12 +760,12 @@ TryAnotherExtension:
             //  for checksum mode, eseutil will generate the whitespace on error
         }
 
-        if (logdumpOp.m_pcwpfCsvOut
-                && (JET_errSuccess != logdumpOp.m_pcwpfCsvOut->m_errLast))
+        if (logdumpOp.m_pcpfCsvOutW
+                && (JET_errSuccess != logdumpOp.m_pcpfCsvOutW->m_errLast))
         {
             DUMPPrintF( "\n      Cannot write csv file (%ws). Error %d.\n",
-                    wszCsvDataFile, logdumpOp.m_pcwpfCsvOut->m_errLast);
-            Call( ErrERRCheck( logdumpOp.m_pcwpfCsvOut->m_errLast ) );
+                    wszCsvDataFile, logdumpOp.m_pcpfCsvOutW->m_errLast);
+            Call( ErrERRCheck( logdumpOp.m_pcpfCsvOutW->m_errLast ) );
         }
     }
     else
@@ -789,7 +789,7 @@ TryAnotherExtension:
         else if ( grbit & JET_bitDBUtilOptionDumpLogInfoCSV )
         {
             Assert( wszCsvDataFile ); // otherwise we won't be printing to any file.
-            logdumpOp.m_pcwpfCsvOut = &cpfCsvOut;
+            logdumpOp.m_pcpfCsvOutW = &cpfCsvOutW;
         }
         else
         {
@@ -822,14 +822,14 @@ TryAnotherExtension:
         {
             DUMPPrintF( "      Base name: %ws\n", SzParam( pinst, JET_paramBaseName ) );
             DUMPPrintF( "      Log file: %ws", wszLog );
-            if (logdumpOp.m_pcwpfCsvOut)
+            if (logdumpOp.m_pcpfCsvOutW)
             {
                 DUMPPrintF( "\n      Csv file: %ws", wszCsvDataFile );
-                if (JET_errSuccess != logdumpOp.m_pcwpfCsvOut->m_errLast)
+                if (JET_errSuccess != logdumpOp.m_pcpfCsvOutW->m_errLast)
                 {
                     DUMPPrintF( "\n      Cannot open csv file (%ws). Error %d.\n",
-                            wszCsvDataFile, logdumpOp.m_pcwpfCsvOut->m_errLast);
-                    Call( ErrERRCheck( logdumpOp.m_pcwpfCsvOut->m_errLast ) );
+                            wszCsvDataFile, logdumpOp.m_pcpfCsvOutW->m_errLast);
+                    Call( ErrERRCheck( logdumpOp.m_pcpfCsvOutW->m_errLast ) );
                 }
             }
         }
@@ -838,12 +838,12 @@ TryAnotherExtension:
 
         if ( !logdumpOp.m_fVerifyOnly )
         {
-            if (logdumpOp.m_pcwpfCsvOut
-                    && (JET_errSuccess != logdumpOp.m_pcwpfCsvOut->m_errLast))
+            if (logdumpOp.m_pcpfCsvOutW
+                    && (JET_errSuccess != logdumpOp.m_pcpfCsvOutW->m_errLast))
             {
                 DUMPPrintF( "\n      Cannot write csv file (%ws). Error %d.\n",
-                        wszCsvDataFile, logdumpOp.m_pcwpfCsvOut->m_errLast);
-                Call( ErrERRCheck( logdumpOp.m_pcwpfCsvOut->m_errLast ) );
+                        wszCsvDataFile, logdumpOp.m_pcpfCsvOutW->m_errLast);
+                Call( ErrERRCheck( logdumpOp.m_pcpfCsvOutW->m_errLast ) );
             }
             DUMPPrintF( "\n" );
         }
@@ -854,7 +854,7 @@ TryAnotherExtension:
     }
 
 HandleError:
-    logdumpOp.m_pcwpfCsvOut = NULL; // stack var will be freed ...
+    logdumpOp.m_pcpfCsvOutW = NULL; // stack var will be freed ...
     if ( NULL != plgfilehdr )
     {
         OSMemoryPageFree( plgfilehdr );
@@ -884,7 +884,7 @@ ERR LOG::ErrLGIDumpOneAttachment( const ATTACHINFO * const pattachinfo, const LO
         Call( wszDbName.ErrSet( (CHAR*)(pattachinfo->szNames) ) );
     }
 
-    if ( NULL == plogdumpOp->m_pcwpfCsvOut )
+    if ( NULL == plogdumpOp->m_pcpfCsvOutW )
     {
         DUMPPrintF( "      %d %ws%ws\n",
                 pattachinfo->Dbid(), (WCHAR *)wszDbName, pattachinfo->FSparseEnabledFile() ? L" (sparse)" : L"" );
@@ -900,7 +900,7 @@ ERR LOG::ErrLGIDumpOneAttachment( const ATTACHINFO * const pattachinfo, const LO
         }
         const size_t cchHexDumped = 3 * sizeof( pattachinfo->signDb );
         rgwchSignBuf[ cchHexDumped ] = L'\0';
-        (*(plogdumpOp->m_pcwpfCsvOut))( L"%s, %d, \"%s\", %s\r\n", wszLogHeaderAttachInfo, pattachinfo->Dbid(), (WCHAR *)wszDbName, rgwchSignBuf );
+        (*(plogdumpOp->m_pcpfCsvOutW))( L"%s, %d, \"%s\", %s\r\n", wszLogHeaderAttachInfo, pattachinfo->Dbid(), (WCHAR *)wszDbName, rgwchSignBuf );
     }
 
 HandleError:
@@ -1201,7 +1201,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
 
     WCHAR const * wszLogHeaderGeneralInfo   = L"LHGI";
 
-    if( plogdumpOp->m_pcwpfCsvOut )
+    if( plogdumpOp->m_pcpfCsvOutW )
     {
         CHAR szLogSig[128]; // plenty of space
         WCHAR wszLogCreate[128]; // plenty of space
@@ -1228,7 +1228,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
                 (SHORT) m_pLogStream->GetCurrentFileHdr()->lgfilehdr.tmPrevGen.bSeconds,
                 (SHORT) m_pLogStream->GetCurrentFileHdr()->lgfilehdr.tmPrevGen.Milliseconds());
 
-        (*(plogdumpOp->m_pcwpfCsvOut))(L"%ws, %hs, %08.08X, %08.08X, %ws, %ws, %d.%d.%d.%d, %ws, %d\r\n",
+        (*(plogdumpOp->m_pcpfCsvOutW))(L"%ws, %hs, %08.08X, %08.08X, %ws, %ws, %d.%d.%d.%d, %ws, %d\r\n",
                 wszLogHeaderGeneralInfo, szLogSig, (ULONG)m_pLogStream->GetCurrentFileGen(),
                 (ULONG)m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulChecksum,
                 wszLogCreate, wszPrevLogCreate,
@@ -1303,7 +1303,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
                 (USHORT)m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_lgposCheckpoint.le_ib );
     }
 
-    if ( fPrint || plogdumpOp->m_pcwpfCsvOut )
+    if ( fPrint || plogdumpOp->m_pcpfCsvOutW )
     {
         err = ErrLGIDumpAttachments( plogdumpOp );
         if ( err < 0 )
@@ -1432,13 +1432,13 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
             }
         }
 
-        if( plogdumpOp->m_pcwpfCsvOut )
+        if( plogdumpOp->m_pcpfCsvOutW )
         {
             LGPOS lgpos;
             m_pLogReadBuffer->GetLgposOfPbNext(&lgpos);
             Assert( lgpos.lGeneration == LONG(m_pLogStream->GetCurrentFileGen()) );
             lgpos.lGeneration = LONG(m_pLogStream->GetCurrentFileGen());
-            Call( ErrLrToLogCsvSimple( plogdumpOp->m_pcwpfCsvOut, lgpos, plr, this ) );
+            Call( ErrLrToLogCsvSimple( plogdumpOp->m_pcpfCsvOutW, lgpos, plr, this ) );
         }
 
         logRecPosCurr++;
@@ -1453,17 +1453,17 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
     Call( err );
     CallS( err );
 
-    if (plogdumpOp->m_pcwpfCsvOut)
+    if (plogdumpOp->m_pcpfCsvOutW)
     {
         // SOMEONE doesn't want the added dev/test cost of parsing LTCL along with LTEL and <nothing>.
         // So, a csv dump will end with LTEL (good log) or <nothing> (bad log or problems with csv file).
         // SOMEONE believes LTCL is needed because the corruption may have occcured after
         // the DB was updated with info past the corruption in the log. But SOMEONE's current design
         // doesn't need this refinement and so I am disabling LTCL at his request.
-        // (*plogdumpOp->m_pcwpfCsvOut)((fCorrupt) ? szLogTrailerCorruptLog : szLogTrailerEndOfLog);
+        // (*plogdumpOp->m_pcpfCsvOutW)((fCorrupt) ? szLogTrailerCorruptLog : szLogTrailerEndOfLog);
         if (!fCorrupt)
         {
-            (*plogdumpOp->m_pcwpfCsvOut)(szLogTrailerEndOfLog);
+            (*plogdumpOp->m_pcpfCsvOutW)(szLogTrailerEndOfLog);
         }
     }
     //  verbose dump

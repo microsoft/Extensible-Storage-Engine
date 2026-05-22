@@ -18,13 +18,6 @@
 #include "esefile.hxx"
 #undef UNICODE              //  esefile.hxx enables UNICODE
 
-#pragma prefast(push)
-#pragma prefast(disable:28196, "Do not bother us with strsafe, someone else owns that.")
-#pragma prefast(disable:28205, "Do not bother us with strsafe, someone else owns that.")
-#include <strsafe.h>
-#pragma prefast(pop)
-
-
 #ifndef ESENT
 #include <esebcli2.h>
 #define ESEBCLI2_DLL_NAME   L"ESEBCLI2.DLL"
@@ -45,6 +38,18 @@
 //
 ESESHADOW_LOCAL_DEFERRED_DLL_STATE
 #endif
+
+// Base product name and version numbers reported by eseutil.
+#ifdef ESENT
+#define ESEUTIL_PRODUCT_NAME L"Windows(R)"
+#define ESEUTIL_PRODUCT_MAJOR VER_PRODUCTMAJORVERSION
+#define ESEUTIL_PRODUCT_MINOR VER_PRODUCTMINORVERSION
+#else
+#define ESEUTIL_PRODUCT_NAME L"Exchange Server"
+#define ESEUTIL_PRODUCT_MAJOR PRODUCT_MAJOR
+#define ESEUTIL_PRODUCT_MINOR PRODUCT_MINOR
+#endif
+
 
 //  In fake recovery without undo, we set the grbit for JET_bitRecoveryWithoutUndo, but 
 //  then the our callback control decides to do undo after all, unless the "/u" option 
@@ -147,11 +152,7 @@ LOCAL const WCHAR   * const wszUsageErr21   = L"Usage Error: Config store spec n
 
 LOCAL const WCHAR   * const wszUsageErr22   = L"Usage Error: Invalid log generation range specification.";
 
-#ifdef ESENT
-LOCAL const WCHAR   * const wszHelpDesc1        = L"DESCRIPTION:  Database utilities for the Extensible Storage Engine for Microsoft(R) Windows(R).";
-#else  //  !ESENT
-LOCAL const WCHAR   * const wszHelpDesc1        = L"DESCRIPTION:  Database utilities for the Extensible Storage Engine for Microsoft(R) Exchange Server.";
-#endif  //  ESENT
+LOCAL const WCHAR   * const wszHelpDesc1    = L"DESCRIPTION:  Database utilities for the Extensible Storage Engine for Microsoft(R) " ESEUTIL_PRODUCT_NAME L".";
 LOCAL const WCHAR   * const wszHelpSyntax   = L"MODES OF OPERATION:";
 LOCAL const WCHAR   * const wszHelpModes1   = L"      Defragmentation:  %s /d <database name> [options]";
 LOCAL const WCHAR   * const wszHelpModes2   = L"             Recovery:  %s /r <logfile base name> [options]";
@@ -213,16 +214,8 @@ LOCAL WCHAR *GetCurArg();
 
 LOCAL VOID EDBUTLPrintLogo( void )
 {
-    WCHAR   wszVersion[16];
-
-#ifdef ESENT
-    StringCbPrintfW( wszVersion, sizeof(wszVersion), L"%d.%d", VER_PRODUCTMAJORVERSION, VER_PRODUCTMINORVERSION );
-    wprintf( L"Extensible Storage Engine Utilities for Microsoft(R) Windows(R)%c", wchNewLine );
-#else  //  !ESENT
-    StringCbPrintfW( wszVersion, sizeof(wszVersion), L"%hs.%hs", PRODUCT_MAJOR, PRODUCT_MINOR );
-    wprintf( L"Extensible Storage Engine Utilities for Microsoft(R) Exchange Server%c", wchNewLine );
-#endif  //  ESENT
-    wprintf( L"Version %s%c", wszVersion, wchNewLine );
+    wprintf( L"Extensible Storage Engine Utilities for Microsoft(R) %s%c", ESEUTIL_PRODUCT_NAME, wchNewLine );
+    wprintf( L"Version %hs.%hs%c", ESEUTIL_PRODUCT_MAJOR, ESEUTIL_PRODUCT_MINOR, wchNewLine );
     wprintf( L"Copyright (c) Microsoft Corporation.\nLicensed under the MIT License.%c", wchNewLine );
     wprintf( L"%c", wchNewLine );
 }
@@ -2112,11 +2105,17 @@ LOCAL BOOL FEDBUTLParseRepair( _In_ PCWSTR arg, UTILOPTS *popts )
 LOCAL VOID EDBUTLGetBaseName( _In_ PCWSTR const wszLogfile, __out_ecount(4) WCHAR * const wszBaseName )
 {
     WCHAR   wszNameT[_MAX_FNAME+1];
+    ERR errT;
 
     assert( wszBaseName != NULL );
 
     _wsplitpath_s( wszLogfile, NULL, 0, NULL, 0, wszNameT, _countof(wszNameT), NULL, 0);
-    StringCbCopyW( wszBaseName, 4 * sizeof(WCHAR), wszNameT );
+    errT = ErrOSStrCbCopyW( wszBaseName, 4 * sizeof(WCHAR), wszNameT );
+    // We're not telling the truth about how big wszBaseName is, we're instead artificially
+    // shortening it to 4 WCHARs in order to only copy 4 WCHARs from wszNameT.  We would
+    // use OSSStrCbCopyNW(), if it existed.  The end result is that we might get success
+    // back and we might get buffer too small, depending on the length of wszNameT
+    assert( errT == JET_errSuccess || errT == JET_errBufferTooSmall );
 }
 
 LOCAL BOOL FEDBUTLBaseNameOnly( const WCHAR * const wszName )
@@ -2404,7 +2403,7 @@ LOCAL BOOL FEDBUTLParseDump( _In_ PCWSTR arg, UTILOPTS *popts )
         {
             const size_t cchSzNode = 256;
             WCHAR   wszNode[cchSzNode];
-            StringCbCopyW( wszNode, sizeof(wszNode), arg+2 );
+            OSStrCbCopyW( wszNode, sizeof(wszNode), arg+2 );
 
             INT     dbid    = 0;
             INT     pgno    = 0;
@@ -2480,7 +2479,7 @@ LOCAL BOOL FEDBUTLParseDump( _In_ PCWSTR arg, UTILOPTS *popts )
             {
                 const size_t    cchSzLogRange   = 256;
                 WCHAR           wszLogRange[cchSzLogRange];
-                StringCbCopyW( wszLogRange, sizeof( wszLogRange ), arg + 2 );
+                OSStrCbCopyW( wszLogRange, sizeof( wszLogRange ), arg + 2 );
                 
                 LONG    lgenStart   = 0;
                 LONG    lgenEnd     = 0;
@@ -3408,12 +3407,12 @@ LOCAL JET_ERR ErrEDBUTLBackupAndInstateDB(
 
         _wsplitpath_s( popts->wszSourceDB, wszDrive, _countof(wszDrive), wszDir, _countof(wszDir), NULL, 0, NULL, 0 );
         _wmakepath_s( wszSourceDB, _countof(wszSourceDB), wszDrive, wszDir, NULL, NULL );
-        StringCbCatW( wszSourceDB, sizeof(wszSourceDB), wfd.cFileName );
+        OSStrCbAppendW( wszSourceDB, sizeof(wszSourceDB), wfd.cFileName );
         FindClose( hFind );
     }
     else
     {
-        StringCbCopyW( wszSourceDB, sizeof(wszSourceDB), popts->wszSourceDB );
+        OSStrCbCopyW( wszSourceDB, sizeof(wszSourceDB), popts->wszSourceDB );
     }
 
     // Make backup before instating, if requested.
@@ -3671,7 +3670,7 @@ ERR ErrPrintESEBCLI2Error ( HRESULT hr, HRESULT hrGLE, HMODULE hESEBCLI2 )
         wszFinalMsg = (WCHAR *) LocalAlloc( LMEM_FIXED | LMEM_ZEROINIT, cbFinalMsg );
         if ( wszFinalMsg )
         {
-            StringCbPrintfW( wszFinalMsg, cbFinalMsg, (WCHAR *)lpMsgBuf, hrGLE );
+            OSStrCbFormatW( wszFinalMsg, cbFinalMsg, (WCHAR *)lpMsgBuf, hrGLE );
             LocalFree( lpMsgBuf );
         }
         else
@@ -3746,7 +3745,7 @@ WCHAR * WszCopy( const WCHAR *  wsz )
     if ( ( wszCopy = (WCHAR *) LocalAlloc( LMEM_FIXED | LMEM_ZEROINIT, cb ) ) == NULL )
         return(NULL);
 
-    StringCbCopyW( wszCopy, cb, wsz );
+    OSStrCbCopyW( wszCopy, cb, wsz );
     return( wszCopy );
 }
 
@@ -3758,7 +3757,7 @@ void FormatErrorInfoString(
     const JET_ERRINFOBASIC_W * perrinfo )
 {
     Assert( szFormatted[0] == '\0' );
-    (void)ErrOSStrCbFormatA( szFormatted, cbFormatted, "err = %d (%ws", err, wszErrStrings ? wszErrStrings : L"unknown, unknown"  );
+    OSStrCbFormatA( szFormatted, cbFormatted, "err = %d (%ws", err, wszErrStrings ? wszErrStrings : L"unknown, unknown"  );
     // Truncate off the ", <Full error message>" to get the constant name only.
     CHAR * const szBeginErrExplanation = strchr( szFormatted, ',' );
     Assert( szBeginErrExplanation ); // implies we didn't get the , before we potentially truncated!?
@@ -3770,7 +3769,7 @@ void FormatErrorInfoString(
 #ifdef DEBUG
     if ( perrinfo && perrinfo->lSourceLine != 0 )
     {
-        (void)ErrOSStrCbFormatA( szFormatted + strlen(szFormatted), cbFormatted - strlen(szFormatted),
+        OSStrCbFormatA( szFormatted + strlen(szFormatted), cbFormatted - strlen(szFormatted),
                                     " - %ws:%d", perrinfo->rgszSourceFile, perrinfo->lSourceLine );
     }
 #endif
@@ -3918,7 +3917,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
 
     PrintField( L"", cDesc, NULL );
 
-    StringCbPrintfW( wszBuffer, sizeof( wszBuffer ), L"%d database(s)", pREnv->m_cDatabases );
+    OSStrCbFormatW( wszBuffer, sizeof( wszBuffer ), L"%d database(s)", pREnv->m_cDatabases );
     PrintField( L"Databases:", cDesc, wszBuffer );
 
     assert ( pREnv->m_wszDatabaseDisplayName || 0 == pREnv->m_cDatabases);
@@ -3939,7 +3938,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
 
         PrintField( L"Database Name:", cDesc, pREnv->m_wszDatabaseDisplayName[iDb] );
         // like: 6B29FC40-CA47-1067-B31D-00DD010662DA
-        StringCbPrintfW( guidStr, sizeof( guidStr ),
+        OSStrCbFormatW( guidStr, sizeof( guidStr ),
                     L"%08X-%04X-%04X-%08X%08X",
                     guid.Data1, guid.Data2, guid.Data3,
                     *(DWORD *)&guid.Data3,*( 1 + (DWORD *)&guid.Data3 ) );
@@ -3980,7 +3979,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
         // in restore.env at parsing point (HrESERestoreOpenFile)
         // For now, we will display the Store defaults as this is
         // the only client using the eseback2/esebcli2 anyway
-        StringCbPrintfW( wszBuffer, sizeof( wszBuffer ), L"%s%08X.log - %s%08X.log",
+        OSStrCbFormatW( wszBuffer, sizeof( wszBuffer ), L"%s%08X.log - %s%08X.log",
             pREnv->m_wszLogBaseName,
             pREnv->m_ulGenLow,
             pREnv->m_wszLogBaseName,
@@ -3990,7 +3989,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
     {
         assert ( 0 == pREnv->m_ulGenLow );
         assert ( 0 == pREnv->m_ulGenHigh );
-        StringCbPrintfW( wszBuffer, sizeof( wszBuffer ), L"no log files restored");
+        OSStrCbFormatW( wszBuffer, sizeof( wszBuffer ), L"no log files restored");
     }
     PrintField( L"Log files range:", cDesc, wszBuffer );
 
@@ -4003,7 +4002,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
 
     PrintField( L"Recover Status:", cDesc, rwszRecoverStatus [ status ] );
 
-    StringCbPrintfW( wszBuffer, sizeof( wszBuffer ), L"0x%08X", pREnv->m_hrLastRecover);
+    OSStrCbFormatW( wszBuffer, sizeof( wszBuffer ), L"0x%08X", pREnv->m_hrLastRecover);
     PrintField( L"Recover Error:", cDesc, wszBuffer );
 
     PrintField( L"Recover Time:", cDesc, ( 0 != pREnv->m_timeLastRecover ? _wctime( &pREnv->m_timeLastRecover ) : L"<none>" ) );
@@ -5315,7 +5314,7 @@ LOCAL JET_ERR ErrEDBUTLCheckLogStream( JET_INSTANCE* pInst, UTILOPTS* pOpts )
     // file name (with wild card)
     WCHAR wszFName[ _MAX_PATH + 1 ];
     Call( JetGetSystemParameterW( *pInst, JET_sesidNil, JET_paramBaseName, NULL, wszFName, sizeof( wszFName ) ) );
-    StringCchCatW( wszFName, _countof( wszFName ), L"*" );
+    OSStrCbAppendW( wszFName, sizeof( wszFName ), L"*" );
 
     //================================
     // drive and dir
@@ -5388,7 +5387,7 @@ void PushEseutilArgTrace( INT argc, __in_ecount(argc) LPWSTR argv[] )
     {
         CHAR * szT = szEseutilCmd;
 
-        (void)ErrOSStrCbFormatA( szT, cbAllArgs, "Command:     \"" );   // 5 spaces is _perfect_. Excercise to reader as to why.
+        OSStrCbFormatA( szT, cbAllArgs, "Command:     \"" );   // 5 spaces is _perfect_. Excercise to reader as to why.
         size_t cbUsed = strlen( szT );
         szT += cbUsed;
         cbAllArgs -= cbUsed;
@@ -5396,7 +5395,7 @@ void PushEseutilArgTrace( INT argc, __in_ecount(argc) LPWSTR argv[] )
         for( INT iarg = 0; iarg < argc; iarg++ )
         {
             //  Not sure if MBCS can expand this, but left buffer anyways, may truncate but we'd survive.
-            (void)ErrOSStrCbFormatA( szT, cbAllArgs, "%ws ", argv[iarg] );
+            OSStrCbFormatA( szT, cbAllArgs, "%ws ", argv[iarg] );
             cbUsed = strlen( szT );
             szT += cbUsed;
             cbAllArgs -= cbUsed;
@@ -5404,7 +5403,7 @@ void PushEseutilArgTrace( INT argc, __in_ecount(argc) LPWSTR argv[] )
         if ( argc )
         {
             //  if we had any args wipe out the last space with the end quote.
-            (void)ErrOSStrCbFormatA( szT - 1, cbAllArgs + 1, "\"" );
+            OSStrCbFormatA( szT - 1, cbAllArgs + 1, "\"" );
         }
         JET_TESTHOOKTRACETESTMARKER mark = { sizeof(mark), szEseutilCmd, 1 };
         JetTestHook( opTestHookTraceTestMarker, &mark );

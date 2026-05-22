@@ -200,6 +200,7 @@ ERR ErrOSEventTraceInit()
 
     // Needed to make everything compile.  Harmless.
     (void)FOSEventTraceEnabled();
+    (void)FOSEventTraceAnyKeywordEnabled( 0 );
 
     return JET_errSuccess;
 }
@@ -267,3 +268,35 @@ INLINE BOOL FOSEventTraceEnabled()
     // return !fThanks;
 }
 
+template< OSEventTraceKeywordGUID etguid >
+INLINE BOOL FOSEventTraceKeywordEnabled()
+{
+    if ( g_fDisableTracingForced )
+    {
+        return fFalse;
+    }
+
+#ifdef ESENT
+    MCGEN_TRACE_CONTEXT* p = &Microsoft_Windows_ESE_Context;
+#else
+    MCGEN_TRACE_CONTEXT* p = &Microsoft_Exchange_ESE_Context;
+#endif
+
+    return ( etguid & p->MatchAnyKeyword );
+}
+
+INLINE BOOL FOSEventTraceAnyKeywordEnabled( const ULONGLONG ullKeywordMask )
+{
+    if ( g_fDisableTracingForced )
+    {
+        return fFalse;
+    }
+
+#ifdef ESENT
+    MCGEN_TRACE_CONTEXT* p = &Microsoft_Windows_ESE_Context;
+#else
+    MCGEN_TRACE_CONTEXT* p = &Microsoft_Exchange_ESE_Context;
+#endif
+
+    return ( ( ullKeywordMask & p->MatchAnyKeyword ) != 0 );
+}

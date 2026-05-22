@@ -1837,11 +1837,11 @@ ERR ErrOSMemoryInit()
 
 #ifdef MEM_CHECK
 
-INLINE const CHAR * const SzNewFile()
+const CHAR * const SzNewFile()
 {
     return Postls()->szNewFile;
 }
-INLINE ULONG UlNewLine()
+ULONG UlNewLine()
 {
     return Postls()->ulNewLine;
 }
@@ -2024,7 +2024,7 @@ VOID SprintHex(
     {
         if ( 0 != cbAddress )
         {
-            StringCbPrintfA( sz, cbDest-(sz-szDest), "%*.*lx    ", cbAddress, cbAddress, (INT)(pb - rgbSrc) + cbStart );
+            OSStrCbFormatA( sz, cbDest-(sz-szDest), "%*.*lx    ", cbAddress, cbAddress, (INT)(pb - rgbSrc) + cbStart );
             sz += strlen( sz );
         }
         CHAR * szHex    = sz;

@@ -276,7 +276,7 @@ INLINE ERR TCachedBlockWriteCountsManager<I>::ErrSave()
 
     //  flush the write
 
-    Call( m_pff->ErrFlushFileBuffers( iofrBlockCache ) );
+    Call( m_pff->ErrFlushFileBuffers( iofrBlockCache, ffmDataOnly ) );
 
     //  move to the new write set
 

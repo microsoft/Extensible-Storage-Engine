@@ -626,6 +626,24 @@ class CCachedBlockSlabReference : public CCachedBlockSlabWrapper
             m_pcbsm->RemoveSlabReference( &m_pste );
         }
 
+#pragma push_macro( "new" )
+#undef new
+
+        using CPool = TPool<CCachedBlockSlabReference>;
+
+        void* operator new( _In_ const size_t cb )
+        {
+            return CPool::PvAllocate();
+        }
+
+        void operator delete( _In_opt_ void* const pv )
+        {
+            void* pvT = pv;
+            CPool::Free( &pvT );
+        }
+
+#pragma pop_macro( "new" )
+
     private:
 
         TCachedBlockSlabManager<ICachedBlockSlabManager>* const m_pcbsm;

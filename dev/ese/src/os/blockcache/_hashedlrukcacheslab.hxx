@@ -141,6 +141,8 @@ class TCachedBlockSlab  //  cbs
 
         BOOL FDirty() override;
 
+        int CInvalidSlot() override;
+
         ERR ErrSave(    _In_opt_    const ICachedBlockSlab::PfnSlabSaved    pfnSlabSaved,
                         _In_opt_    const DWORD_PTR                         keySlabSaved ) override;
 
@@ -270,6 +272,11 @@ class TCachedBlockSlab  //  cbs
         void RevertUnacceptedUpdate( _In_ CUpdate* const pupdate, _In_ const BOOL fPermanently );
         void RestoreUnacceptedUpdates();
         void InvalidateCachedRead();
+
+        void TrackInvalidSlots( _In_ const CCachedBlockSlot&    slotBefore,
+                                _In_ const CCachedBlockSlot&    slotAfter );
+        void TrackValidSlot( _In_ const CCachedBlockSlot& slot );
+        void TrackInvalidSlot( _In_ const CCachedBlockSlot& slot );
 
         ERR ErrResetChunk( _In_ const size_t icbc );
 
@@ -716,6 +723,9 @@ class TCachedBlockSlab  //  cbs
         int                                             m_cUpdate;
         BOOL*                                           m_rgfDirty;
         BOOL                                            m_fDirty;
+        int                                             m_cInvalid;
+        ChunkNumber                                     m_chnoInvalidHint;
+        SlotNumber                                      m_slnoInvalidHint;
         CInvasiveList<CUpdate, CUpdate::OffsetOfILE>    m_ilUpdate;
         BOOL*                                           m_rgfSlotSuperceded;
 
@@ -1022,6 +1032,10 @@ INLINE ERR TCachedBlockSlab<I>::ErrUpdateSlot( _In_ const CCachedBlockSlot& slot
 
     m_rgcUpdate[ icbc ]++;
     m_cUpdate++;
+
+    //  track invalid slots
+
+    TrackInvalidSlots( slotstCurrent, slotNew );
 
     //  update the superceded state
 
@@ -1518,6 +1532,15 @@ INLINE BOOL TCachedBlockSlab<I>::FDirty()
 }
 
 template< class I  >
+INLINE int TCachedBlockSlab<I>::CInvalidSlot()
+{
+    Assert( m_cInvalid >= 0 );
+    Assert( m_cInvalid <= m_ccbc* CCachedBlockChunk::Ccbl() );
+
+    return m_cInvalid;
+}
+
+template< class I  >
 INLINE ERR TCachedBlockSlab<I>::ErrSave(    _In_opt_    const ICachedBlockSlab::PfnSlabSaved    pfnSlabSaved,
                                             _In_opt_    const DWORD_PTR                         keySlabSaved )
 {
@@ -1620,6 +1643,9 @@ INLINE TCachedBlockSlab<I>::TCachedBlockSlab(   _In_    IFileFilter* const      
         m_cUpdate( 0 ),
         m_rgfDirty( NULL ),
         m_fDirty( fFalse ),
+        m_cInvalid( 0 ),
+        m_chnoInvalidHint( chnoInvalid ),
+        m_slnoInvalidHint( slnoInvalid ),
         m_rgfSlotSuperceded( NULL ),
         m_pfnSlabSaved( NULL ),
         m_keySlabSaved( NULL ),
@@ -1675,35 +1701,39 @@ INLINE ERR TCachedBlockSlab<I>::ErrInit()
 
         //  if this chunk passed verification then verify each slot in this cached block chunk
 
-        if ( m_rgerrChunk[ icbc ] >= JET_errSuccess )
+        for ( size_t icbl = 0; icbl < ccbl; icbl++ )
         {
-            for ( size_t icbl = 0; icbl < ccbl; icbl++ )
+            CCachedBlock* const pcbl = pcbc->Pcbl( icbl );
+
+            //  if this cached block chunk was uninit then defer init this slot
+
+            if ( fUninit )
             {
-                CCachedBlock* const pcbl = pcbc->Pcbl( icbl );
+                new( pcbl ) CCachedBlock(   CCachedBlockId( volumeidInvalid,
+                                                            fileidInvalid,
+                                                            fileserialInvalid,
+                                                            cbnoInvalid ),
+                                            m_clnoMin + (DWORD)( ( m_icbwcBase + icbc ) * ccbl + icbl ),
+                                            0,
+                                            tonoInvalid,
+                                            tonoInvalid,
+                                            fFalse,
+                                            fFalse,
+                                            fFalse,
+                                            fFalse,
+                                            fFalse,
+                                            updnoInvalid );
+            }
 
-                //  if this cached block chunk was uninit then defer init this slot
+            //  if the chunk is valid then verify the slot
 
-                if ( fUninit )
-                {
-                    new( pcbl ) CCachedBlock(   CCachedBlockId( volumeidInvalid,
-                                                                fileidInvalid,
-                                                                fileserialInvalid,
-                                                                cbnoInvalid ),
-                                                m_clnoMin + (DWORD)( ( m_icbwcBase + icbc ) * ccbl + icbl ),
-                                                0,
-                                                tonoInvalid,
-                                                tonoInvalid,
-                                                fFalse,
-                                                fFalse,
-                                                fFalse,
-                                                fFalse,
-                                                fFalse,
-                                                updnoInvalid );
-                }
+            if ( m_rgerrChunk[ icbc ] >= JET_errSuccess )
+            {
+                CCachedBlockSlot slot( m_ibSlab, Chno( icbc ), Slno( icbl ), *pcbl );
 
                 //  verify this slot
 
-                Call( ErrVerifySlot( CCachedBlockSlot( m_ibSlab, Chno( icbc ), Slno( icbl ), *pcbl ) ) );
+                Call( ErrVerifySlot( slot ) );
 
                 //  determine the max touch number
 
@@ -1711,6 +1741,23 @@ INLINE ERR TCachedBlockSlab<I>::ErrInit()
                 {
                     m_tonoLast = pcbl->Tono0();
                 }
+
+                //  track invalid slots
+
+                if ( !slot.FValid() )
+                {
+                    TrackInvalidSlot( slot );
+                }
+            }
+
+            //  if the chunk isn't valid then init our stats
+
+            else
+            {
+                CCachedBlockSlot slotDefault( m_ibSlab, Chno( icbc ), Slno( icbl ), CCachedBlock() );
+
+                Assert( !slotDefault.FValid() );
+                TrackInvalidSlot( slotDefault );
             }
         }
 
@@ -1962,25 +2009,64 @@ INLINE ERR TCachedBlockSlab<I>::ErrGetSlotForNewImage(  _In_                    
 
     //  try to find an empty slot to hold the new image, prefering least recently used slots to ensure we don't leave
     //  slots with very old updnos that could cause problems due to wrap around
+    //
+    //  if this is a journal slab then use the first invalid slot we find starting from the hint
 
-    for ( size_t icbc = 0; icbc < m_ccbc; icbc++ )
+    if ( fJournalSlab )
     {
-        CCachedBlockChunk* const    pcbc    = Pcbc( icbc );
-        const size_t                ccbl    = CCachedBlockChunk::Ccbl();
+        const size_t    icbcInvalidHint = m_chnoInvalidHint == chnoInvalid ? 0 : (size_t)m_chnoInvalidHint;
+        const size_t    icblInvalidHint = m_slnoInvalidHint == slnoInvalid ? 0 : (size_t)m_slnoInvalidHint;
 
-        for ( size_t icbl = 0; icbl < ccbl; icbl++ )
+        for ( size_t iicbc = 0; !fFoundEmpty && iicbc < m_ccbc; iicbc++ )
         {
-            CCachedBlock* const pcbl = pcbc->Pcbl( icbl );
+            size_t                      icbc    = icbcInvalidHint + iicbc;
+                                        icbc    = icbc < m_ccbc ? icbc : icbc - m_ccbc;
+            CCachedBlockChunk* const    pcbc    = Pcbc( icbc );
+            const size_t                ccbl    = CCachedBlockChunk::Ccbl();
 
-            if (    !pcbl->FValid() &&
-                    (   !fFoundEmpty ||
-                        ( tono0Empty != tonoInvalid && pcbl->Tono0() == tonoInvalid ) ||
-                        ( tono0Empty != tonoInvalid && tono0Empty > pcbl->Tono0() ) ) )
+            for ( size_t iicbl = 0; !fFoundEmpty && iicbl < ccbl; iicbl++ )
             {
-                fFoundEmpty = fTrue;
-                icbcEmpty = icbc;
-                icblEmpty = icbl;
-                tono0Empty = pcbl->Tono0();
+                size_t              icbl    = icblInvalidHint + iicbl;
+                                    icbl    = icbl < ccbl ? icbl : icbl - ccbl;
+                CCachedBlock* const pcbl    = pcbc->Pcbl( icbl );
+
+                if ( !pcbl->FValid() )
+                {
+                    fFoundEmpty = fTrue;
+                    icbcEmpty = icbc;
+                    icblEmpty = icbl;
+                }
+            }
+        }
+
+        if ( !fFoundEmpty )
+        {
+            Assert( m_cInvalid == 0 );
+            m_chnoInvalidHint = chnoInvalid;
+            m_slnoInvalidHint = slnoInvalid;
+        }
+    }
+    else
+    {
+        for ( size_t icbc = 0; icbc < m_ccbc; icbc++ )
+        {
+            CCachedBlockChunk* const    pcbc    = Pcbc( icbc );
+            const size_t                ccbl    = CCachedBlockChunk::Ccbl();
+
+            for ( size_t icbl = 0; icbl < ccbl; icbl++ )
+            {
+                CCachedBlock* const pcbl = pcbc->Pcbl( icbl );
+
+                if (    !pcbl->FValid() &&
+                        (   !fFoundEmpty ||
+                            ( tono0Empty != tonoInvalid && pcbl->Tono0() == tonoInvalid ) ||
+                            ( tono0Empty != tonoInvalid && tono0Empty > pcbl->Tono0() ) ) )
+                {
+                    fFoundEmpty = fTrue;
+                    icbcEmpty = icbc;
+                    icblEmpty = icbl;
+                    tono0Empty = pcbl->Tono0();
+                }
             }
         }
     }
@@ -2751,6 +2837,8 @@ INLINE void TCachedBlockSlab<I>::RevertUnacceptedUpdate( _In_ CUpdate* const pup
     m_rgcUpdate[ icbc ]--;
     m_cUpdate--;
 
+    TrackInvalidSlots( pupdate->SlotAfter(), pupdate->SlotBefore() );
+
     if ( fPermanently )
     {
         m_ilUpdate.Remove( pupdate );
@@ -2781,6 +2869,8 @@ INLINE void TCachedBlockSlab<I>::RestoreUnacceptedUpdates()
 
         m_rgcUpdate[ icbc ]++;
         m_cUpdate++;
+
+        TrackInvalidSlots( pupdate->SlotBefore(), pupdate->SlotAfter() );
     }
 
     InvalidateCachedRead();
@@ -2790,6 +2880,80 @@ template<class I>
 INLINE void TCachedBlockSlab<I>::InvalidateCachedRead()
 {
     new( &m_cbidLastRead ) CCachedBlockId();
+}
+
+template<class I>
+INLINE void TCachedBlockSlab<I>::TrackInvalidSlots( _In_ const CCachedBlockSlot& slotBefore,
+                                                    _In_ const CCachedBlockSlot& slotAfter )
+{
+    if ( !slotBefore.FValid() && slotAfter.FValid() )
+    {
+        TrackValidSlot( slotAfter );
+    }
+    else if ( slotBefore.FValid() && !slotAfter.FValid() )
+    {
+        TrackInvalidSlot( slotAfter );
+    }
+}
+
+template<class I>
+INLINE void TCachedBlockSlab<I>::TrackValidSlot( _In_ const CCachedBlockSlot& slot )
+{
+    Assert( slot.Chno() != chnoInvalid );
+    Assert( slot.Slno() != slnoInvalid );
+
+    Assert( m_cInvalid > 0 );
+    m_cInvalid--;
+
+    Assert( m_chnoInvalidHint != chnoInvalid );
+    Assert( m_slnoInvalidHint != slnoInvalid );
+
+    if ( slot.Chno() == m_chnoInvalidHint && slot.Slno() == m_slnoInvalidHint )
+    {
+        m_slnoInvalidHint = (SlotNumber)( (size_t)m_slnoInvalidHint + 1 );
+        if ( m_slnoInvalidHint >= (SlotNumber)CCachedBlockChunk::Ccbl() )
+        {
+            m_slnoInvalidHint = (SlotNumber)0;
+            m_chnoInvalidHint = (ChunkNumber)( (size_t)m_chnoInvalidHint + 1 );
+            if ( m_chnoInvalidHint >= (ChunkNumber)m_ccbc )
+            {
+                m_chnoInvalidHint = (ChunkNumber)0;
+            }
+        }
+
+        Assert( m_chnoInvalidHint != chnoInvalid );
+        Assert( m_chnoInvalidHint >= (ChunkNumber)0 );
+        Assert( m_chnoInvalidHint < (ChunkNumber)m_ccbc );
+
+        Assert( m_slnoInvalidHint != slnoInvalid );
+        Assert( m_slnoInvalidHint >= (SlotNumber)0 );
+        Assert( m_slnoInvalidHint < (SlotNumber)CCachedBlockChunk::Ccbl() );
+
+        Assert( !( slot.Chno() == m_chnoInvalidHint && slot.Slno() == m_slnoInvalidHint ) );
+    }
+}
+
+template<class I>
+INLINE void TCachedBlockSlab<I>::TrackInvalidSlot( _In_ const CCachedBlockSlot& slot )
+{
+    Assert( slot.Chno() != chnoInvalid );
+    Assert( slot.Slno() != slnoInvalid );
+
+    Assert( m_cInvalid < m_ccbc * CCachedBlockChunk::Ccbl() );
+    m_cInvalid++;
+
+    Assert( ( m_chnoInvalidHint == chnoInvalid ) == ( m_slnoInvalidHint == slnoInvalid ) );
+
+    if ( ( m_chnoInvalidHint == chnoInvalid && m_slnoInvalidHint == slnoInvalid ) ||
+        slot.Chno() < m_chnoInvalidHint ||
+        ( slot.Chno() == m_chnoInvalidHint && slot.Slno() < m_slnoInvalidHint ) )
+    {
+        m_chnoInvalidHint = slot.Chno();
+        m_slnoInvalidHint = slot.Slno();
+    }
+
+    Assert( m_chnoInvalidHint != chnoInvalid );
+    Assert( m_slnoInvalidHint != slnoInvalid );
 }
 
 template<class I>
@@ -2861,15 +3025,15 @@ int TCachedBlockSlab<I>::CompareSlotsForInit( _In_ const ISlot& islotA, _In_ con
     const BOOL                  fValidA = pcblA->FValid();
     const BOOL                  fValidB = pcblB->FValid();
 
-    if ( !fValidA & fValidB )
+    if ( ( !fValidA ) & fValidB )
     {
         return -1;
     }
-    if ( fValidA & !fValidB )
+    if ( fValidA & ( !fValidB ) )
     {
         return 1;
     }
-    if ( !fValidA & !fValidB )
+    if ( ( !fValidA ) & ( !fValidB ) )
     {
         if ( islotA < islotB )
         {
@@ -2962,15 +3126,15 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ co
     const TouchNumber           tono0A  = pcblA->Tono0();
     const TouchNumber           tono0B  = pcblB->Tono0();
 
-    if ( !fValidA & fValidB )
+    if ( ( !fValidA ) & fValidB )
     {
         return -1;
     }
-    if ( fValidA & !fValidB )
+    if ( fValidA & ( !fValidB ) )
     {
         return 1;
     }
-    if ( !fValidA & !fValidB )
+    if ( ( !fValidA ) & ( !fValidB ) )
     {
         if ( tono0A == tonoInvalid && tono0B != tonoInvalid )
         {
@@ -3008,11 +3172,11 @@ int TCachedBlockSlab<I>::CompareSlotsForEvict( _In_ const ISlot& islotA, _In_ co
     const BOOL  fSupercededA    = m_rgfSlotSuperceded[ (size_t)islotA ];
     const BOOL  fSupercededB    = m_rgfSlotSuperceded[ (size_t)islotB ];
 
-    if ( fSupercededA & !fSupercededB )
+    if ( fSupercededA & ( !fSupercededB ) )
     {
         return -1;
     }
-    if ( !fSupercededA & fSupercededB )
+    if ( ( !fSupercededA ) & fSupercededB )
     {
         return 1;
     }
@@ -3161,6 +3325,24 @@ class CCachedBlockSlab  //  cbsm
             return err;
         }
 
+#pragma push_macro( "new" )
+#undef new
+
+        using CPool = TPool<CCachedBlockSlab>;
+
+        void* operator new( _In_ const size_t cb )
+        {
+            return CPool::PvAllocate();
+        }
+
+        void operator delete( _In_opt_ void* const pv )
+        {
+            void* pvT = pv;
+            CPool::Free( &pvT );
+        }
+
+#pragma pop_macro( "new" )
+
     private:
 
         CCachedBlockSlab(   _In_    IFileFilter* const                      pff,
@@ -3171,7 +3353,7 @@ class CCachedBlockSlab  //  cbsm
                             _In_    const QWORD                             icbwcBase,
                             _In_    const ClusterNumber                     clnoMin,
                             _In_    const ClusterNumber                     clnoMax )
-            : TCachedBlockSlab<ICachedBlockSlab>( pff, ibSlab, cbSlab, ccbc, pcbwcm, icbwcBase, clnoMin, clnoMax )
+            :   TCachedBlockSlab<ICachedBlockSlab>( pff, ibSlab, cbSlab, ccbc, pcbwcm, icbwcBase, clnoMin, clnoMax )
         {
         }
 };

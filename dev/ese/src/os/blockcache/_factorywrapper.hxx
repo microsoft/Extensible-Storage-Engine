@@ -254,6 +254,11 @@ class TBlockCacheFactoryWrapper
             return m_piInner->ErrDetachFile( wszFilePath, pfnDetachFileStatus, keyDetachFileStatus );
         }
 
+        ERR ErrIsCachedFile( _In_z_ const WCHAR* const wszFilePath, _Out_ BOOL* const pfCached ) override
+        {
+            return m_piInner->ErrIsCachedFile( wszFilePath, pfCached );
+        }
+
     private:
 
         I* const   m_piInner;

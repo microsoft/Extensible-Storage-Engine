@@ -40,7 +40,7 @@ namespace Internal
                         {
                             String^ absPath = I()->Path();
                             pin_ptr<const Char> wszAbsPathT = PtrToStringChars( absPath );
-                            OSStrCbCopyW( wszAbsPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszAbsPathT );
+                            OSStrCbCopyW( wszAbsPath, cbOSFSAPI_MAX_PATHW, wszAbsPathT );
                         }
 
                         QWORD CbMaximumSize() override

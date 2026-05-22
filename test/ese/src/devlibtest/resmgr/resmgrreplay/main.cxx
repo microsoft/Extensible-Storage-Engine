@@ -44,6 +44,10 @@ static void PrintHelp( const WCHAR * const wszApplication )
     fprintf( stderr, "    /PrintSamples <IntervalInSec>: prints out simulation samples, in sec (default: do not print samples). (/Emulate only)\n" );
     fprintf( stderr, "    /NoHisto: do not print out histograms. (default: print histograns). (/Emulate only)\n" );
     fprintf( stderr, "    /Ifmp <IfmpFilter>: specific IFMP to report results on (default: all IFMPs). Note, the simulation is always performed with all IFMPs. (/Emulate only)\n" );
+    fprintf( stderr, "    /SubSampling <ratio> <seed>: Subsample events by keeping on average one event out of <ratio> event. <seed> is used to change the set of subsampled pages.\n" );
+    fprintf( stderr, "      Note that to estimate the performance of the cache using a subsampled trace, the cache size must also be scaled by 1/<ratio>.\n" );
+    fprintf( stderr, "      Similarly, event counters in the statistics must be multiplied by <ratio> to estimate their values under the full workload.\n" );
+    fprintf( stderr, "      <ratio> must be at least 1, <seed> must be positive. (/Emulate only)\n" );
 }
 
 //  ================================================================
@@ -159,6 +163,8 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
     Alloc( pids );
     cacheSizes                          = new std::set<DWORD>();
     Alloc( cacheSizes );
+    DWORD dwSamplingRatio               = 1;
+    DWORD dwSamplingSeed                = 1;
 
     if ( ( 0 == _wcsicmp( argv[1], L"/Ftl" ) ) || ( 0 == _wcsicmp( argv[1], L"-Ftl" ) ) )
     {
@@ -634,6 +640,25 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 Error( ErrERRCheck( JET_errInvalidParameter ) );
             }
         }
+        else if ( 0 == _wcsicmp( argv[iarg], L"/SubSampling" ) || 0 == _wcsicmp( argv[iarg], L"-SubSampling" ) )
+        {
+            if ( ( iarg + 2 ) < argc )
+            {
+                dwSamplingRatio = (DWORD)_wtoi( argv[iarg + 1] );
+                dwSamplingSeed = (DWORD)_wtoi( argv[iarg + 2] );
+                iarg += 2;
+                if ( dwSamplingRatio < 1 )
+                {
+                    wprintf( L"Invalid sampling options.\n" );
+                    Error( ErrERRCheck( JET_errInvalidParameter ) );
+                }
+            }
+            else
+            {
+                wprintf( L"Insufficient number of arguments for /SubSampling option.\n" );
+                Error( ErrERRCheck( JET_errInvalidParameter ) );
+            }
+        }
         else
         {
             wprintf( L"Invalid argument: %ws.\n", argv[iarg] );
@@ -888,6 +913,7 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 emulator.SetPrintHistograms( fPrintHistograms );
                 Call( emulator.ErrSetFaultsHistoRes( cCachedHistoRes ) );
                 Call( emulator.ErrSetLifetimeHistoRes( dtickLifetimeHistoRes ) );
+                Call( emulator.ErrSetSamplingParameters( dwSamplingRatio, dwSamplingSeed ) );
                 
                 Call( emulator.ErrInit( pbfftlc, pipea ) );
 
@@ -1019,6 +1045,7 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                     emulator.SetPrintHistograms( fPrintHistograms );
                     Call( emulator.ErrSetFaultsHistoRes( cCachedHistoRes ) );
                     Call( emulator.ErrSetLifetimeHistoRes( dtickLifetimeHistoRes ) );
+                    Call( emulator.ErrSetSamplingParameters( dwSamplingRatio, dwSamplingSeed ) );
 
                     if ( ( rmmode == rmemCacheSizeIteration ) || ( rmmode == rmemCacheSizeFixedIteration ) || ( rmmode == rmemCacheSizeIterationAvoidable ) ||
                             ( rmmode == rmemCacheFaultIteration ) || ( rmmode == rmemCacheFaultIterationAvoidable ) )

@@ -146,6 +146,18 @@ ERR ErrSPIOpenOwnExt(
     FUCB    *pfucb,
     FUCB    **ppfucbOE );
 
+ERR ErrSPIGetInfo(
+    FUCB        *pfucb,
+    const PGNO  pgnoHighest,
+    CPG         *pcpgTotal,
+    CPG         *pcpgReserved,
+    CPG         *pcpgShelved,
+    INT         *piext,
+    INT         cext,
+    EXTENTINFO  *rgext,
+    INT         *pcextSentinelsRemaining,
+    CPRINTF     * const pcprintf );
+
 ERR ErrSPIGetExtentInfo(
     _In_ const FUCB             *pfucb,
     _Out_ PGNO                  *ppgnoLast,

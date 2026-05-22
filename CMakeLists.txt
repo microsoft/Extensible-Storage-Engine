@@ -51,6 +51,13 @@ else()
     message(FATAL_ERROR "NOTE: NOT setting 64-bit OR 32-bit symbols")
 endif()
 
+# Set the C++ standard to C++17
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)  # Optional: disables compiler-specific extensions like MSVC's /TP
+# Alternative, is this other way to do it, that is MSVC specific (so would need to be in if MSVC clause of some kind)
+#  add_compile_options(/std:c++17)
+
 # CMake chooses reasonable prefixes and suffixes for Unix-like platforms,
 # but we'd rather keep them the same for now. May revisit this decision later.
 set(CMAKE_STATIC_LIBRARY_PREFIX)
@@ -140,8 +147,21 @@ link_libraries(
     ${ESE_RELEASE_LIBRARIES}
 )
 
+#  Global ESE project defines
+add_compile_definitions(
+    OS_LAYER_USE_NEW_OVERRIDE
+)
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     # Using Microsoft Visual C++
+
+    # The _HAS_STD_BYTE=0 came in along with the CMAKE_CXX_STANDARD 17 (and was <LanguageStandard>stdcpp17</LanguageStandard> change 
+    # from the .vcxproj project file world) to make ESE code not conflict.  Research suggested this is only need for MSVC, so it is 
+    # set in here.
+    add_compile_definitions(
+        _HAS_STD_BYTE=0
+    )
+
     add_compile_options(
         /Oi # generate intrinsic functions
         /Ot
@@ -158,6 +178,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         /Gy # function-level linking
         /Zc:wchar_t-
         /Zc:forScope
+        /Zc:externConstexpr
         /Zc:inline-
         /GR-
         /TP

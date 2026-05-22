@@ -50,8 +50,6 @@ deal with that.
 #include "osustd.hxx"
 #include "esestd.hxx"
 
-
-
 //  ================================================================
 XECHECKSUM LongChecksumFromShortChecksum( const ULONG xorChecksum, const ULONG pgno )
 //  ================================================================
@@ -108,8 +106,8 @@ UINT IbitNewChecksumFormatFlag( const PAGETYPE pagetype )
         //  for database pages, the page flags are stored in the 10th
         //  unsigned long. The format bit is 0x2000, which is the 14th bit
         //
-        Assert( OffsetOf( CPAGE::PGHDR, fFlags ) * 8 == 9 * 32 );
-        Assert( CPAGE::fPageNewChecksumFormat == ( 1 << 13 ) );
+        static_assert( OffsetOf( CPAGE::PGHDR, fFlags ) * 8 == 9 * 32 );
+        static_assert( CPAGE::fPageNewChecksumFormat == ( 1 << 13 ) );
 
         return ( 9 * 32 ) + 13;
     }
@@ -267,19 +265,18 @@ ULONG CbBlockSize( const ULONG cb )
 }
 
 //  ================================================================
-static PAGECHECKSUM ComputePageChecksum(
+LOCAL PAGECHECKSUM ComputePageChecksum_(
     const void* const pv,
     const UINT cb,
     const PAGETYPE pagetype,
     const ULONG pgno,
-    // set fNew to compute new ECC for a page (R/W wrt the large page!!)
-    // reset fNew to computer ECC for verification purpose (R/O wrt the page)
-    const BOOL fNew = fFalse )
+    const BOOL fNewChecksumFormat,
+    const BOOL fWriteChecksum )
 //  ================================================================
 {
     if( FPageHasLongChecksum( pagetype ) )
     {
-        if( FPageHasNewChecksumFormat( pv, pagetype ) )
+        if( fNewChecksumFormat )
         {
             // large pages (16/32kiB) always have new checksum format
             PAGECHECKSUM pgChecksum;
@@ -311,7 +308,7 @@ static PAGECHECKSUM ComputePageChecksum(
 
                 // write checksums into designated location in header block
                 // so checksum for header block can protect them as well
-                if ( fNew )
+                if ( fWriteChecksum )
                 {
                     // cast RO pv to RW pPgHdr2
                     CPAGE::PGHDR2* const pPgHdr2 = ( CPAGE::PGHDR2* )pv;
@@ -332,6 +329,18 @@ static PAGECHECKSUM ComputePageChecksum(
     }
 
     return ChecksumOldFormat((unsigned char *)pv, cb);
+}
+
+//  ================================================================
+static PAGECHECKSUM ComputePageChecksum(
+    const void* const pv,
+    const UINT cb,
+    const PAGETYPE pagetype,
+    const ULONG pgno,
+    const BOOL fWriteChecksum = fFalse )
+//  ================================================================
+{
+    return ComputePageChecksum_( pv, cb, pagetype, pgno, FPageHasNewChecksumFormat( pv, pagetype ), fWriteChecksum );
 }
 
 //  ================================================================
@@ -383,7 +392,7 @@ static void TryFixPage(
     UINT ibT = 0;
     XECHECKSUMERROR rgErr[ cxeChecksumPerPage ] = { xeChecksumNoError, };
 
-    UINT rgibitCorrupted[ cxeChecksumPerPage ] = { IbitNewChecksumFormatFlag( pagetype ), UINT_MAX, UINT_MAX, UINT_MAX, };
+    UINT rgibitCorrupted[ cxeChecksumPerPage ] = { UINT_MAX, UINT_MAX, UINT_MAX, UINT_MAX, };
     UINT ibitCorrupted = UINT_MAX;
 
     // work out correction
@@ -488,11 +497,25 @@ void ChecksumAndPossiblyFixPage(
 
     *pchecksumExpected  = ChecksumFromPage( pv, cb, pagetype );
     *pchecksumActual    = ComputePageChecksum( pv, cb, pagetype, pgno );
-    
+
     const BOOL fNewChecksumFormat = FPageHasNewChecksumFormat( pv, pagetype );
-    if( *pchecksumActual != *pchecksumExpected && fNewChecksumFormat )
+    if ( *pchecksumActual != *pchecksumExpected && *pchecksumExpected != PAGECHECKSUM{ 0 } )
     {
-        TryFixPage( pv, cb, pagetype, fCorrectError, pfCorrectableError, pibitCorrupted, *pchecksumExpected, *pchecksumActual );
+        // Try correcting bit flips in the page for non-zero pages. (Pages whose checksum isn't 0).
+        // Note that a valid old format checksum can be 0 for some combination of non-zero bits on the page.
+        // A valid new checksum can't be zero because it comprises of two complimentary checksums,
+        // both of which can only be 0 if all of the bits on the page are 0 or 1.
+        // See checksum_amd64.cxx for a detailed description of why that is true.
+
+        // Old checksum format doesn't support error correction.
+        // But it could be that the checksum was new format and the bit that indicated formats got flipped.
+        // Compute the checksum as new format and try fixing it.
+        // If it is fixable, then we know that fNewChecksumFormat bit on the page got flipped.
+        PAGECHECKSUM checksumNewFormat = fNewChecksumFormat ?
+                                                *pchecksumActual :
+                                                ComputePageChecksum_( pv, cb, pagetype, pgno, fTrue, fFalse );
+
+        TryFixPage( pv, cb, pagetype, fCorrectError, pfCorrectableError, pibitCorrupted, *pchecksumExpected, checksumNewFormat );
         Assert( ( *pfCorrectableError && *pibitCorrupted != -1 ) || ( !*pfCorrectableError && *pibitCorrupted == -1 ) );
 
         // no point in re-computing the checksum if we haven't done any changes
@@ -524,13 +547,13 @@ void DumpLargePageChecksumInfo(
     {
         PAGECHECKSUM checksumStoredInHeader     = ChecksumFromPage( pv, cb, pagetype );
         PAGECHECKSUM checksumComputedOffData    = ComputePageChecksum( pv, cb, pagetype, pgno );
-        (*pcprintf)( _T(     "HEADER checksum     = 0x%016I64X:0x%016I64X:0x%016I64X:0x%016I64X\n" ),
+        (*pcprintf)( "HEADER checksum     = 0x%016I64X:0x%016I64X:0x%016I64X:0x%016I64X\n",
             checksumStoredInHeader.rgChecksum[ 0 ], checksumStoredInHeader.rgChecksum[ 1 ], checksumStoredInHeader.rgChecksum[ 2 ], checksumStoredInHeader.rgChecksum[ 3 ] );
 
         if( checksumStoredInHeader != checksumComputedOffData )
         {
-            (*pcprintf)( _T( "****** checksum mismatch ******\n" ) );
-            (*pcprintf)( _T( "COMPUTED checksum   = 0x%016I64X:0x%016I64X:0x%016I64X:0x%016I64X\n" ),
+            (*pcprintf)( "****** checksum mismatch ******\n" );
+            (*pcprintf)( "COMPUTED checksum   = 0x%016I64X:0x%016I64X:0x%016I64X:0x%016I64X\n",
                 checksumComputedOffData.rgChecksum[ 0 ], checksumComputedOffData.rgChecksum[ 1 ], checksumComputedOffData.rgChecksum[ 2 ], checksumComputedOffData.rgChecksum[ 3 ] );
 
             BOOL fCorrectableError = fFalse;
@@ -539,15 +562,15 @@ void DumpLargePageChecksumInfo(
 
             if ( !fCorrectableError )
             {
-                (*pcprintf)( _T( "error is NOT correctable by the checksum\n" ) );
+                (*pcprintf)( "error is NOT correctable by the checksum\n" );
             }
             else
             {
                 Assert( 0 <= ibitCorrupted && ( unsigned )ibitCorrupted <= CHAR_BIT * cb );
-                (*pcprintf)( _T( "a bit at offset %d (0x%X) was corrupted and can be corrected by the checksum\n" ), ibitCorrupted, ibitCorrupted );
+                (*pcprintf)( "a bit at offset %d (0x%X) was corrupted and can be corrected by the checksum\n", ibitCorrupted, ibitCorrupted );
 
                 const PAGECHECKSUM checksumFixed = ComputePageChecksum( pv, cb, pagetype, pgno );
-                (*pcprintf)( _T( "FIXED checksum    = 0x%016I64X:0x%016I64X:0x%016I64X:0x%016I64X\n" ),
+                (*pcprintf)( "FIXED checksum    = 0x%016I64X:0x%016I64X:0x%016I64X:0x%016I64X\n",
                     checksumFixed.rgChecksum[ 0 ], checksumFixed.rgChecksum[ 1 ], checksumFixed.rgChecksum[ 2 ], checksumFixed.rgChecksum[ 3 ] );
                 Assert( checksumFixed == checksumStoredInHeader );
             }
@@ -555,7 +578,7 @@ void DumpLargePageChecksumInfo(
     }
     EXCEPT( efaExecuteHandler )
     {
-        (*pcprintf)( _T( "\t<unable to validate page checksum info>\n" ) );
+        (*pcprintf)( "\t<unable to validate page checksum info>\n" );
     }
     ENDEXCEPT
 }
@@ -582,56 +605,56 @@ void DumpPageChecksumInfo(
         const BOOL          fNewChecksumFormat      = FPageHasNewChecksumFormat( pv, pagetype );
         const BOOL          fBadChecksum            = ( checksumStoredInHeader != checksumComputedOffData );
         
-        (*pcprintf)( _T(     "\theader checksum       = 0x%016I64x\n" ), checksumStoredInHeader.rgChecksum[ 0 ] );
+        (*pcprintf)( "\theader checksum       = 0x%016I64x\n", checksumStoredInHeader.rgChecksum[ 0 ] );
         if( fBadChecksum )
         {
-            (*pcprintf)( _T( "\t****** checksum mismatch ******\n" ) );
-            (*pcprintf)( _T( "\tcomputed checksum     = 0x%016I64x\n" ), checksumComputedOffData );
+            (*pcprintf)( "\t****** checksum mismatch ******\n" );
+            (*pcprintf)( "\tcomputed checksum     = 0x%016I64x\n", checksumComputedOffData );
         }
         if( !fNewChecksumFormat )
         {
-            (*pcprintf)( _T( "\t\told checksum format\n" ) );
+            (*pcprintf)( "\t\told checksum format\n" );
             const ULONG * pdw = (const ULONG * ) pv;
             const ULONG pgnoFromPage = pdw[1];
-            (*pcprintf)( _T( "\t\t\tpgno = %d\n" ), pgnoFromPage );
+            (*pcprintf)( "\t\t\tpgno = %d\n", pgnoFromPage );
         }
         else
         {
-            (*pcprintf)( _T( "\t\tnew checksum format\n" ) );
+            (*pcprintf)( "\t\tnew checksum format\n" );
             const ULONG eccChecksumComputed = DwECCChecksumFromXEChecksum( checksumComputedOffData.rgChecksum[ 0 ] );
             const ULONG xorChecksumComputed = DwXORChecksumFromXEChecksum( checksumComputedOffData.rgChecksum[ 0 ] );
             const ULONG eccChecksumHeader = DwECCChecksumFromXEChecksum( checksumStoredInHeader.rgChecksum[ 0 ] );
             const ULONG xorChecksumHeader = DwXORChecksumFromXEChecksum( checksumStoredInHeader.rgChecksum[ 0 ] );
-            (*pcprintf)( _T( "\t\t\theader ECC checksum = 0x%08x\n" ), eccChecksumHeader );
+            (*pcprintf)( "\t\t\theader ECC checksum = 0x%08x\n", eccChecksumHeader );
             if( fBadChecksum )
             {
-                (*pcprintf)( _T( "\t\t\tcomputed ECC checksum = 0x%08x\n" ), eccChecksumComputed );
+                (*pcprintf)( "\t\t\tcomputed ECC checksum = 0x%08x\n", eccChecksumComputed );
             }
-            (*pcprintf)( _T( "\t\t\theader XOR checksum   = 0x%08x\n" ), xorChecksumHeader );
+            (*pcprintf)( "\t\t\theader XOR checksum   = 0x%08x\n", xorChecksumHeader );
             if( fBadChecksum )
             {
-                (*pcprintf)( _T( "\t\t\tcomputed XOR checksum = 0x%08x\n" ), xorChecksumComputed );
+                (*pcprintf)( "\t\t\tcomputed XOR checksum = 0x%08x\n", xorChecksumComputed );
             }
 
             if( fBadChecksum )
             {
                 if( !FECCErrorIsCorrectable( cb, checksumStoredInHeader.rgChecksum[ 0 ], checksumComputedOffData.rgChecksum[ 0 ] ) )
                 {
-                    (*pcprintf)( _T( "\tchecksum error is NOT correctable\n" ) );
+                    (*pcprintf)( "\tchecksum error is NOT correctable\n" );
                     if( eccChecksumComputed == eccChecksumHeader )
                     {
                         const ULONG pgnoPossible = xorChecksumComputed ^ xorChecksumHeader ^ pgno;
-                        (*pcprintf)( _T( "\tECC checksums match. perhaps this is actually page %d?\n" ), pgnoPossible );
+                        (*pcprintf)( "\tECC checksums match. perhaps this is actually page %d?\n", pgnoPossible );
                     }
                 }
                 else
                 {
-                    (*pcprintf)( _T( "\tchecksum error is correctable\n" ) );
+                    (*pcprintf)( "\tchecksum error is correctable\n" );
                     const UINT ibitCorrupted = IbitCorrupted( cb, checksumStoredInHeader.rgChecksum[ 0 ], checksumComputedOffData.rgChecksum[ 0 ] );
-                    (*pcprintf)( _T( "\t\tbit %d is corrupted\n" ), ibitCorrupted );
+                    (*pcprintf)( "\t\tbit %d is corrupted\n", ibitCorrupted );
                     if( IbitNewChecksumFormatFlag( pagetype ) == ibitCorrupted )
                     {
-                        (*pcprintf)( _T( "\t\tbit %d is the checksum format flag! this corruption is not fixable\n" ), ibitCorrupted );
+                        (*pcprintf)( "\t\tbit %d is the checksum format flag! this corruption is not fixable\n", ibitCorrupted );
                     }
                     else
                     {
@@ -639,16 +662,16 @@ void DumpPageChecksumInfo(
                         const PAGECHECKSUM  checksumFixed       = ComputePageChecksum( pv, cb, pagetype, pgno );
                         const ULONG eccChecksumFixed = DwECCChecksumFromXEChecksum( checksumFixed.rgChecksum[ 0 ] );
                         const ULONG xorChecksumFixed = DwXORChecksumFromXEChecksum( checksumFixed.rgChecksum[ 0 ] );
-                        (*pcprintf)( _T( "\t\tfixed checksum is 0x%016I64x\n" ), checksumFixed );
-                        (*pcprintf)( _T( "\t\tfixed ECC checksum is 0x%08x\n" ), eccChecksumFixed );
-                        (*pcprintf)( _T( "\t\tfixed XOR checksum is 0x%08x\n" ), xorChecksumFixed );
+                        (*pcprintf)( "\t\tfixed checksum is 0x%016I64x\n", checksumFixed );
+                        (*pcprintf)( "\t\tfixed ECC checksum is 0x%08x\n", eccChecksumFixed );
+                        (*pcprintf)( "\t\tfixed XOR checksum is 0x%08x\n", xorChecksumFixed );
                         if( checksumFixed == checksumStoredInHeader )
                         {
-                            (*pcprintf)( _T( "\t****** page corruption was fixed ******\n" ) );
+                            (*pcprintf)( "\t****** page corruption was fixed ******\n" );
                         }
                         else
                         {
-                            (*pcprintf)( _T( "\t****** page corruption fix FAILED! ******\n" ) );
+                            (*pcprintf)( "\t****** page corruption fix FAILED! ******\n" );
                         }
                     }
                 }
@@ -657,7 +680,7 @@ void DumpPageChecksumInfo(
     }
     EXCEPT( efaExecuteHandler )
     {
-        (*pcprintf)( _T( "\t<unable to validate page checksum info>\n" ) );
+        (*pcprintf)( "\t<unable to validate page checksum info>\n" );
     }
     ENDEXCEPT
 }

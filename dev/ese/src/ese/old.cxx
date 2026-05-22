@@ -2043,7 +2043,7 @@ LOCAL ERR ErrOLDDefragOneTree(
             err = ErrBTIMultipageCleanup( pfucb, bmStart, &bmNext, preccheck, &mergetype, fTrue );
             BTUp( pfucb );
 
-            if ( err < 0 )
+            if ( err < JET_errSuccess )
             {
                 //  if out of version store, try once to clean up
                 if ( ( JET_errVersionStoreOutOfMemory == err || JET_errVersionStoreOutOfMemoryAndCleanupTimedOut == err )
@@ -5323,13 +5323,18 @@ ERR CTableDefragment::ErrPerformOneMerge_( PrereadInfo * const pPrereadInfo )
     if ( mergetypeNone == mergetype || mergetypePartialLeft == mergetype )
     {
         err = ErrBTPageMove( m_pfucbToDefrag, bmCurr, pgnoNull, fTrue, fSPContinuous, &bmNext );
-        Call( err );
-
-        if ( err != wrnBTShallowTree )
+        
+        if ( err >= JET_errSuccess )
         {
             m_pold2Status->IncrementCpgMoved();
             PERFOpt( cOLDPagesMoved.Inc( pinst ) );
         }
+        else if ( err == errBTShallowTree )
+        {
+            err = JET_errSuccess;
+        }
+
+        Call( err );
     }
 
     m_pold2Status->SetBookmark( bmNext );

@@ -140,6 +140,11 @@ class TCachedBlockSlabWrapper  //  fw
             return m_piInner->FDirty();
         }
 
+        int CInvalidSlot() override
+        {
+            return m_piInner->CInvalidSlot();
+        }
+
         ERR ErrSave(    _In_opt_    const ICachedBlockSlab::PfnSlabSaved    pfnSlabSaved, 
                         _In_opt_    const DWORD_PTR                         keySlabSaved ) override
         {

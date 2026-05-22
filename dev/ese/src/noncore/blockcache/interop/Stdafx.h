@@ -22,6 +22,7 @@
 #include "FileIdentification.h"
 
 #include "FileModeFlags.h"
+#include "FileFlushMode.h"
 #include "FileQOS.h"
 #include "FileSize.h"
 #include "IFile.h"

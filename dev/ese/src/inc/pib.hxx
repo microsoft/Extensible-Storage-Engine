@@ -167,7 +167,7 @@ public:
             critLogBeginTrx( CLockBasicInfo( CSyncBasicInfo( szPIBLogBeginTrx ), rankPIBLogBeginTrx, 0 ) ),
             ptlsApi( NULL ),
             ptlsTrxBeginLast( Ptls() ),
-            asigWaitLogWrite( CSyncBasicInfo( _T( "PIB::asigWaitLogWrite" ) ) ),
+            asigWaitLogWrite( CSyncBasicInfo( "PIB::asigWaitLogWrite" ) ),
             m_level( 0 ),
             m_critCachePriority( CLockBasicInfo( CSyncBasicInfo( szPIBCachePriority ), rankPIBCachePriority, 0 ) ),
             m_pctCachePriority( g_pctCachePriorityUnassigned ),
@@ -252,7 +252,6 @@ public:
 private:
     DWORD_PTR           dwTrxContext;           //  default is thread id.
 
-    friend VOID PIBSetTrxBegin0( PIB * const ppib );
     LGPOS               lgposTrxBegin0;         //  temporary, only for debugging
 
     //  flags
@@ -281,6 +280,7 @@ private:
             FLAG32      m_fDBScan:1;                        //    session is for DBSCAN
             FLAG32      m_fLeakReport:1;                    //    session is for the leak report
             FLAG32      m_fEnforceOptionallyUniqueIndices:1;//    session is enforcing uniqueness on optionally unique indices. 
+            FLAG32      m_fDupedTransaction:1;              //    transaction on session is duped from another session
 #if defined(DEBUG) || defined(EXPENSIVE_INLINE_EXTENT_PAGE_COUNT_CACHE_VALIDATION)
             FLAG32      m_fUpdatingExtentPageCountCache:1;  //    session is currently updating the cached CPG values in the catalog
 #endif
@@ -511,6 +511,9 @@ public:
     ERR                 ErrDeregisterDeferredRceid( const RCEID& );
     VOID                RemoveAllDeferredRceid();
     VOID                AssertNoDeferredRceid() const;
+#ifdef DEBUG
+    BOOL                FDeferredRceid( const RCEID& );
+#endif
 
     ERR                 ErrRegisterRceid( const RCEID rceid, RCE * const prce);
     ERR                 ErrDeregisterRceid( const RCEID rceid );
@@ -579,6 +582,9 @@ public:
     void ClearUserTraceContextInTls() const;
     UserTraceContext*   Putc()                                          { return &m_utc; }
     const UserTraceContext* Putc() const                                { return &m_utc; }
+
+    VOID                PIBSetTrxBegin0( PIB * const ppibCopyFrom );
+    ERR                 ErrDupReadOnlyTransaction( PIB *ppib );
 
 #ifdef DEBUGGER_EXTENSION
     VOID DumpOpenTrxUserDetails( _In_ CPRINTF * const pcprintf, _In_ const DWORD_PTR dwOffset = 0, _In_ LONG lgenTip = 0 ) const;
@@ -866,7 +872,7 @@ INLINE ERR PIB::MACRO::ErrInsertPgnoFreed( IFMP ifmp, const PGNO pgnoFreed )
         Alloc( m_rgfmppgnoFreed = new CArray< CFMPPage >() );
     }
 
-    errArray = m_rgfmppgnoFreed->ErrSetEntry( m_rgfmppgnoFreed->Size(), fmppage );
+    errArray = m_rgfmppgnoFreed->ErrAppendEntry( fmppage );
 
     if ( errArray != CArray< CFMPPage >::ERR::errSuccess )
     {
@@ -1249,44 +1255,60 @@ INLINE VOID PIBSetLevelRollback( PIB *ppib, LEVEL levelT )
 #define TRXID_INCR  4
 
 //  ================================================================
-INLINE VOID PIBSetTrxBegin0( PIB * const ppib )
+INLINE VOID PIB::PIBSetTrxBegin0( PIB * const ppibCopyFrom = NULL )
 //  ================================================================
 //
 //  Used when a transaction starts from level 0 or refreshes
 //
 //-
 {
-    INST* const pinst = PinstFromPpib( ppib );
+    INST* const pinst = PinstFromPpib( this );
     INST::PLS* const ppls = pinst->Ppls();
 
     ppls->m_rwlPIBTrxOldest.EnterAsWriter();
-    if ( ppib->FReadOnlyTrx() )
+    if ( ppibCopyFrom )
     {
-        ppib->trxBegin0 = pinst->m_trxNewest + TRXID_INCR/2;
+        Assert( ppibCopyFrom->Level() > 0 );
+        Assert( ppibCopyFrom->FReadOnlyTrx() );
+        Assert( FReadOnlyTrx() );
+
+        trxBegin0 = ppibCopyFrom->trxBegin0;
+    }
+    else if ( FReadOnlyTrx() )
+    {
+        trxBegin0 = pinst->m_trxNewest + TRXID_INCR/2;
     }
     else
     {
-        ppib->trxBegin0 = TRX( AtomicExchangeAdd( (LONG *)&pinst->m_trxNewest, TRXID_INCR ) ) + TRXID_INCR;
+        trxBegin0 = TRX( AtomicExchangeAdd( (LONG *)&pinst->m_trxNewest, TRXID_INCR ) ) + TRXID_INCR;
     }
     // collect lgpos for debugging purpose
-    ppib->lgposTrxBegin0 = pinst->m_plog->LgposLGLogTipNoLock();
+    lgposTrxBegin0 = pinst->m_plog->LgposLGLogTipNoLock();
 
-    ppib->m_pplsTrxOldest = ppls;
+    m_pplsTrxOldest = ppls;
 #ifdef DEBUG
     // This trxBegin0 better not be older than the trxBegin0 of the first session on the invasive list or
     // TrxOldest calculation will be busted
     PIB* const ppibTrxOldest = ppls->m_ilTrxOldest.PrevMost();
-    Assert ( !ppibTrxOldest || ( INT( ppibTrxOldest->trxBegin0 - ppib->trxBegin0 ) <= 0 ) );
+    Assert ( !ppibTrxOldest || ( INT( ppibTrxOldest->trxBegin0 - trxBegin0 ) <= 0 ) );
 #endif
-    // Oldest transaction can only change if this is the first transaction
-    if ( ppls->m_ilTrxOldest.PrevMost() == NULL )
+    // Insert in trxBegin0 order in the TrxOldest CInvasiveList
+    if ( ppibCopyFrom )
     {
-        pinst->SetTrxOldestCachedMayBeStale();
+        ppls->m_ilTrxOldest.Insert( this, ppibCopyFrom );
     }
-    ppls->m_ilTrxOldest.InsertAsNextMost( ppib );
+    else
+    {
+        // Oldest transaction can only change if this is the first transaction
+        if ( ppls->m_ilTrxOldest.PrevMost() == NULL )
+        {
+            pinst->SetTrxOldestCachedMayBeStale();
+        }
+        ppls->m_ilTrxOldest.InsertAsNextMost( this );
+    }
     ppls->m_rwlPIBTrxOldest.LeaveAsWriter();
 
-    ppib->trxCommit0 = trxMax;
+    trxCommit0 = trxMax;
 }
 
 //  ================================================================

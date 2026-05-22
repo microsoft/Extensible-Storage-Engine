@@ -179,6 +179,8 @@ public:
 class PageEvictionEmulator
 //  ================================================================
 {
+    friend class ResMgrEmulatorBasicTest;                           // Used to access function FSamplePage from the unit test class ResMgrEmulatorBasicTest.
+
 public:
     //  Possible cache sizing policies.
 
@@ -375,6 +377,8 @@ public:
     void SetPrintHistograms( const bool fPrintHistograms );                         //  Whether or not to print histograms.
     ERR ErrSetFaultsHistoRes( const ULONG cFaultsHistoRes );                        //  See m_cFaultsHistoRes below, default is 1.
     ERR ErrSetLifetimeHistoRes( const TICK dtickLifetimeHistoRes );                 //  See m_dtickLifetimeHistoRes below, default is 1.
+    ERR ErrSetSamplingParameters( const DWORD dwSamplingRatio,                      //  See m_dwSamplingRatio below, default is 1.
+                                  const DWORD dwSamplingSeed );                     //  See m_dwSamplingSeed below, default is 0.
 
     //  Runs through a BFFTL trace.
 
@@ -472,6 +476,10 @@ private:
 
     bool m_fSetLgposModifySupported;                                //  Whether or not the traces being processed support SetLgposModify.
 
+    DWORD m_dwSamplingRatio;                                        //  Sampling ratio, used to replay the events on 1/m_dwSamplingRatio pages.
+
+    DWORD m_dwSamplingSeed;                                         //  Sampling seed, used to 'seed' the subsampling.
+
     //  Helpers.
 
     void ResetConfig();                                                     //  Resets the emulator configuration.
@@ -503,6 +511,8 @@ private:
                                 const SAMPLE sampleMax,
                                 const SAMPLE sampleRes,
                                 const bool fDumpDetails );
+
+    bool FSamplePage( const IFMPPGNO& ifmppgno );
 
     //  These functions update the state of the pages in the internal emulator
     //  data structures and accumulate statistics. They do not replay the traces.

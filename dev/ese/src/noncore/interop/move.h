@@ -20,7 +20,7 @@ namespace Isam
 // a warning. Instead we'll use INT_MIN, which is the same bit value.
 // Converting MJET_GRIT to be an unsigned enum is a nuisance, since CLR is much happier
 // with signed numbers.
-C_ASSERT( 0x80000000 == INT_MIN );
+static_assert( 0x80000000 == INT_MIN );
 
 MSINTERNAL enum class MJET_MOVE
 {

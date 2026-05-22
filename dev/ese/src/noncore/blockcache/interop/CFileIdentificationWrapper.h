@@ -75,7 +75,7 @@ namespace Internal
                     if ( keyPath != nullptr )
                     {
                         pin_ptr<const Char> wszKeyPathT = PtrToStringChars( keyPath );
-                        Call( ErrOSStrCbCopyW( wszKeyPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszKeyPathT ) );
+                        Call( ErrOSStrCbCopyW( wszKeyPath, cbOSFSAPI_MAX_PATHW, wszKeyPathT ) );
                     }
 
                 HandleError:
@@ -102,9 +102,9 @@ namespace Internal
                     ExCall( I()->GetFilePathById( (VolumeId)volumeid, (FileId)(Int64)fileid, anyAbsPath, keyPath ) );
 
                     pin_ptr<const Char> wszAnyAbsPathT = PtrToStringChars( anyAbsPath );
-                    Call( ErrOSStrCbCopyW( wszAnyAbsPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszAnyAbsPathT ) );
+                    Call( ErrOSStrCbCopyW( wszAnyAbsPath, cbOSFSAPI_MAX_PATHW, wszAnyAbsPathT ) );
                     pin_ptr<const Char> wszKeyPathT = PtrToStringChars( keyPath );
-                    Call( ErrOSStrCbCopyW( wszKeyPath, cbOSFSAPI_MAX_PATHW, (STRSAFE_LPCWSTR)wszKeyPathT ) );
+                    Call( ErrOSStrCbCopyW( wszKeyPath, cbOSFSAPI_MAX_PATHW, wszKeyPathT ) );
 
                 HandleError:
                     if ( err < JET_errSuccess )

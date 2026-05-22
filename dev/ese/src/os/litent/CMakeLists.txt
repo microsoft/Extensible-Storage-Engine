@@ -37,3 +37,7 @@ target_precompile_headers(oslite PRIVATE
 target_include_directories(oslite PRIVATE
     ./
 )
+
+target_link_libraries(oslite PRIVATE
+    _lz4
+)

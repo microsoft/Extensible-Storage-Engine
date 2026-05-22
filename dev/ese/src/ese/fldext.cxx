@@ -569,7 +569,131 @@ ERR ErrRECIRetrieveTaggedColumn(
     }
     if ( dataRec.Cb() < REC::cbRecordMin || dataRec.Cb() > REC::CbRecordMostCHECK( g_rgfmp[ pfcb->Ifmp() ].CbPage() ) )
     {
-        FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1" );
+        const LONG cbRec = dataRec.Cb();
+        const LONG cbRecMost = REC::CbRecordMostCHECK( g_rgfmp[ pfcb->Ifmp() ].CbPage() );
+
+        if ( cbRec < REC::cbRecordMin )
+        {
+            if ( cbRec == 0 )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.Cb0" );
+            }
+            else if ( cbRec >= 0 && cbRec < REC::cbRecordMin )
+            {
+                static_assert( REC::cbRecordMin == 4 );
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.Cb1to3" );
+            }
+            else if ( cbRec > -4 )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpToDword" );
+            }
+            else if ( cbRec > -16 )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpTo16B" );
+            }
+            else if ( cbRec > -( cbRecMost / 2 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpToHalfRecMost" );
+            }
+            else if ( cbRec > -( cbRecMost ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpToRecMost" );
+            }
+            else if ( cbRec > -( cbRecMost * 2 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpToRecMostX2" );
+            }
+            else if ( cbRec > -( 64 * 1024 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpTo64K" );
+            }
+            else if ( cbRec > -( 128 * 1024 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpTo128K" );
+            }
+            else if ( cbRec > -( 1024 * 1024 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpTo1M" );
+            }
+            else if ( cbRec > -( 1024 * 1024 * 1024 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpTo1G" );
+            }
+            else if ( cbRec >= lMin )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooSmall14.1.NegativeCbByUpTo2G" );
+            }
+            else
+            {
+                // This shouldn't be able to happen at all, unless dataRec was like being modified while we tested
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbTooSmallHow" ); // !!!?
+            }
+        }
+        else if ( cbRec > cbRecMost )
+        {
+            if ( cbRec == cbRecMost )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbEqualsMost" );
+            }
+            else if ( cbRec < ( cbRecMost + 4 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpToDwordOverMost" );
+            }
+            else if ( cbRec < ( cbRecMost + 16 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpTo16BOverMost" );
+            }
+            else if ( cbRec < ( cbRecMost + cbRecMost / 2 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpTo50PctOverMost" );
+            }
+            else if ( cbRec < ( cbRecMost * 2 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpToX2OverMost" );
+            }
+            else if ( cbRec < ( 64 * 1024 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpTo64KOverMost" );
+            }
+            else if ( cbRec < ( 128 * 1024 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpTo128KOverMost" );
+            }
+            else if ( cbRec < ( 1024 * 1024 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpTo1MOverMost" );
+            }
+            else if ( cbRec < ( 1024 * 1024 * 1024 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpTo1GOverMost" );
+            }
+            else if ( cbRec < ( (ULONG)2 * 1024 * 1024 * 1024 - 1 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbUpTo2GOverMost" );
+            }
+            else
+            {
+                // should be impossible, as the value is a LONG
+                FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.CbGtrThan2GOverMost" );
+            }
+
+            if ( cbRecMost < 4000 )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecMostCuriouslySmall" );
+            }
+            //  yes this cbPage is too small for possibly other Exchange clients, but the whole branch is 
+            //  processing invalid data.
+            else if ( g_rgfmp[ pfcb->Ifmp() ].CbPage() != ( 32 * 1024 ) || cbRecMost < ( 32 * 1000 ) )
+            {
+                FireWall( "RECIRetrieveTaggedColumnsRecMostOrPageSizeOdd" );
+            }
+        }
+        else
+        {
+            // This shouldn't be able to happen at all, unless dataRec was like being modified while we tested
+            FireWall( "RECIRetrieveTaggedColumnsRecTooBig14.1.VoltaileValues" );
+        }
+        
         return ErrERRCheck( JET_errDatabaseCorrupted );
     }
 

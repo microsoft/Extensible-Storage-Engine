@@ -62,9 +62,9 @@ namespace Internal
                             this->target->Issue( ioMode );
                         }
 
-                        virtual void Flush( IOMode ioMode )
+                        virtual void Flush( FileFlushMode fileFlushMode, IOMode ioMode )
                         {
-                            this->target->Flush( ioMode );
+                            this->target->Flush( fileFlushMode, ioMode );
                         }
 
                     private:

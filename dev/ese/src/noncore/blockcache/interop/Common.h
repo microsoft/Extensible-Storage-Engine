@@ -24,8 +24,6 @@
 
 #include <functional>
 
-
-#include <tchar.h>
 #include "os.hxx"
 
 #include "tcconst.hxx"

@@ -17,7 +17,7 @@
 const wchar_t * const g_mwszzAdvapi32CoreSystemBroken       = wszAdvapi32 L"\0";
 
 typedef struct{
-    PFNEVENTLOGGING pfnCallback;
+    PFNEVENTLOGGING     pfnCallback;
     HANDLE              hEventLog;
     PWSTR*              pwszEventSources;
     size_t              cEventSources;
@@ -34,11 +34,7 @@ typedef struct{
     PBYTE               pBuffer;
     DWORD               cbBufferSize;
     HANDLE              hObjects[ 2 ];
-
-    // Won't be used after initialization. For debugging purposes only.
     PWSTR               wszEventLog;
-    SYSTEMTIME          stTimeMin;
-    SYSTEMTIME          stTimeMax;
     PWSTR               wszLogFile;
     BOOL                fThreadActive;
 } EseEventLoggingQuery;
@@ -78,6 +74,7 @@ IEventLoggingProcessEvents(
     DWORD cbNeed;   
     PBYTE pBufferAux, pBuffer2;
     EVENTLOGRECORD* pelg;
+    DWORD dwRecordNumber;
     PWSTR wszEventSource;
     DWORD dwTimeGenerated;
     WORD wEventType;
@@ -123,6 +120,7 @@ IEventLoggingProcessEvents(
             // Process all the events returned.
             while ( ( ( DWORD )( pBufferAux - hQuery->pBuffer ) ) < cbRead ){
                 pelg = ( EVENTLOGRECORD* )pBufferAux;
+                dwRecordNumber = pelg->RecordNumber;
                 wszEventSource = ( WCHAR* )( pelg + 1 );
                 dwTimeGenerated = pelg->TimeGenerated;
                 wEventType = pelg->EventType;
@@ -218,6 +216,7 @@ IEventLoggingProcessEvents(
                 // Callback.
                 if ( hQuery->pfnCallback ){
                     hQuery->pfnCallback( hQuery->wszEventLog,
+                                            dwRecordNumber,
                                             wszEventSource,
                                             &stTimeGenerated,
                                             wEventType,
@@ -237,6 +236,10 @@ IEventLoggingProcessEvents(
                     sprintf_s( szBuffer,
                                 ESETEST_ELHELPER_STRING_BUFFER_SIZE,
                                 "Event log: %S" CRLF, hQuery->wszEventLog );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Event record number: %lu" CRLF, dwRecordNumber );
                     IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
                     sprintf_s( szBuffer,
                                 ESETEST_ELHELPER_STRING_BUFFER_SIZE,
@@ -372,12 +375,12 @@ IEventLoggingBackgroundListening(
 
 HANDLE
 EventLoggingCreateQuery(
-    __in_opt PFNEVENTLOGGING                        pfnCallback,
+    __in_opt PFNEVENTLOGGING                    pfnCallback,
     __in_opt PCWSTR                             wszEventLog,
     __in_ecount_opt( cEventSources ) PCWSTR*    pwszEventSources,
     _In_ size_t                                 cEventSources,
-    __in_opt PSYSTEMTIME                            pTimeMin,
-    __in_opt PSYSTEMTIME                            pTimeMax,
+    __in_opt PSYSTEMTIME                        pTimeMin,
+    __in_opt PSYSTEMTIME                        pTimeMax,
     __in_ecount_opt( cEventTypes ) PWORD        pEventTypes,
     _In_ size_t                                 cEventTypes,
     __in_ecount_opt( cEventCategories ) PWORD   pEventCategories,
@@ -476,11 +479,9 @@ EventLoggingCreateQuery(
     if ( NULL != pTimeMin ){
         hQuery->dwTimeMin = SystemTimeToSecondsSince1970( pTimeMin );
     }
-    SecondsSince1970ToSystemTime( hQuery->dwTimeMin, &hQuery->stTimeMin );
     if ( NULL != pTimeMax ){
         hQuery->dwTimeMax = SystemTimeToSecondsSince1970( pTimeMax );
     }
-    SecondsSince1970ToSystemTime( hQuery->dwTimeMax, &hQuery->stTimeMax );
 
     // Event type filters.
     if ( NULL != pEventTypes ){
@@ -727,6 +728,7 @@ EventLoggingModuleFromEventSource(
 VOID
 EventLoggingPrintEvent(
     _In_ PCWSTR                         wszEventLog,
+    _In_ DWORD                          dwRecordNumber,
     _In_ PCWSTR                         wszEventSource,
     _In_ PSYSTEMTIME                    pTimeGenerated,
     _In_ WORD                           wEventType,
@@ -744,6 +746,7 @@ EventLoggingPrintEvent(
         
     tprintf( CRLF );
     tprintf( "Event log: %S" CRLF, wszEventLog );   
+    tprintf( "Event record number: %lu" CRLF, dwRecordNumber );
     tprintf( "Event source: %S" CRLF, wszEventSource );
     tprintf( "Time generated: %04u/%02u/%02u %02u:%02u:%02u" CRLF,
                 pTimeGenerated->wYear, pTimeGenerated->wMonth, pTimeGenerated->wDay,
@@ -773,12 +776,12 @@ EventLoggingPrintEvent(
 //Windows Phone
 HANDLE
 EventLoggingCreateQuery(
-    __in_opt PFNEVENTLOGGING                        pfnCallback,
+    __in_opt PFNEVENTLOGGING                    pfnCallback,
     __in_opt PCWSTR                             wszEventLog,
     __in_ecount_opt( cEventSources ) PCWSTR*    pwszEventSources,
     _In_ size_t                                 cEventSources,
-    __in_opt PSYSTEMTIME                            pTimeMin,
-    __in_opt PSYSTEMTIME                            pTimeMax,
+    __in_opt PSYSTEMTIME                        pTimeMin,
+    __in_opt PSYSTEMTIME                        pTimeMax,
     __in_ecount_opt( cEventTypes ) PWORD        pEventTypes,
     _In_ size_t                                 cEventTypes,
     __in_ecount_opt( cEventCategories ) PWORD   pEventCategories,
@@ -822,6 +825,7 @@ EventLoggingModuleFromEventSource(
 VOID
 EventLoggingPrintEvent(
     _In_ PCWSTR                         wszEventLog,
+    _In_ DWORD                          dwRecordNumber,
     _In_ PCWSTR                         wszEventSource,
     _In_ PSYSTEMTIME                    pTimeGenerated,
     _In_ WORD                           wEventType,

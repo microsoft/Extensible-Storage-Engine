@@ -5,6 +5,7 @@
 
 #include "tcconst.hxx"
 #include "checksum.hxx"
+#include "lz4.h"
 
 #ifdef ESENT
 #include "jetmsg.h"
@@ -23,7 +24,6 @@
 #include "blockcache\_cachethreadlocalstoragebase.hxx"
 #include "blockcache\_cachethreadlocalstoragehash.hxx"
 #include "blockcache\_cachethreadlocalstorage.hxx"
-#include "blockcache\_iocompletehash.hxx"
 #include "blockcache\_filewrapper.hxx"
 #include "blockcache\_cachedfileheader.hxx"
 #include "blockcache\_filefilter.hxx"

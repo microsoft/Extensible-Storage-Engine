@@ -4,6 +4,8 @@
 #include "osustd.hxx"
 #include "esestd.hxx"
 
+
+
 // The current layer is high enough to understand INST internal.
 // Extracing m_wszInstanceName and m_wszDisplayName was
 // not possible down inside OS layer
@@ -20,8 +22,25 @@ void OSUHAPublishEvent_(
     DWORD cParameter,
     const WCHAR** rgwszParameter )
 {
+    BOOL fEmit    =   fTrue;
+
     // failure events need not be published if there is no instance
-    if ( pinstNil != pinst && UlParam( pinst, JET_paramEnableHaPublish ) )
+    // update:  why?
+    if ( pinst == NULL || pinstNil == pinst )
+    {
+#ifdef ENABLE_MISSED_FAILURE_ITEM_TRACKING
+        FireWall( "SkipFi2NoInst" );
+#endif
+        fEmit = fFalse;
+    }
+
+    if (  pinstNil != pinst && !UlParam( pinst, JET_paramEnableHaPublish ) )
+    {
+        // might be nice to Assert/FireWall not O365 Datacenter / Store.worker, but a bit of a layer violation
+        fEmit = fFalse;
+    }
+
+    if ( fEmit )
     {
         OSUHAPublishEventImpl(  haTag,
                                 pinst->m_wszInstanceName,
@@ -130,11 +149,44 @@ void OSUHAEmitFailureTag_(
             }
         }
     }
+    #define pinst  pinstDoNotUseForRestOfFuncUse_pinstActual
+
+    // FUTURE:  HA Publish is only for O365 datacenter, but even so this is a bit of a layering violation.  We will
+    // add these temporarily to do a basic health check on O365 to see if we're dropping HA FailureItems from any ESE
+    // code paths.
+    const BOOL fO365StoreWorker = ( _wcsicmp( WszUtilProcessName(), L"Microsoft.Exchange.Store.Worker" ) == 0 );
+    const BOOL fO365DatacenterProcess = 
+       fO365StoreWorker ||
+       ( _wcsicmp( WszUtilProcessName(), L"MSExchangeRepl" ) == 0 ) ||
+       ( _wcsicmp( WszUtilProcessName(), L"EdgeTransport" ) == 0 ) ||
+       ( _wcsicmp( WszUtilProcessName(), L"Microsoft.Exchange.DxStore.HA.Instance" ) == 0 ) ||
+       ( _wcsicmp( WszUtilProcessName(), L"Microsoft.Exchange.SharedCache" ) == 0 ) ||
+       ( _wcsicmp( WszUtilProcessName(), L"Microsoft.Exchange.Store.Service" ) == 0 );  // calls JET APIs, but should not actually start ese inst
+       // should we add eseutil?
 
     //  if the instance pointer is NULL then do not emit an event
     //
     if ( !pinstActual )
     {
+#ifdef ENABLE_MISSED_FAILURE_ITEM_TRACKING
+        if ( !FInEmbeddedUnitTest() )
+        {
+            if ( haTag != HaDbFailureTagMemory )
+            {
+                CHAR szTag[60];
+                OSStrFormatA( szTag, sizeof( szTag ), "SkipFiNoInstProvided-%d", haTag ); 
+                FireWall( szTag );
+            }
+            else if ( !FOSLayerUp() )
+            {
+                FireWall( "SkipFiNoInstAllocBeforeOsInit" :
+            }
+            else 
+            {
+                FireWall( "SkipFiNoInstAllocVictimNotFoundOrAcquired" );
+            }
+        }
+#endif
         fEmit = fFalse;
     }
 
@@ -142,6 +194,12 @@ void OSUHAEmitFailureTag_(
     //
     if ( pinstActual && !UlParam( pinstActual, JET_paramEnableHaPublish ) )
     {
+#ifdef ENABLE_MISSED_FAILURE_ITEM_TRACKING
+        if ( fO365StoreWorker )
+        {
+            FireWall( "SkipFiHaPublishOff" );
+        }
+#endif
         fEmit = fFalse;
     }
 
@@ -151,6 +209,13 @@ void OSUHAEmitFailureTag_(
             (   !pinstActual->m_wszInstanceName || !pinstActual->m_wszInstanceName[ 0 ] ||
                 !pinstActual->m_wszDisplayName || !pinstActual->m_wszDisplayName[ 0 ] ) )
     {
+        // many test processes have this off, but all real ESE instances should be correctly identified.
+#ifdef ENABLE_MISSED_FAILURE_ITEM_TRACKING
+        if ( fO365DatacenterProcess )
+        {
+            FireWall( "SkipFiNoInstOrDispName" );
+        }
+#endif
         fEmit = fFalse;
     }
 
@@ -158,6 +223,9 @@ void OSUHAEmitFailureTag_(
     //
     if ( haTag == HaDbFailureTagNoOp )
     {
+#ifdef ENABLE_MISSED_FAILURE_ITEM_TRACKING
+        FireWall( "SkipFiTagNoOp" );
+#endif
         fEmit = fFalse;
     }
 
@@ -165,6 +233,9 @@ void OSUHAEmitFailureTag_(
     //
     if ( !wszGuid || !wszGuid[ 0 ] )
     {
+#ifdef ENABLE_MISSED_FAILURE_ITEM_TRACKING
+        FireWall( "SkipFiNoGuid" );
+#endif
         fEmit = fFalse;
     }
 
@@ -176,6 +247,9 @@ void OSUHAEmitFailureTag_(
             HA_NOOP_FAILURE_TAG_ID + msgidOffset <= HA_NOOP_FAILURE_TAG_ID ||
             HA_NOOP_FAILURE_TAG_ID + msgidOffset > HA_MAX_FAILURE_TAG_ID )
     {
+#ifdef ENABLE_MISSED_FAILURE_ITEM_TRACKING
+        FireWall( "SkipFiEvtOutOfRange" );
+#endif
         fEmit = fFalse;
     }
 
@@ -214,6 +288,20 @@ void OSUHAEmitFailureTag_(
                                 HA_NOOP_FAILURE_TAG_ID + msgidOffset,
                                 iwsz,
                                 rgwsz );
+
+        AtomicExchangeSet( (ULONG*)&pinstActual->m_grbitHaFailureTags, (ULONG)bitHaPublishedEvent );
+        if ( haTag == HaDbFailureTagCorruption )
+        {
+            AtomicExchangeSet( (ULONG*)&pinstActual->m_grbitHaFailureTags, (ULONG)bitHaPublishedCorruptionTag );
+        }
+        if ( haTag == HaDbFailureTagIoHard )
+        {
+            AtomicExchangeSet( (ULONG*)&pinstActual->m_grbitHaFailureTags, (ULONG)bitHaPublishedIoHardTag );
+        }
+        if ( haTag == HaDbFailureTagLogLogicallyInconsistent )
+        {
+            AtomicExchangeSet( (ULONG*)&pinstActual->m_grbitHaFailureTags, (ULONG)bitHaPublishedLogLogicallyInconsistentTag );
+        }
     }
 
     //  cleanup
@@ -222,6 +310,8 @@ void OSUHAEmitFailureTag_(
     {
         pcritInstActual->Leave();
     }
+
+    #undef pinst
 }
 #endif
 

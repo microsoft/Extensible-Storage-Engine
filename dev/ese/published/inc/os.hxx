@@ -261,4 +261,14 @@ BOOL FOSLayerUp();
 //#define wcslen __USE_LOSSTRLENGTHW__
 #endif
 
+#if 0
+// These are too difficult to get working in test code and
+// downstream build locations that include the OS abstraction
+// but don't necessarily directly use it.  So don't leave them
+// turned on.   However, leave them here to turn on in an
+// ad-hoc manner.
+#pragma deprecated( "wcscmp" )
+#pragma deprecated( "wcslen" )
+#endif
+
 #endif  //  _OS_HXX_INCLUDED

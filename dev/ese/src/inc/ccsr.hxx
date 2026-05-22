@@ -58,7 +58,6 @@ class CSR
         DBTIME  Dbtime( )       const;
         VOID    SetDbtime( const DBTIME dbtime );
         VOID    RevertDbtime( const DBTIME dbtime, const ULONG fFlags );
-        VOID    RestoreDbtime( const DBTIME dbtime, const BOOL fPageFDPDeleteBefore );
         BOOL    FLatched( )     const;
         LATCH   Latch( )        const;
         PGNO    Pgno( )         const;
@@ -237,8 +236,13 @@ class CSR
         const VOID *  PvBufferForCrashDump()    { return m_cpage.PvBuffer(); }
 
 #ifdef DEBUGGER_EXTENSION
+        VOID LoadDehydratedPage( const IFMP ifmp, const PGNO pgno, VOID* const pv, const ULONG cb, const ULONG cbPage );
         VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
 #endif  //  DEBUGGER_EXTENSION
+
+#ifdef ENABLE_JET_UNIT_TEST
+        VOID LoadNewTestPage( const ULONG cb, const IFMP ifmp = ifmpNil, const PGNO pgno = 42 );
+#endif  // ENABLE_JET_UNIT_TEST
 
     private:
         CSR( const CSR& );  //  not defines
@@ -424,11 +428,11 @@ VOID CSR::SetDbtime( const DBTIME dbtime )
 }
 
 INLINE
-VOID CSR::OverrideDbtime_( const DBTIME dbtime, const ULONG fFlags )
+VOID CSR::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
 {
     ASSERT_VALID( this );
     Assert( FDirty() );
-    
+
     Assert( Latch() == latchWrite );
     Assert( dbtime <= m_dbtimeSeen );
 
@@ -436,21 +440,6 @@ VOID CSR::OverrideDbtime_( const DBTIME dbtime, const ULONG fFlags )
     m_dbtimeSeen = dbtime;
 
     Assert( dbtime == m_cpage.Dbtime() );
-}
-
-INLINE
-VOID CSR::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
-{
-    Assert( PinstFromIfmp( m_cpage.Ifmp() )->m_plog->FRecoveringMode() != fRecoveringRedo );  // redo gets all preconditions done, and never has to revert.
-    OverrideDbtime_( dbtime, fFlags );
-}
-
-INLINE
-VOID CSR::RestoreDbtime( const DBTIME dbtime, const BOOL fPageFDPDeleteBefore )
-{
-    Assert( m_cpage.FLoadedPage() );
-    Assert( PinstFromIfmp( m_cpage.Ifmp() )->m_plog->FRecoveringMode() == fRecoveringRedo );
-    OverrideDbtime_( dbtime, m_cpage.FFlags() | ( fPageFDPDeleteBefore ? CPAGE::fPageFDPDelete : 0 ) );
 }
 
 
@@ -811,6 +800,26 @@ INLINE ERR CSR::ErrLoadPage(
 }
 
 
+#ifdef ENABLE_JET_UNIT_TEST
+INLINE VOID CSR::LoadNewTestPage( const ULONG cb, const IFMP ifmp /* = ifmpNil */, const PGNO pgno /* = 42 */ )
+{
+    ASSERT_VALID( this );
+    Assert( m_latch == latchNone );
+
+    m_cpage.LoadNewTestPage( cb, ifmp, pgno );
+
+    //  set members
+    m_pgno = m_cpage.PgnoThis();
+    m_cpage.SetDbtime( dbtimeStart );
+    m_dbtimeSeen = m_cpage.Dbtime();
+    m_latch = latchWrite;
+    m_pagetrimState = pagetrimNormal;
+
+    Assert( m_dbtimeSeen == m_cpage.Dbtime() );
+}
+#endif  // ENABLE_JET_UNIT_TEST
+
+
 INLINE VOID CSR::CopyPage( const VOID* pvPage, const ULONG cbPage )
 {
     ASSERT_VALID( this );
@@ -1168,3 +1177,35 @@ VOID CSR::Reset()
     m_dbtimeSeen = dbtimeNil;
     m_pagetrimState = pagetrimNormal;
 }
+
+// Variable sized CSR array.
+// Use with alloca to create a CSR array on stack.
+// Automatically releases any held latches.
+template <typename TAlloc>
+class CSRArray : public FixedArray<CSR, TAlloc>
+{
+public:
+    using FixedArray::FixedArray; // inherit base constructor
+
+    // Copy and move constructors can't be inherited.
+    CSRArray() = default;
+    CSRArray( const FixedArray& rhs ) : FixedArray( rhs ) {}
+    CSRArray( CSRArray&& rhs ) : FixedArray( std::move( rhs ) ) {}
+    CSRArray( FixedArray&& rhs ) : FixedArray( std::move( rhs ) ) {}  // both are needed because a base rvalue-reference can't bind to a derived type
+
+    const CSRArray& operator=( CSRArray&& rhs ) { return static_cast<const CSRArray&>( FixedArray::operator=( std::move( rhs ) ) ); }
+    const CSRArray& operator=( FixedArray&& rhs ) { return static_cast<const CSRArray&>( FixedArray::operator=( std::move( rhs ) ) ); }
+    ~CSRArray()
+    {
+        if ( m_fOwnsArray )
+        {
+            for ( int i = 0; i < CItems(); i++ )
+            {
+                ( *this )[ i ].ReleasePage();
+            }
+        }
+    }
+};
+
+using CSRStackArray = CSRArray<NoAlloc>;
+using CSRHeapArray = CSRArray<HeapAllocator>;

@@ -150,7 +150,8 @@ VOID OSLibraryValidateLoaderPolicy( const WCHAR * const mwszzDlls, OSLoadFlags o
                     mwszzDlls == g_mwszzProcessMemLibs ||
                     mwszzDlls == g_mwszzWow64Libs ||
                     mwszzDlls == g_mwszzEventLogLegacyLibs ||
-                    mwszzDlls == g_mwszzEventingProviderLibs
+                    mwszzDlls == g_mwszzEventingProviderLibs ||
+                    mwszzDlls == g_mwszzBCryptLib
                     );
         
             //  there are a couple reasons to add a library to the strict free required list

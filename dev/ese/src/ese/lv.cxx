@@ -3095,7 +3095,7 @@ INLINE ERR ErrLVAppendChunks(
         if ( CpgDIRActiveSpaceRequestReserve( pfucbLV ) == cpgDIRReserveConsumed )
         {
             //  yay, we allocated contiguous pages for the LV.  Turn off computations of LV reserve required.
-            DIRSetActiveSpaceRequestReserve( pfucbLV, 0 );
+            DIRResetActiveSpaceRequestReserve( pfucbLV );
             cpgRequiredReserve = 0;
         }
 
@@ -3118,7 +3118,7 @@ HandleError:
 
     Assert( CpgDIRActiveSpaceRequestReserve( pfucbLV ) != cpgDIRReserveConsumed );
 
-    DIRSetActiveSpaceRequestReserve( pfucbLV, 0 );
+    DIRResetActiveSpaceRequestReserve( pfucbLV );
 
     return err;
 }
@@ -5668,7 +5668,7 @@ HandleError:
             //  fits on a page.
             *pcpgLvSpaceRequired = 0;
         }
-        DIRSetActiveSpaceRequestReserve( pfucbLV, 0 );
+        DIRResetActiveSpaceRequestReserve( pfucbLV );
     }
     Assert( CpgDIRActiveSpaceRequestReserve( pfucbLV ) == 0 );
 

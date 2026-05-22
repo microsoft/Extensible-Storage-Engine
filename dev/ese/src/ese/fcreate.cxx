@@ -3015,6 +3015,8 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate, 
     return JET_errSuccess;
 
 HandleError:
+    Assert( err != JET_errKeyDuplicate );   // should return JET_errTableDuplicate
+
     OSTraceFMP(
         ifmp,
         JET_tracetagDDLWrite,

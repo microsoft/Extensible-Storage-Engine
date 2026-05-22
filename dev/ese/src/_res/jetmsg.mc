@@ -215,6 +215,17 @@ Language=English
 %1 (%2) %3The specific ESE configuration store is locked in a read inhibit state, clear the %1 registry value to enable ESE to continue and utilize the config store.
 .
 
+MessageId=109
+SymbolicName=START_INSTANCE_FAILED_ID
+Language=English
+%1 (%2) %3The database engine failed to start instance (%4) due to error %5. (Time=%6 seconds)
+%n
+Failure Details:%n
+Mode: %7%n
+Fail Address: %8%n
+Publishing: %9%n
+.
+
 ;// You are almost assuredly not adding in the right place?
 
 
@@ -1695,6 +1706,12 @@ Language=English
 %1 (%2) %3Database %4: Page %5 in a B-Tree (ObjectId: %6) failed verfication due to page FDP delete flag mismatch at log position %7.  The remote page FDP delete flag persisted to the log record was %8 but the actual page FDP delete flag was %9. This problem is likely due to revert of the database gone wrong. Please investigate the database revert operations performed on the database.%n
 .
 
+MessageId=571
+SymbolicName=DB_PAGE_FDP_REDELETE_EXPECTED_ID
+Language=English
+%1 (%2) %3Database %4: Page %5 failed verification due to being reverted using revert snapshot without having page fdp delete flag set, but the log record at log position %6 expected the page to have the flag set (log position commit before revert - %7).  This problem is likely due to revert of the database gone wrong. Please investigate the database revert operations performed on the database.%n
+.
+
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 
 
@@ -2507,11 +2524,16 @@ Pages shelved: %24 page(s).%n
 Pages unleaked: %25 page(s).%n
 Return code: %17%n
 Stop reason: %18%n
+Available space below target: %34 bytes (%35 page(s)).%n
+Small-space trees converted: %27 tree(s).%n
+Root pages moved (regular, space): %28 page(s), %29 page(s).%n
+Strictly-internal pages moved (regular, space): %30 page(s), %31 page(s).%n
+Strictly-leaf pages moved (regular, space): %32 page(s), %33 page(s).%n
 Total time: %5 minute(s) and %6 second(s).%n
 Pct. time in extent maintenance: %19%%%n
 Pct. time in file truncation: %20%%%n
 Pct. time in page categorization: %21%%%n
-Pct. time in data move: %22%%%n
+Pct. time in page processing: %22%% (%26%% in page moves)%n
 Pct. remaining time: %23%%%n
 .
 
@@ -2528,11 +2550,16 @@ Pages shelved: %24 page(s).%n
 Pages unleaked: %25 page(s).%n
 Error code: %17%n
 Stop reason: %18%n
+Available space below target: %34 bytes (%35 page(s)).%n
+Small-space trees converted: %27 tree(s).%n
+Root pages moved (regular, space): %28 page(s), %29 page(s).%n
+Strictly-internal pages moved (regular, space): %30 page(s), %31 page(s).%n
+Strictly-leaf pages moved (regular, space): %32 page(s), %33 page(s).%n
 Total time: %5 minute(s) and %6 second(s).%n
 Pct. time in extent maintenance: %19%%%n
 Pct. time in file truncation: %20%%%n
 Pct. time in page categorization: %21%%%n
-Pct. time in data move: %22%%%n
+Pct. time in page processing: %22%% (%26%% in page moves)%n
 Pct. remaining time: %23%%%n
 .
 
@@ -2622,6 +2649,7 @@ Number of uncached primary objects: %38%n
 Correction applied to space owned by primary objects: %46 page(s) (%47 bytes, %48%%).%n
 Enumeration conflicts resolved successfully: %49%n
 Enumeration conflicts not resolved successfully: %50%n
+Time spent resolving conflicts: %51 seconds(s).%n
 Performance: %39 page(s) read, %40 page(s) preread, %41 page(s) referenced, %42 page(s) dirtied, %43 page(s) re-dirtied.%n
 Duration: %44 minute(s) and %45 second(s).%n
 .

@@ -19,6 +19,7 @@ target_compile_definitions(COLLECTIONUNIT PRIVATE
     _MBCS
     BUILD_ENV_IS_EX
     ESE_FLAVOUR_IS_ESE
+    _HAS_AUTO_PTR_ETC
 )
 
 target_include_directories(COLLECTIONUNIT PRIVATE

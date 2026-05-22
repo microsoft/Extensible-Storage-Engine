@@ -4451,6 +4451,9 @@ class CArray
         void SetEntryDefault( const CEntry& entry );
 
         ERR ErrSetEntry( const size_t ientry, const CEntry& entry );
+        ERR ErrAppendEntry( const CEntry& entry );
+        bool FRemoveLastEntry();
+        void Clear();
         void SetEntry( const CEntry* const pentry, const CEntry& entry );
 
         ERR ErrLoadEntries( const BYTE* const rgbData, const size_t cbData );
@@ -4685,6 +4688,42 @@ ErrSetEntry( const size_t ientry, const CEntry& entry )
     SetEntry( PEntry( ientry ), entry );
 
     return ERR::errSuccess;
+}
+
+//  grows the array by one element and sets that element to the value provided
+
+template< class CEntry >
+inline typename CArray< CEntry >::ERR CArray< CEntry >::
+ErrAppendEntry( const CEntry& entry )
+{
+    return ErrSetEntry( Size(), entry );
+}
+
+//  removes the last entry of the array, returns false IFF the array is already empty
+
+template< class CEntry >
+inline typename bool CArray< CEntry >::
+FRemoveLastEntry()
+{
+    if ( Size() == 0 )
+    {
+        return false;
+    }
+
+    const ERR err = ErrSetSize( Size() - 1 );
+    COLLAssert( err == ERR::errSuccess );
+
+    return true;
+}
+
+//  sets the array size to zero
+
+template< class CEntry >
+inline typename void CArray< CEntry >::
+Clear()
+{
+    const ERR err = ErrSetSize( 0 );
+    COLLAssert( err == ERR::errSuccess );
 }
 
 //  sets an existing entry of the array. WARNING: the array size and capacity
@@ -7039,6 +7078,175 @@ inline T IrrPrev( T iCurrent, const size_t cRoundRobinBufferElements )
     COLLAssert( FIrrInRange( ret, (T)cRoundRobinBufferElements ) );
     return ret;
 }
+
+//  *****************************************************
+//  FixedArray helper class.
+//  Use with an allocator of your choice to create a runtime fixed sized array.
+//  For example, use with NoAlloc & _alloca to declare arrays on stack.
+//
+
+class NoAlloc
+{
+public:
+    // Lower-case to confirm with std::allocator
+    // Illegal to call allocate using this allocator (externally allocated)
+    // Legal to call deallocate, but does nothing
+    BYTE* allocate( std::size_t n ) = delete;
+    void deallocate( BYTE* p, std::size_t n ) {};
+};
+
+class HeapAllocator
+{
+public:
+    BYTE* allocate( std::size_t n ) { return new BYTE[ n ]; }
+    void deallocate( BYTE* pb, std::size_t n ) { delete[] pb; }
+};
+
+template <typename T, typename TAlloc = NoAlloc>
+class FixedArray
+{
+protected:
+    T*      m_rgT = nullptr;
+    int     m_cItems = 0;
+    bool    m_fOwnsArray = false;
+
+public:
+    FixedArray() = default;
+    FixedArray( void* pv, int cItems, bool fOwnsArray = true ) :
+        m_rgT( reinterpret_cast<T*>( pv ) ),
+        m_cItems( cItems ),
+        m_fOwnsArray( fOwnsArray )
+    {
+        // Vectorized placement-new, i.e. new()[] is broken in the C++ standard
+        // because it can pad the placement pointer with an arbitrary number of bytes
+        // (e.g. vc pads it with some bytes keeping count of objects passed to new()[]).
+        // This leads to UB because after padding, the initialized objects overrun the allocated buffer.
+        // To avoid this, we have to loop and initialize each object individually, thus avoiding new()[].
+        if ( fOwnsArray )
+        {
+            for ( int i = 0; i < cItems; i++ )
+            {
+                new( &m_rgT[ i ] ) T{};
+            }
+        }
+    }
+
+    // Needed for the copy constructor.
+    template <typename, typename>
+    friend class FixedArray;
+
+    // The copy contructor for this class allows copying from an array whose elements are the same type.
+    // The allocator type doesn't matter because ownership isn't transferred with the copy.
+    template <typename TOtherAlloc>
+    FixedArray( const FixedArray<T, TOtherAlloc>& rhs )
+    {
+        // Makes a copy, this means rhs stays intact.
+        // New object doesn't own the array.
+        m_rgT = rhs.m_rgT;
+        m_cItems = rhs.m_cItems;
+        m_fOwnsArray = false;
+    }
+
+    FixedArray( FixedArray&& rhs )
+    {
+        // Takes ownership of the array.
+        // rhs relinquishes control.
+        m_rgT = rhs.m_rgT;
+        m_cItems = rhs.m_cItems;
+        m_fOwnsArray = rhs.m_fOwnsArray;
+        rhs.m_rgT = NULL;
+        rhs.m_cItems = 0;
+        rhs.m_fOwnsArray = false;
+    }
+
+    // Copy assignment makes a copy without transferring ownership.
+    template <typename TOtherAlloc>
+    const FixedArray& operator=( const FixedArray<T, TOtherAlloc>& rhs )
+    {
+        Free();
+        m_rgT = rhs.m_rgT;
+        m_cItems = rhs.m_cItems;
+        m_fOwnsArray = false;
+        return *this;
+    }
+
+    // Move assignment takes ownership.
+    const FixedArray& operator= ( FixedArray&& rhs )
+    {
+        std::swap( m_rgT, rhs.m_rgT );
+        std::swap( m_cItems, rhs.m_cItems );
+        std::swap( m_fOwnsArray, rhs.m_fOwnsArray );
+        return *this;
+    }
+
+protected:
+    void Free()
+    {
+        if ( m_fOwnsArray )
+        {
+            for ( int i = 0; i < m_cItems; i++ )
+            {
+                m_rgT[ i ].~T();
+            }
+
+            TAlloc allocator;
+            allocator.deallocate( (BYTE*) m_rgT, sizeof( T ) * m_cItems );
+        }
+    }
+
+public:
+    ~FixedArray()                           { Free(); }
+    int CItems() const                      { return m_cItems; }
+    T* PrgT()                               { return m_rgT; }
+    const T* PrgT() const                   { return m_rgT; }
+    const T& operator[]( int i ) const      { return m_rgT[ i ]; }
+    T& operator[]( int i )                  { return m_rgT[ i ]; }
+    operator const T* ( ) const             { return m_rgT; }
+    operator T* ( )                         { return m_rgT; }
+    FixedArray Subarray( int iBegin ) const { return Subarray( iBegin, m_cItems ); }
+
+    // Implicit conversion to a FixedArray<T> that doesn't own the array.
+    // Allows using FixedArray<T> as a generic container for parameter passing.
+    operator FixedArray<T, NoAlloc>() const { return FixedArray<T, NoAlloc>( m_rgT, m_cItems, false ); }
+
+    // Returns the range [iBegin, iEnd).
+    // Retains ownership of the subarray items.
+    FixedArray Subarray( int iBegin, int iEnd ) const
+    {
+        Assert( iBegin >= 0 );
+        Assert( iEnd <= m_cItems );
+        Assert( iEnd >= iBegin );
+        return FixedArray( &m_rgT[ iBegin ], iEnd - iBegin, false );
+    }
+
+    template <typename TFunc>
+    void ForEach( TFunc func )
+    {
+        for ( int i = 0; i < m_cItems; i++ )
+        {
+            func( m_rgT[ i ] ); // TFunc takes T& 
+        }
+    }
+
+    template <typename TFunc>
+    void ForEach( TFunc func ) const
+    {
+        for ( int i = 0; i < m_cItems; i++ )
+        {
+            func( m_rgT[ i ] ); // TFunc takes const T&
+        }
+    }
+
+    static FixedArray MakeArray( int citems )
+    {
+        TAlloc allocator;
+        BYTE* ptr = allocator.allocate( sizeof( T ) * citems );
+        return FixedArray( ptr, ptr != NULL ? citems : 0 );
+    }
+};
+
+template <typename T>
+using FixedHeapArray = FixedArray<T, HeapAllocator>;
 
 NAMESPACE_END( COLL );
 

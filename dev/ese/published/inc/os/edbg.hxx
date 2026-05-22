@@ -38,12 +38,6 @@ struct EDBGGlobals
 // as a pointer of a different name.
 extern const EDBGGlobals * rgEDBGGlobalsArray;
 
-HRESULT
-EDBGPrintf(
-    _In_ PCSTR szFormat,
-    ...
-)
-;
 #endif // DEBUGGER_EXTENSION
 
 

@@ -179,10 +179,12 @@ LOCAL ERR ErrReplacePageImage(
 
     Call( csr.ErrLoadPage( ppib, ifmp, pgno, pbBeforeImage, cb, latchWrite ) );
 
-    // the before image of the page is logged after the dbtime was updated so we have to restore it
+    // the before image of the page is logged after the dbtime was updated so we have to revert it
+    csr.RevertDbtime( dbtimeBefore, csr.Cpage().FFlags() );
+
     // Its also possible we are replaying a log on an available lag on a table which was deleted and reverted with fPageFDPDelete.
     // We do not want to overwrite that flag.
-    csr.RestoreDbtime( dbtimeBefore, fPageFDPDeleteBefore );
+    csr.Cpage().SetPageFDPDelete( fPageFDPDeleteBefore );
     csr.Downgrade( latchRIW );
 
     Assert( csr.Cpage().FPageFDPDelete() == fPageFDPDeleteBefore );
@@ -2277,13 +2279,23 @@ LOCAL ERR ErrLGRIClearRedoMapDbtimeRevert( PIB* ppib, const LR* const plr, const
         {
             const LRMERGE_* const plrmerge = (LRMERGE_*)plr;
 
-            // Merge is always done inside a Macro
-            Assert( fMacroGoing );
-
             // Add it to the list of pages freed, if empty.
             if ( plrmerge->FEmptyPage() )
             {
-                CallR( ppib->ErrInsertPgnoFreed( dbtime, ifmp, plrmerge->le_pgno ) );
+                // Merge is always done inside a Macro
+                // If there is no macro for given dbtime, then macro begin must have been outside the checkpoint.
+                // We should be fine skipping reconciling such a page from dbtimerevert redomap as the macro would have had exclusive latch during merge
+                // and no other update on the page should be possible concurrently and shouldn't have been added to redomap.
+                //
+                if ( !fMacroGoing )
+                {
+                    Assert( !pLogRedoMapToClear || !pLogRedoMapToClear->FPgnoSet( plrmerge->le_pgno ) );
+                    return JET_errSuccess;
+                }
+                else
+                {
+                    CallR( ppib->ErrInsertPgnoFreed( dbtime, ifmp, plrmerge->le_pgno ) );
+                }
             }
             break;
         }
@@ -2378,7 +2390,7 @@ HandleError:
 
 ERR LOG::ErrLGRIEndAllSessions(
     const BOOL              fEndOfLog,
-    const BOOL              fKeepDbAttached,
+          BOOL              fKeepDbAttached,
     const LE_LGPOS *        ple_lgposRedoFrom,
     BYTE *                  pbAttach )
 {
@@ -2387,9 +2399,17 @@ ERR LOG::ErrLGRIEndAllSessions(
     BOOL                    fNeedCallINSTTerm   = fTrue;
     DBID dbid;
 
-    //  UNDONE: is this call needed?
-    //
-    //(VOID)ErrVERRCEClean( );
+    // If we are close to the CheckpointTooDeep limit, do a clean RecoveryQuit even if asked for
+    // dirty cache keepalive recovery quit at the end of recovery.
+    if ( fKeepDbAttached && fEndOfLog )
+    {
+        const LONG lgenTooDeepLimit = (LONG)UlParam( m_pinst, JET_paramCheckpointTooDeep ) - lgenCheckpointTooDeepMin / 2;
+        const LONG lgenOutstanding = m_pLogStream->GetCurrentFileGen() - LgposGetCheckpoint().le_lGeneration;
+        if ( lgenOutstanding >= ( lgenTooDeepLimit * 90 ) / 100 )
+        {
+            fKeepDbAttached = fFalse;
+        }
+    }
 
     //  Set current time to attached db's dbfilehdr
 
@@ -3155,7 +3175,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             err = ErrNDValidateSetExternalHeader( csr.Cpage(), &data );
             if ( err < JET_errSuccess )
             {
-                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"630fa9f1-afcd-4998-bb82-db992a6eb22f" );
+                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagLogLogicallyInconsistent, L"630fa9f1-afcd-4998-bb82-db992a6eb22f" );
                 Call( err );
             }
 
@@ -3193,6 +3213,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             }
 
             //  remove this RCE from the list of uncreated RCEs
+            Assert( !ppib->FDeferredRceid( plrundoinfo->le_rceid ) || g_rgfmp[ifmp].FContainsDataFromFutureLogs() );
             Call( ppib->ErrDeregisterDeferredRceid( plrundoinfo->le_rceid ) );
 
             Assert( trxOld == plrundoinfo->le_trxBegin0 );
@@ -3481,6 +3502,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 //  add this RCE to the list of uncreated RCEs
                 if ( plrfiard->FVersioned() )
                 {
+                    Assert( g_rgfmp[ifmp].FContainsDataFromFutureLogs() );
                     Call( ppib->ErrRegisterDeferredRceid( plrfiard->le_rceidReplace, pgno ) );
                 }
 
@@ -3501,6 +3523,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 //  add this RCE to the list of uncreated RCEs
                 if ( plrreplace->FVersioned() )
                 {
+                    Assert( g_rgfmp[ifmp].FContainsDataFromFutureLogs() );
                     Call( ppib->ErrRegisterDeferredRceid( plrnode->le_rceid, pgno ) );
                 }
 
@@ -3545,7 +3568,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 //              Assert( cb < sizeof( rgbRecNew ) );
                 if ( cb >= (SIZE_T)g_cbPage )
                 {
-                    OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"dba4c055-bbbf-4fd1-a56d-e786519803eb" );
+                    OSUHAEmitFailureTag( m_pinst, HaDbFailureTagLogLogicallyInconsistent, L"dba4c055-bbbf-4fd1-a56d-e786519803eb" );
                     Error( ErrERRCheck( JET_errLogCorrupted ) );
                 }
 
@@ -3560,7 +3583,11 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             Assert( (ULONG)data.Cb() == cbNewData );
             if ( (ULONG)data.Cb() != cbNewData )
             {
-                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"a3cb57b9-8ba1-496d-a6fc-4fc2f0140fc4" );
+                //  per analysis of a real world case, it is hard to imagine how local (passive) data or remote (active)
+                //  database data generated this incorrectness.  This is literally saying the ib/cb pairs do NOT add up 
+                //  to the final record size (from the active).  This almost assuredly means that there was a corruption 
+                //  of the actual log record data.  Or a bug in our diff creation or reconstruction alg.
+                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagLogLogicallyInconsistent, L"a3cb57b9-8ba1-496d-a6fc-4fc2f0140fc4" );
                 Error( ErrERRCheck( JET_errLogCorrupted ) );
             }
 
@@ -3622,6 +3649,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 //  add this RCE to the list of uncreated RCEs
                 if ( plrflagdelete->FVersioned() )
                 {
+                    Assert( g_rgfmp[ifmp].FContainsDataFromFutureLogs() );
                     Call( ppib->ErrRegisterDeferredRceid( plrnode->le_rceid, pgno ) );
                 }
 
@@ -4710,7 +4738,6 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     IFMP        ifmp                            = ifmpNil;
     RSTMAP*     psrtmap                         = NULL;
     ULONG       pctCachePriority                = g_pctCachePriorityUnassigned;
-    JET_GRBIT   grbitShrinkDatabaseOptions      = NO_GRBIT;
 
     pifmp = pifmp ? pifmp : &ifmp;
     pirstmap = pirstmap ? pirstmap : &irstmap;
@@ -4761,13 +4788,12 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     //  and set below in the FMP. Once recovery is finished, the DB needs to go through
     //  JetAttachDatabase anyways, so all DB parameters will be parsed and consumed then.
     //
-
     Call( ErrDBParseDbParams(
                 psrtmap ? psrtmap->rgsetdbparam : NULL,
                 psrtmap ? psrtmap->csetdbparam : 0,
                 NULL,                           // JET_dbparamDbSizeMaxPages (not used here).
                 &pctCachePriority,              // JET_dbparamCachePriority.
-                &grbitShrinkDatabaseOptions,    // JET_dbparamShrinkDatabaseOptions.
+                NULL,                           // JET_dbparamShrinkDatabaseOptions (not used here).
                 NULL,                           // JET_dbparamShrinkDatabaseTimeQuota (not used here).
                 NULL,                           // JET_dbparamShrinkDatabaseSizeLimit (not used here).
                 NULL,                           // JET_dbparamLeakReclaimerEnabled (not used here).
@@ -4815,7 +4841,6 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     pfmpT->ResetDeferredAttach();
 
     pfmpT->SetPctCachePriorityFmp( pctCachePriority );
-    pfmpT->SetShrinkDatabaseOptions( grbitShrinkDatabaseOptions );
 
     FMP::EnterFMPPoolAsWriter();
     pfmpT->SetLogOn();
@@ -4988,6 +5013,7 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
             m_pinst,
             m_pinst->m_pfsapi,
             wszDbName,
+            JET_filetypeDatabase,
             (BYTE*)pdbfilehdr,
             g_cbPage,
             OffsetOf( DBFILEHDR, le_cbPageSize ) );
@@ -5236,6 +5262,7 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
             m_pinst,
             m_pinst->m_pfsapi,
             wszDbName,
+            JET_filetypeDatabase,
             (BYTE*)pdbfilehdr,
             g_cbPage,
             OffsetOf( DBFILEHDR, le_cbPageSize ) );
@@ -5274,7 +5301,7 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
             goto HandleError;
         }
     }
-    else if ( JET_errReadVerifyFailure == err )
+    else if ( FErrIsDbCorruption( err ) )
     {
         reason = eDARHeaderCorrupt;
         if ( pfmp->FIgnoreDeferredAttach() )
@@ -5284,8 +5311,8 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
         }
         else
         {
-            // the log file header is corrupt
-            OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRecoveryRedoLogCorruption, L"9106f5c1-2f93-479b-a12a-c93c6ab3de68" );
+            // the DB file header is corrupt
+            OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"9106f5c1-2f93-479b-a12a-c93c6ab3de68" );
             goto HandleError;
         }
     }
@@ -5350,7 +5377,7 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
     const BOOL  fMatchingLoggedSignLog  = ( 0 == memcmp( &pdbfilehdr->signLog, psignLogged, sizeof(SIGNATURE) ) );
 
     //  When we are recovering a dirty-and-patched database, it's possible that lGenMinRequired gets
-    //  stalled due to pending redo map entries. When that happens and there are mulitple attach/detach
+    //  stalled due to pending redo map entries. When that happens and there are multiple attach/detach
     //  cycles before the redo map entries are resolved, we could have lgposAttach ahead of lGenMinRequired.
     //  In that case, we need to reset lGenMinRequired and lgposAttach so that we are forced to re-attach
     //  and rebuild the redo maps. Note that ErrIsamEndDatabaseIncrementalReseed() does something similar to
@@ -7335,7 +7362,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         //       This is because we will apply this root page move record only if we have preimage of the root.
         if ( g_rgfmp[ ifmp ].FRBSOn() )
         {
-            CallR( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( dbid, 0, plrcreatemefdp->le_pgno ) );
+            CallR( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( dbid, 0, plrcreatemefdp->le_pgno, plrcreatemefdp->le_dbtime ) );
         }
 
         break;
@@ -7385,7 +7412,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         //       This is because we will apply this root page move record only if we have preimage of the root.
         if ( g_rgfmp[ ifmp ].FRBSOn() )
         {
-            CallR( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( dbid, 0, pgnoFDP ) );
+            CallR( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( dbid, 0, pgnoFDP, plrcreatesefdp->le_dbtime ) );
         }
 
         break;
@@ -7724,8 +7751,8 @@ LOCAL ERR ErrLGIRedoSplitLineinfo( FUCB                 *pfucb,
 
     if ( psplit->clines < 0 || psplit->clines > 1000000 )
     {
-        OSUHAEmitFailureTag( PinstFromPfucb( pfucb ), HaDbFailureTagRecoveryRedoLogCorruption, L"2dfb97c9-80ee-4438-ba68-0d4953cf09ad" );
-        return ErrERRCheck( JET_errLogFileCorrupt );
+        OSUHAEmitFailureTag( PinstFromPfucb( pfucb ), HaDbFailureTagLogLogicallyInconsistent, L"2dfb97c9-80ee-4438-ba68-0d4953cf09ad" );
+        return ErrERRCheck( JET_errLogCorrupted );
     }
 
     AllocR( psplit->rglineinfo = new LINEINFO[psplit->clines] );
@@ -9620,7 +9647,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             Assert( cpage.CbPage() == UlParam( PinstFromIfmp( ifmp ), JET_paramDatabasePageSize ) );
             const DBTIME dbtimePage = cpage.Dbtime();
             const BOOL fInitDbtimePage = dbtimePage != 0 && dbtimePage != dbtimeShrunk;
-            const BOOL fPageFDPDelete = cpage.FPageFDPDelete();
+            const BOOL fPageFDPDelete = !!( cpage.FPageFDPDelete() );
             Expected( fInitDbtimePage || ( dbtimePage == dbtimeShrunk ) ); // dbtime 0 only usually comes from a completely uninit page (-1019).
 
             const DBTIME dbtimeCurrentInLogRec = plrscancheck->DbtimeCurrent();
@@ -10089,8 +10116,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     (void)m_arrayPagerefSupercold.ErrSetCapacity( LNextPowerOf2( m_arrayPagerefSupercold.Size() + 1 ) );
                 }
 
-                (void)m_arrayPagerefSupercold.ErrSetEntry(  m_arrayPagerefSupercold.Size(),
-                                                            PageRef( plrscancheck->Dbid(), plrscancheck->Pgno() ) );
+                (void)m_arrayPagerefSupercold.ErrAppendEntry( PageRef( plrscancheck->Dbid(), plrscancheck->Pgno() ) );
             }
 
             //  Ideally, we should check for the error returned when latching the page to filter out cases where
@@ -10965,7 +10991,7 @@ ERR LOG::ErrLGRIRedoRootPageMove( PIB* const ppib, const DBTIME dbtime )
     //       This is because we will apply this root page move record only if we have preimages of both the source and destination.
     if ( g_rgfmp[ ifmp ].FRBSOn() )
     {
-        Call( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( g_rgfmp[ ifmp ].Dbid(), rm.pgnoFDP, rm.pgnoNewFDP ) );
+        Call( g_rgfmp[ ifmp ].PRBS()->ErrCaptureRootPageMove( g_rgfmp[ ifmp ].Dbid(), rm.pgnoFDP, rm.pgnoNewFDP, rm.dbtimeAfter ) );
     }
 
 HandleError:
@@ -10984,7 +11010,8 @@ ERR LOG::ErrLGRIRedoMacroOperation( PIB *ppib, DBTIME dbtime )
     if ( plr == NULL )
     {
         FireWall( "NullLrOnRedoMacro" );
-        return ErrERRCheck( JET_errLogFileCorrupt );
+        OSUHAEmitFailureTag( PinstFromPpib( ppib ), HaDbFailureTagLogLogicallyInconsistent, L"5ccd5865-becc-4c71-9eed-14756d0b0397" );
+        return ErrERRCheck( JET_errLogCorrupted );
     }
 
     LRTYP   lrtyp   = plr->lrtyp;
@@ -11053,12 +11080,6 @@ ERR LOG::ErrLGRIRedoExtendDB( const LREXTENDDB * const plrdbextension )
     const BOOL fLgposLastResizeSet = ( CmpLgpos( lgposLastResize, lgposMin ) != 0 );
     const INT icmpLgposLastVsCurrent = CmpLgpos( lgposLastResize, m_lgposRedo );
 
-#ifndef DEBUG
-    const BOOL fMaySkipOlderResize = fLgposLastResizeSet && pfmp->FShrinkDatabaseEofOnAttach();
-#else
-    const BOOL fMaySkipOlderResize = fLgposLastResizeSet;
-#endif
-
     Assert( !fLgposLastResizeSet || fLgposLastResizeSupported );
     {
     OnDebug( PdbfilehdrReadOnly pdbfilehdr = pfmp->Pdbfilehdr() );
@@ -11070,9 +11091,7 @@ ERR LOG::ErrLGRIRedoExtendDB( const LREXTENDDB * const plrdbextension )
     //  that may have been initiated after the physical resizing of the file and the stamping of lgposLastResize to
     //  the header, but before the logical file size is updated post-OE operation. In that case, not replaying a
     //  matching lgposLastResize would leave the file with the smaller (logical) size captured by backup-start.
-    if ( fMaySkipOlderResize &&
-         fLgposLastResizeSet &&
-         ( icmpLgposLastVsCurrent > 0 ) )
+    if ( fLgposLastResizeSet && ( icmpLgposLastVsCurrent > 0 ) )
     {
         OSTraceFMP( ifmp, JET_tracetagSpaceManagement,
             OSFormat( "%hs: Skipping ExtendDB because we're replaying the initial required range and we haven't reached the last resize yet.", __FUNCTION__ ) );
@@ -11543,6 +11562,10 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed )
 
     if ( fTableRootPage )
     {
+        // If this database was reverted and we redo'ing an extent freed LR on root page, we should be seeing fPageFDPDelete flag set on the page when it was reverted.
+        LGPOS lgposCommitBeforeRevert   = pfmp->Pdbfilehdr()->le_lgposCommitBeforeRevert;
+        BOOL fPageFDPDeleteFlagExpected = BoolParam( m_pinst, JET_paramFlight_EnableFDPDeleteFlagCheckOnExtentFreedRedo ) && !pfmp->FContainsDataFromFutureLogs() && ( CmpLgpos( lgposCommitBeforeRevert, m_lgposRedo ) > 0 );
+
         // Capture the preimage of the table root and pass flag to indicate this is a delete table so that we special mark this table when reverted.
         // We should generally not be touching the table pages before table delete.
         // But in case we did due to some bug or some unexpected scenario, we will pass fRBSPreimageRevertAlways to make sure we always keep the table deleted.
@@ -11551,6 +11574,7 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed )
                 pgnoFirst,
                 dbtimeLast,
                 fRBSDeletedTableRootPage,
+                fPageFDPDeleteFlagExpected,
                 BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS) qosIODispatchImmediate ),
                 TcCurr() );
 
@@ -11561,6 +11585,37 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed )
             BFMarkAsSuperCold( ifmp, pgnoFirst );
             err = JET_errSuccess;
         }
+
+        if ( err == JET_errRBSRedeleteFDPExpected )
+        {
+            OSTraceSuspendGC();
+            const WCHAR* rgwsz[] =
+            {
+                pfmp->WszDatabaseName(),
+                OSFormatW( L"%I32u (0x%08x)", pgnoFirst, pgnoFirst ),
+                OSFormatW( L"(%08I32X,%04hX,%04hX)", m_lgposRedo.lGeneration, m_lgposRedo.isec, m_lgposRedo.ib ),
+                OSFormatW( L"(%08I32X,%04hX,%04hX)", lgposCommitBeforeRevert.lGeneration, lgposCommitBeforeRevert.isec, lgposCommitBeforeRevert.ib ),
+            };
+
+            // Raise corruption event
+            UtilReportEvent(
+                eventError,
+                DATABASE_CORRUPTION_CATEGORY,
+                DB_PAGE_FDP_REDELETE_EXPECTED_ID,
+                _countof( rgwsz ),
+                rgwsz,
+                0,
+                NULL,
+                pfmp->Pinst() );
+
+            OSUHAPublishEvent(
+                HaDbFailureTagCorruption, pfmp->Pinst(), HA_DATABASE_CORRUPTION_CATEGORY,
+                HaDbIoErrorNone, pfmp->WszDatabaseName(), 0, 0,
+                HA_DB_PAGE_FDP_REDELETE_EXPECTED_ID, _countof( rgwsz ), rgwsz );
+
+            OSTraceResumeGC();
+        }
+
         CallR( err );
     }
     else if ( fEmptyPageFDPDeleted )
@@ -12064,8 +12119,7 @@ ERR LOG::ErrLGRIRedoOperations(
                 }
             }
 
-            const CArray<PageRef>::ERR errArray = m_arrayPagerefSupercold.ErrSetSize( 0 );
-            Assert( errArray == CArray<PageRef>::ERR::errSuccess );
+            m_arrayPagerefSupercold.Clear();
 
             // we report the progress either if this log took too long to replay (at least 5 seconds) or
             // if the control callback says so ...

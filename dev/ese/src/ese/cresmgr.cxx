@@ -1882,7 +1882,7 @@ VOID CResourceManager::MarkAsFreed__(
 //======================================
 VOID CResourceManager::IDumpAlloc( const WCHAR* szDumpFile )
 {
-    CPRINTFFILE cprintf( szDumpFile );
+    CPRINTFFILE cprintf( szDumpFile, CPRINTFFILE::FILEENCODING::ASCII );
 
     cprintf( "ResourceID = %i Tag: \"%.*s\" object size = %i\r\n\r\n",
         ResID(),
@@ -3057,7 +3057,7 @@ VOID OSRMPostterm()
     fOSRMPreinitPostTerm = fTrue;
 
 #ifdef RM_STATISTICS
-    CPRINTFFILE cprintf( "rmstat.txt" );
+    CPRINTFFILE cprintf( "rmstat.txt", fFalse );
     cprintf( "\r\n\r\n%ws\r\n", WszUtilProcessName() );
     cprintf( "RESID   Alloc  (RFOLWait)   Free   (WaitChnk WaitLoop WaitSucc) ( LAGACX  LAGFst LAGHit) ( LARACX  LARFst LARHit)\r\n" );
     cprintf( "=================================================================================================================" );

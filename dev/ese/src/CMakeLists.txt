@@ -7,6 +7,7 @@
 add_subdirectory(_errstr)
 add_subdirectory(_esefile)
 add_subdirectory(_etw)
+add_subdirectory(_lz4)
 add_subdirectory(_perfctrs)
 add_subdirectory(_res)
 add_subdirectory(_xpress)

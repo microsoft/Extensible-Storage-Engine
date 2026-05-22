@@ -2567,6 +2567,7 @@ ERR LOG::ErrLGReadCheckpoint( _In_ PCWSTR wszCheckpointFile, CHECKPOINT *pcheckp
             m_pinst,
             m_pinst->m_pfsapi,
             wszCheckpointFile,
+            JET_filetypeCheckpoint,
             (BYTE*)pcheckpoint,
             sizeof(CHECKPOINT),
             -1,

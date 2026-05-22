@@ -49,7 +49,9 @@ namespace Internal
 
                         ERR ErrIssue( _In_ const ::IFileFilter::IOMode iom ) override;
 
-                        ERR ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const ::IFileFilter::IOMode iom ) override;
+                        ERR ErrFlush(   _In_ const IOFLUSHREASON            iofr,
+                                        _In_ const IFileAPI::FileFlushMode  ffm,
+                                        _In_ const ::IFileFilter::IOMode    iom ) override;
                 };
 
                 template< class TM, class TN >
@@ -188,11 +190,13 @@ namespace Internal
 
                 template< class TM, class TN >
                 inline ERR CFileFilterWrapper<TM, TN>::ErrFlush(    _In_ const IOFLUSHREASON            iofr,
+                                                                    _In_ const IFileAPI::FileFlushMode  ffm,
                                                                     _In_ const ::IFileFilter::IOMode    iom )
                 {
                     ERR err = JET_errSuccess;
 
-                    ExCall( I()->Flush( (Internal::Ese::BlockCache::Interop::IOMode)iom ) );
+                    ExCall( I()->Flush( (Internal::Ese::BlockCache::Interop::FileFlushMode)ffm,
+                                        (Internal::Ese::BlockCache::Interop::IOMode)iom ) );
 
                 HandleError:
                     return err;

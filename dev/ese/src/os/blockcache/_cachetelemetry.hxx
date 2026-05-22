@@ -41,12 +41,17 @@ class TCacheTelemetry  //  ctm
         BFRequestTraceFlags BfrtfReference( _In_ const BOOL fRead, _In_ const BOOL fCacheIfPossible );
 };
 
+#ifdef DEBUG
+#define ENABLE_BFEBC_TRACING
+#endif
+
 template< class I >
 void TCacheTelemetry<I>::Miss(  _In_ const ICacheTelemetry::FileNumber  filenumber, 
                                 _In_ const ICacheTelemetry::BlockNumber blocknumber,
                                 _In_ const BOOL                         fRead,
                                 _In_ const BOOL                         fCacheIfPossible )
 {
+#ifdef ENABLE_BFEBC_TRACING
     if ( filenumber == filenumberInvalid )
     {
         return;
@@ -62,6 +67,7 @@ void TCacheTelemetry<I>::Miss(  _In_ const ICacheTelemetry::FileNumber  filenumb
                         100,
                         BfrtfReference( fRead, fCacheIfPossible ),
                         getutc->context.nClientType );
+#endif
 }
 
 template< class I >
@@ -70,6 +76,7 @@ void TCacheTelemetry<I>::Hit(   _In_ const ICacheTelemetry::FileNumber  filenumb
                                 _In_ const BOOL                         fRead,
                                 _In_ const BOOL                         fCacheIfPossible )
 {
+#ifdef ENABLE_BFEBC_TRACING
     if ( filenumber == filenumberInvalid )
     {
         return;
@@ -87,12 +94,14 @@ void TCacheTelemetry<I>::Hit(   _In_ const ICacheTelemetry::FileNumber  filenumb
                         100,
                         BfrtfReference( fRead, fCacheIfPossible ),
                         getutc->context.nClientType );
+#endif
 }
 
 template< class I >
 void TCacheTelemetry<I>::Update(    _In_ const ICacheTelemetry::FileNumber  filenumber, 
                                     _In_ const ICacheTelemetry::BlockNumber blocknumber )
 {
+#ifdef ENABLE_BFEBC_TRACING
     if ( filenumber == filenumberInvalid )
     {
         return;
@@ -120,6 +129,7 @@ void TCacheTelemetry<I>::Update(    _In_ const ICacheTelemetry::FileNumber  file
                         petc->iorReason.Ioru(),
                         petc->iorReason.Iorf(),
                         petc->nParentObjectClass );
+#endif
 }
 
 template< class I >
@@ -127,6 +137,7 @@ void TCacheTelemetry<I>::Write( _In_ const ICacheTelemetry::FileNumber  filenumb
                                 _In_ const ICacheTelemetry::BlockNumber blocknumber,
                                 _In_ const BOOL                         fReplacementPolicy )
 {
+#ifdef ENABLE_BFEBC_TRACING
     if ( filenumber == filenumberInvalid )
     {
         return;
@@ -153,6 +164,7 @@ void TCacheTelemetry<I>::Write( _In_ const ICacheTelemetry::FileNumber  filenumb
                         petc->iorReason.Ioru(),
                         petc->iorReason.Iorf(),
                         petc->nParentObjectClass );
+#endif
 }
 
 template< class I >
@@ -160,6 +172,7 @@ void TCacheTelemetry<I>::Evict( _In_ const ICacheTelemetry::FileNumber  filenumb
                                 _In_ const ICacheTelemetry::BlockNumber blocknumber,
                                 _In_ const BOOL                         fReplacementPolicy )
 {
+#ifdef ENABLE_BFEBC_TRACING
     if ( filenumber == filenumberInvalid )
     {
         return;
@@ -172,6 +185,7 @@ void TCacheTelemetry<I>::Evict( _In_ const ICacheTelemetry::FileNumber  filenumb
                         JET_errSuccess, 
                         fReplacementPolicy ? bfefReasonAvailPool : bfefReasonPurgePage,
                         100 );
+#endif
 }
 
 template< class I >

@@ -122,8 +122,9 @@ namespace Internal
                     /// <summary>
                     /// Flushes all data previously written for the current file.
                     /// </summary>
+                    /// <param name="fileFlushMode">File flush mode.</param>
                     /// <param name="ioMode">IO operation mode.</param>
-                    void Flush( IOMode ioMode );
+                    void Flush( FileFlushMode fileFlushMode, IOMode ioMode );
                 };
             }
         }

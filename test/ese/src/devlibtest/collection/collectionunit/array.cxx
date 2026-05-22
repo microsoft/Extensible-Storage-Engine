@@ -51,7 +51,7 @@ bool FTestArraySortAndSearch( CArray<INT>& array, const INT* const rgiUnsorted, 
 
     const INT iMustNotBeFound = g_defaultElement;
 
-    TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 0 ) );
+    array.Clear();
     TestCheck( 0 == array.Size() );
 
     //  searching on empty array
@@ -62,8 +62,6 @@ bool FTestArraySortAndSearch( CArray<INT>& array, const INT* const rgiUnsorted, 
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchBinary( &iMustNotBeFound, CmpFunction ) );
 
     //  inserting unsorted objects
-
-
 
     for ( size_t i = 0; i < ci; i++ )
     {
@@ -488,9 +486,53 @@ ERR ArrayTest::ErrTest()
     TestCheck( g_defaultElement == arrayClone.Entry( 76 ) );
     TestCheck( ( g_elementMult * 77 ) == arrayClone.Entry( 77 ) );
 
+    //  cleaning to start append tests
+
+    array.Clear();
+    TestCheck( 0 == array.Size() );
+
+    //  append elements
+
+    for ( size_t iElement = 0; iElement < 10; iElement++ )
+    {
+        const INT iKey = (INT)( 10 * ( iElement + 1 ) );
+
+        TestCheck( CArray<INT>::ERR::errSuccess == array.ErrAppendEntry( iKey ) );
+        TestCheck( ( iElement + 1 ) == array.Size() );
+
+        for ( size_t jElement = 0; jElement <= iElement; jElement++ )
+        {
+            const INT iKeyExpected = (INT)( 10 * ( jElement + 1 ) );
+            const INT iKeyActual = array[ jElement ];
+            TestCheck( iKeyExpected == iKeyActual );
+        }
+    }
+
+    //  remove last element
+
+    TestCheck( 10 == array.Size() );
+    for ( size_t iElement = 0; iElement < 11; iElement++ )
+    {
+        const size_t cSizeBefore = array.Size();
+        const bool fRemovedExpected = ( iElement < 10 );
+        const bool fRemovedActual = array.FRemoveLastEntry();
+        const size_t cSizeAfter = array.Size();
+
+        TestCheck( fRemovedExpected == fRemovedActual );
+        TestCheck( fRemovedActual ? ( cSizeAfter == ( cSizeBefore - 1 ) ) : ( cSizeAfter == cSizeBefore ) );
+
+        for ( size_t jElement = 0; jElement < cSizeAfter; jElement++ )
+        {
+            const INT iKeyExpected = (INT)( 10 * ( jElement + 1 ) );
+            const INT iKeyActual = array[ jElement ];
+            TestCheck( iKeyExpected == iKeyActual );
+        }
+    }
+    TestCheck( 0 == array.Size() );
+
     //  cleaning to start sort/search tests
 
-    TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 0 ) );
+    array.Clear();
     TestCheck( 0 == array.Size() );
 
     //  inserting and sorting/searching: empty

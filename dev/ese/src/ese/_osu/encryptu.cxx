@@ -75,7 +75,31 @@ ErrOSUEncrypt(
     PERFOpt( cEncryptionCalls.Inc( iInstance, tce ) );
 
     const HRT hrtStart = HrtHRTCount();
-    const ERR err = ErrOSEncryptWithAes256( pbData, pcbDataLen, cbDataBufLen, pfucbTable->pbEncryptionKey, pfucbTable->cbEncryptionKey );
+#ifdef DEBUG
+    ULONG cbDataIn = *pcbDataLen;
+    BYTE *pbDataCopy = new BYTE[cbDataIn];
+    if ( pbDataCopy != NULL )
+    {
+        memcpy_s( pbDataCopy, cbDataIn, pbData, cbDataIn );
+    }
+#endif
+    const ERR err = ErrOSEncryptWithAes256( PARAM_AES256_IMPLEMENTATION, pbData, pcbDataLen, cbDataBufLen, pfucbTable->pbEncryptionKey, pfucbTable->cbEncryptionKey );
+#ifdef DEBUG
+    // On debug, verify that other encryption implementation can decrypt the result back to the original buffer.
+    if ( err >= JET_errSuccess && pbDataCopy != NULL )
+    {
+        ULONG cbDataOut = *pcbDataLen;
+        BYTE *pbDataOutCopy = new BYTE[cbDataOut];
+        if ( pbDataOutCopy != NULL )
+        {
+            CallS( ErrOSDecryptWithAes256( OTHER_AES256_IMPLEMENTATION, pbData, pbDataOutCopy, &cbDataOut, pfucbTable->pbEncryptionKey, pfucbTable->cbEncryptionKey ) );
+            Assert( cbDataIn == cbDataOut );
+            Assert( memcmp( pbDataCopy, pbDataOutCopy, cbDataIn ) == 0 );
+            delete[] pbDataOutCopy;
+        }
+    }
+    delete[] pbDataCopy;
+#endif
     PERFOpt( cEncryptionTotalDhrts.Add( iInstance, tce, HrtHRTCount() - hrtStart ) );
 
     return err;
@@ -100,7 +124,7 @@ ErrOSUDecrypt(
     PERFOpt( cDecryptionCalls.Inc( iInstance, tce ) );
 
     const HRT hrtStart = HrtHRTCount();
-    const ERR err = ErrOSDecryptWithAes256( pbDataIn, pbDataOut, pcbDataLen, pfucbTable->pbEncryptionKey, pfucbTable->cbEncryptionKey );
+    const ERR err = ErrOSDecryptWithAes256( PARAM_AES256_IMPLEMENTATION, pbDataIn, pbDataOut, pcbDataLen, pfucbTable->pbEncryptionKey, pfucbTable->cbEncryptionKey );
     PERFOpt( cDecryptionTotalDhrts.Add( iInstance, tce, HrtHRTCount() - hrtStart ) );
 
     if ( err == JET_errDecryptionFailed )

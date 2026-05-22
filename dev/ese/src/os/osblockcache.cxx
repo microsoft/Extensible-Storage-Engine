@@ -272,7 +272,7 @@ void CCachedBlockSlot::DumpFile(    _In_ const CCachedBlockSlot&    slot,
                                             wszAnyAbsPath,
                                             wszKeyPath );
 
-        (*pcprintf)(    _T( "  // file %ws at offset 0x%016I64x for 0x%08x bytes" ),
+        (*pcprintf)(    "  // file %ws at offset 0x%016I64x for 0x%08x bytes",
                         wszAnyAbsPath[0] ? wszAnyAbsPath : L"<unknown>",
                         (QWORD)slot.Cbid().Cbno() * cbCachedBlock,
                         cbCachedBlock );
@@ -337,6 +337,6 @@ BOOL FOSBlockCachePreinit()
 
 void OSBlockCachePostterm()
 {
-    CFileWrapper::Cleanup();
     CFileFilter::Cleanup();
+    CPoolRepository::CleanupAll();
 }

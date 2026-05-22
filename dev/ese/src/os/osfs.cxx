@@ -325,7 +325,7 @@ VOID COSFileSystem::ReportFileErrorWithFilter(
 
 COSFileSystem::COSFileSystem( IFileSystemConfiguration * const pfsconfig )
     :   m_pfsconfig( pfsconfig ),
-        m_critVolumePathCache( CLockBasicInfo( CSyncBasicInfo( _T( "COSFileSystem::m_critVolumePathCache" ) ), 0, 0 ) )
+        m_critVolumePathCache( CLockBasicInfo( CSyncBasicInfo( "COSFileSystem::m_critVolumePathCache" ), 0, 0 ) )
 {
 }
 

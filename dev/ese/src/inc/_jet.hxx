@@ -462,7 +462,7 @@ typedef CAutoIWSZ< 90 > CAutoWSZPATH;
     {                                                                               \
         err = (func);                                                               \
     }                                                                               \
-    EXCEPT( GrbitParam( JET_paramExceptionAction ) != JET_ExceptionNone ? ExceptionFail( _T( "API" ) ) : efaContinueSearch )    \
+    EXCEPT( GrbitParam( JET_paramExceptionAction ) != JET_ExceptionNone ? ExceptionFail( "API" ) : efaContinueSearch )    \
     {                                                                               \
         AssertPREFIX( !"This code path should be impossible (the exception-handler should have terminated the process)." );     \
         err = ErrERRCheck( JET_errInternalError );                                  \
@@ -490,9 +490,9 @@ typedef CAutoIWSZ< 90 > CAutoWSZPATH;
     TRY                                                                             \
     {                                                                               \
         err = (func);                                                               \
-        OSTrace( JET_tracetagAPI, OSFormat( "End %s with error %d (0x%x)", _T( #func ), err, err ) );   \
+        OSTrace( JET_tracetagAPI, OSFormat( "End %s with error %d (0x%x)", #func, err, err ) );   \
     }                                                                               \
-    EXCEPT( GrbitParam( JET_paramExceptionAction ) != JET_ExceptionNone ? ExceptionFail( _T( #func ) ) : efaContinueSearch )    \
+    EXCEPT( GrbitParam( JET_paramExceptionAction ) != JET_ExceptionNone ? ExceptionFail( #func ) : efaContinueSearch )    \
     {                                                                               \
         AssertPREFIX( !"This code path should be impossible (the exception-handler should have terminated the process)." );     \
         err = ErrERRCheck( JET_errInternalError );                                  \
@@ -519,7 +519,7 @@ typedef CAutoIWSZ< 90 > CAutoWSZPATH;
     OSEventTrace( _etguidApiCall_Start, 1, &ulTraceApiId );                         \
     CLockDeadlockDetectionInfo::GetApiEntryState(&cDisableDeadlockCheck, &cDisableOwnershipCheck, &cLocks);                     \
     const JET_ERR   err     = (func);                                               \
-    OSTrace( JET_tracetagAPI, OSFormat( "End %s with error %d (0x%x)", _T( #func ), err, err ) );   \
+    OSTrace( JET_tracetagAPI, OSFormat( "End %s with error %d (0x%x)", #func, err, err ) );   \
     AssertRTL( err > -65536 && err < 65536 );                                       \
     fDisableLockCheck ? CLockDeadlockDetectionInfo::DisableLockCheckOnApiExit() : 0;\
     CLockDeadlockDetectionInfo::AssertCleanApiExit(cDisableDeadlockCheck, cDisableOwnershipCheck, cLocks);                      \

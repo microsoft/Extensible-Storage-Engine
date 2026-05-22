@@ -47,6 +47,9 @@ public:
     QWORD CbMaxSpaceForRBSWhenLowDiskSpace() { return m_cbMaxSpaceForRBSWhenLowDiskSpace; }
     VOID SetCbMaxSpaceForRBSWhenLowDiskSpace( QWORD cbMaxSpaceForRBSWhenLowDiskSpace ) { m_cbMaxSpaceForRBSWhenLowDiskSpace = cbMaxSpaceForRBSWhenLowDiskSpace; }
 
+    QWORD CbMaxSpaceForRBS() { return m_cbMaxSpaceForRBS; }
+    VOID SetCbMaxSpaceForRBS( QWORD cbMaxSpaceForRBS ) { m_cbMaxSpaceForRBS = cbMaxSpaceForRBS; }
+
     INT CSecRBSMaxTimeSpan() { return m_cSecRBSMaxTimeSpan; }
     VOID SetCSecRBSMaxTimeSpan( INT cSecRBSMaxTimeSpan ) { m_cSecRBSMaxTimeSpan = cSecRBSMaxTimeSpan; }
 
@@ -62,6 +65,7 @@ public:
         m_fEnableCleanup = fTrue;
         m_cbLowDiskSpaceThreshold = 1073741824; // 1GB
         m_cbMaxSpaceForRBSWhenLowDiskSpace = 1048576; // 1MB
+        m_cbMaxSpaceForRBS = 2147483648; // 2GB, same as disk size by default.
         m_cSecRBSMaxTimeSpan = 300; // 5mins
         m_cSecMinCleanupIntervalTime = 1; // every 1sec
         m_lFirstValidRBSGen = 1;
@@ -74,6 +78,7 @@ private:
     QWORD   m_cbLowDiskSpaceThreshold;
     QWORD   m_cbLowDiskSpaceDisableRBSThreshold;
     QWORD   m_cbMaxSpaceForRBSWhenLowDiskSpace;
+    QWORD   m_cbMaxSpaceForRBS;
     INT     m_cSecRBSMaxTimeSpan;
     INT     m_cSecMinCleanupIntervalTime;
     LONG    m_lFirstValidRBSGen;
@@ -852,4 +857,70 @@ JETUNITTEST( RBSCleaner, ExpiredBackupSnapshotsRemoved )
     CHECK( piooperator->m_lRBSGenMin == 6 );
 
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
+}
+
+// Max space of RBS reached and we have to remove multiple RBS files to free up space
+JETUNITTEST( RBSCleaner, MaxRBSSpaceRequiringMultipleRBSRemoval )
+{
+    __int64 ftStartTime = UtilGetCurrentFileTime();
+    unique_ptr<RBSCleanerTestConfig> pconfig( new RBSCleanerTestConfig() );
+    pconfig->SetCSecRBSMaxTimeSpan( 3600 );
+
+    RBSCleanerTestState* pstate = new RBSCleanerTestState();
+    RBSCleanerTestIOOperator* piooperator = new RBSCleanerTestIOOperator();
+    piooperator->m_lRBSGenMin = 1;
+    piooperator->m_lRBSGenMax = 10;
+
+    // Configure rbs disk space threshold such that we are consuming extra space and multiple RBS snapshots need to be removed. 
+    pconfig->SetCbMaxSpaceForRBS(  2 * piooperator->m_cbDirSize );
+
+    INST* pinst;
+    CHECKCALLS( JetCreateInstance2W( (JET_INSTANCE*)&pinst, NULL, NULL, JET_bitNil ) );
+    CHECKCALLS( JetSetSystemParameterW( (JET_INSTANCE*)&pinst, JET_sesidNil, JET_paramEnableRBS, 1, NULL ) );
+
+    unique_ptr<RBSCleaner> prbscleaner( new RBSCleaner( pinst, piooperator, pstate, pconfig.release() ) );
+    CHECK( JET_errSuccess == prbscleaner->ErrStartCleaner() );
+
+    SleepTillConditionSatisfied( pstate->CPassesFinished() == 1, 2, MaxTestRunTimeInMSec );
+
+    CHECK( pstate->FtPassStartTime() >= ftStartTime );
+    CHECK( pstate->FtPrevPassCompletionTime() >= pstate->FtPassStartTime() );
+    CHECK( piooperator->m_cRemoveFolderCalls == 8 );
+    CHECK( piooperator->m_lRBSGenMin == 9 );
+
+    CHECKCALLS( JetTerm2( (JET_INSTANCE)pinst, JET_bitTermAbrupt ) );
+}
+
+// Low disk space but there is space occupied by backup RBS which could be removed. But that's not enough and we need to remove one more RBS.
+JETUNITTEST( RBSCleaner, MaxRBSSpaceBackupRBSRemovalNotEnough )
+{
+    __int64 ftStartTime = UtilGetCurrentFileTime();
+    unique_ptr<RBSCleanerTestConfig> pconfig( new RBSCleanerTestConfig() );
+    pconfig->SetCSecRBSMaxTimeSpan( 3600 );
+
+    RBSCleanerTestState* pstate = new RBSCleanerTestState();
+    RBSCleanerTestIOOperator* piooperator = new RBSCleanerTestIOOperator();
+    piooperator->m_lRBSGenMin = 1;
+    piooperator->m_lRBSGenMax = 10;
+    piooperator->m_lRBSGenMinBackup = 11;
+    piooperator->m_lRBSGenMaxBackup = 15;
+
+    // Configure rbs disk space threshold such that we are consuming extra space and backup RBS removal alone shouldn't clear up enough space. 
+    pconfig->SetCbMaxSpaceForRBS( ( piooperator->m_lRBSGenMax - piooperator->m_lRBSGenMin ) * piooperator->m_cbDirSize );
+
+    INST* pinst;
+    CHECKCALLS( JetCreateInstance2W( (JET_INSTANCE*)&pinst, NULL, NULL, JET_bitNil ) );
+    CHECKCALLS( JetSetSystemParameterW( (JET_INSTANCE*)&pinst, JET_sesidNil, JET_paramEnableRBS, 1, NULL ) );
+
+    unique_ptr<RBSCleaner> prbscleaner( new RBSCleaner( pinst, piooperator, pstate, pconfig.release() ) );
+    CHECK( JET_errSuccess == prbscleaner->ErrStartCleaner() );
+
+    SleepTillConditionSatisfied( pstate->CPassesFinished() == 1, 2, MaxTestRunTimeInMSec );
+
+    CHECK( pstate->FtPassStartTime() >= ftStartTime );
+    CHECK( pstate->FtPrevPassCompletionTime() >= pstate->FtPassStartTime() );
+    CHECK( piooperator->m_cRemoveFolderCalls == 6 );
+    CHECK( piooperator->m_lRBSGenMin == 2 );
+
+    CHECKCALLS( JetTerm2( (JET_INSTANCE)pinst, JET_bitTermAbrupt ) );
 }

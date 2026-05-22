@@ -7,13 +7,6 @@
 
 #include "cc.hxx"
 #include "math.hxx"
-#pragma prefast(push)
-#pragma prefast(disable:26006, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:26007, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:28718, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:28726, "Dont bother us with tchar, someone else owns that.")
-#include <tchar.h>
-#pragma prefast(pop)
 #include "os.hxx"
 
 #include "jet.h"

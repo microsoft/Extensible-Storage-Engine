@@ -252,9 +252,11 @@ extern INT g_fMemCheck;
 
 
 #ifdef MEM_CHECK
-INLINE const CHAR * const SzNewFile();
-INLINE ULONG UlNewLine();
+const CHAR * const SzNewFile();
+ULONG UlNewLine();
 #endif
+
+#ifdef OS_LAYER_USE_NEW_OVERRIDE
 
 _Ret_maybenull_ _Post_writable_byte_size_(cbSize)
 INLINE void* __cdecl operator new( const size_t cbSize )
@@ -290,6 +292,7 @@ inline void* __cdecl operator new[](size_t size) { return operator new(size); }
 inline void __cdecl operator delete[](void* p) { operator delete(p); }
 #pragma pop_macro("new")
 
+#endif // OS_LAYER_USE_NEW_OVERRIDE
 
 //  Page Memory Control
 

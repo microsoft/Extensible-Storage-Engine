@@ -63,7 +63,7 @@ while($apiline = <JETAPILIST>) {
 print OUTPUTFILE <<EOFHDR;
 	};
 
-C_ASSERT( _countof( mpopsz ) == opMax );
+static_assert( _countof( mpopsz ) == opMax );
 
 #endif // DEBUG
 

@@ -3,85 +3,173 @@
 
 #include "osstd.hxx"
 
-// Undefine these tokens.  They are defined such that you get an error
-// when you try to use certain APIs, but this file implements the
-// indirect APIs you should use instead, and thus needs access to the
-// native APIs.
-#ifdef wcslen
-#undef wcslen
-#endif
-
-#ifdef wcscmp
-#undef wcscmp
-#endif
-
-#ifdef wcsncmp
-#undef wcsncmp
-#endif
+#pragma prefast(push)
+#pragma prefast(disable:28196, "Do not bother us with strsafe, someone else owns that.")
+#pragma prefast(disable:28205, "Do not bother us with strsafe, someone else owns that.")
+#include <strsafe.h>
+#pragma prefast(pop)
 
 ERR ErrFromStrsafeHr ( HRESULT hr)
 {
-    ERR err = (hr == SEC_E_OK) ?
-        JET_errSuccess :
-        (hr == STRSAFE_E_INSUFFICIENT_BUFFER) ?
-            ErrERRCheck(JET_errBufferTooSmall) :
-            (hr == STRSAFE_E_INVALID_PARAMETER) ?
-                ErrERRCheck(JET_errInvalidParameter) :
-                ErrERRCheck(JET_errInternalError);
+    ERR err;
+    
+    switch ( hr )
+    {
+    case SEC_E_OK:
+        err = JET_errSuccess;
+        break;
+        
+    case STRSAFE_E_INSUFFICIENT_BUFFER:
+        err = ErrERRCheck( JET_errBufferTooSmall );
+        break;
+        
+    case STRSAFE_E_INVALID_PARAMETER:
+        err = ErrERRCheck( JET_errInvalidParameter );
+        break;
+        
+    default:
+        err = ErrERRCheck( JET_errInternalError );
+        break;
+    }
+    
     CallSx( err, JET_errBufferTooSmall );   //  this is the only really expected error
     return(err);
 }
 
 
-//  get the length of the string
+// For the LOSStrLength* functions:
+// Get the length of the string in count of characters.
+//
+// * Note the unusual usage.  Most of our string handling uses count of bytes.
+//   Historically, however, string length is returned as count of characters.
+//
+// * Because the length is returned as count of characters, the input parameter
+//   cchMax is also in count of characters.
+//
+// * If caller does not supply a value for the parameter cchMax, a default is
+//   used (see string.hxx).  The default indicates we expect the string to be
+//   NULL terminated in a reasonable number of characters.  In practice, reasonable
+//   means fewer characters than the max that StringCchLengthFoo can handle.
+//
+// * The default can not be the token STRSAFE_MAX_CCH, since that token is defined
+//   in a Windows specific header file and cannot be referenced in our OS abstraction
+//   headers.  The value ulMax is used.
+//
+// * If the value of the parameter cchMax is greater than STRSAFE_MAX_CCH, STRSAFE_MAX_CCH
+//   is used.  We only expect that to happen if the value is ulMax.
+//
+// * Obviously, ulMax must be greater than STRSAFE_MAX_CCH.
 
-LONG LOSStrLengthA( _In_ PCSTR const sz )
+static_assert( ulMax > STRSAFE_MAX_CCH );
+
+// Note the unusual usage.  Most of our string handling uses count of bytes.
+// Historically, however, string length is returned as count of characters.
+LONG LOSStrLengthA(
+    _In_ PCSTR const sz,
+    _In_ ULONG cchMax )
 {
-    // According to Windows OACR, strlen cannot handle NULL.
+    SIZE_T cchLength;
+    SIZE_T cchMaxUsed;
+    HRESULT hr;
+    
+    // StringCchLengthA returns an error on a NULL pointer.
     if ( NULL == sz )
     {
         return 0;
     }
 
-    return strlen( sz );
+    if ( cchMax > STRSAFE_MAX_CCH )
+    {
+        Expected( cchMax == ulMax );
+        cchMaxUsed = STRSAFE_MAX_CCH;
+    }
+    else
+    {
+        cchMaxUsed = cchMax;
+    }
+
+    hr = StringCchLengthA( sz, cchMaxUsed, &cchLength );
+    // We never expect this to fail.
+    Assert( JET_errSuccess == ErrFromStrsafeHr( hr ) );
+
+    Assert( cchLength <= lMax );
+    
+    return (LONG)cchLength;
 }
-LONG LOSStrLengthW( _In_ PCWSTR const wsz )
+
+// Note the unusual usage.  Most of our string handling uses count of bytes.
+// Historically, however, string length is returned as count of characters.
+LONG LOSStrLengthW(
+    _In_ PCWSTR const wsz,
+    _In_ ULONG cchMax )
 {
-    // According to Windows OACR, wcslen cannot handle NULL.
+    SIZE_T cchLength;
+    SIZE_T cchMaxUsed;
+    HRESULT hr;
+    
+    // StringCchLengthW returns an error on a NULL pointer.
     if ( NULL == wsz )
     {
         return 0;
     }
 
-    return wcslen( wsz );
+    if ( cchMax > STRSAFE_MAX_CCH )
+    {
+        Expected( cchMax == ulMax );
+        cchMaxUsed = STRSAFE_MAX_CCH;
+    }
+    else
+    {
+        cchMaxUsed = cchMax;
+    }
+    
+    hr = StringCchLengthW( wsz, cchMaxUsed, &cchLength );
+    // We never expect this to fail.
+    Assert( !ErrFromStrsafeHr( hr ) );
+
+    Assert( cchLength <= cchMax );
+    
+    return (LONG)cchLength;
 }
 
-LONG LOSStrLengthUnalignedW( _In_ const UnalignedLittleEndian< WCHAR > * wsz )
+// Note the unusual usage.  Most of our string handling uses count of bytes.
+// Historically, however, string length is returned as count of characters.
+LONG LOSStrLengthUnalignedW(
+    _In_ const UnalignedLittleEndian< WCHAR > * wsz,
+    _In_ ULONG cchMax )
 {
-    LONG                                    cchCurrent  = 0;
-    const UnalignedLittleEndian< WCHAR > *  wszCurrent  = wsz;
+    SIZE_T cchLength;
+    SIZE_T cchMaxUsed;
+    HRESULT hr;
 
     if ( NULL == wsz )
     {
         return 0;
     }
 
-    // Could we do
-    // if ( 0 == ( wsz % sizeof(WCHAR) ) )
-    //   or
-    // if ( isAligned( wsz, WCHAR ) )
-    // {
-    //    return wcslen( wsz );
-    // }
-    while ( wszCurrent[ cchCurrent ] != L'\0' )
+    if ( cchMax > STRSAFE_MAX_CCH )
     {
-        cchCurrent++;
+        Expected( cchMax == ulMax );
+        cchMaxUsed = STRSAFE_MAX_CCH;
     }
+    else
+    {
+        cchMaxUsed = cchMax;
+    }
+    
+    hr = UnalignedStringCchLengthW( ( PCWSTR )wsz, cchMaxUsed, &cchLength );
+    // We never expect this to fail.
+    Assert( !ErrFromStrsafeHr( hr ) );
 
-    return cchCurrent;
+    Assert( cchLength <= cchMax );
+    
+    return (LONG)cchLength;
 }
 
-LONG LOSStrLengthMW( _In_ PCWSTR const wsz )
+// Note the unusual usage.  Most of our string handling uses count of bytes.
+// Historically, however, string length is returned as count of characters.
+LONG LOSStrLengthMW(
+    _In_ PCWSTR const wsz )
 {
     LONG        cchCurrent  = 0;
     PCWSTR      wszCurrent  = wsz;
@@ -104,56 +192,65 @@ LONG LOSStrLengthMW( _In_ PCWSTR const wsz )
 //  That means byte for byte equality.  If the first string is "less than" the second string, -1
 //  is returned.  If the strings are "equal", 0 is returned.  If the first string is "greater than"
 //  the second string, +1 is returned.
-LONG LOSStrCompareA( _In_ PCSTR const szStr1, _In_ PCSTR const szStr2, _In_ const ULONG cchMax )
+//
+//  Note the unusual usage.  Most of our string handling uses count of bytes.
+//  Historically, however, string compare is limited by count of characters.
+LONG LOSStrCompareA(
+    _In_ PCSTR const szStr1,
+    _In_ PCSTR const szStr2,
+    _In_ const ULONG cchMax )
 {
     LONG lCmp;
+    PCSTR szStrUsed1;
+    PCSTR szStrUsed2;
+    
     if ( 0 == cchMax )
     {
         // Why are you doing this?
         return 0;
     }
 
-    if ( ( NULL == szStr1 ) || ( NULL == szStr2 ) )
+    // We treat NULL pointers as 0 length strings.
+    if ( NULL == szStr1 )
     {
-        // strcmp, strlen, and strncmp don't play well with NULLs.
-        // NULLs are treated as 0 length strings, and we're sure that
-        // cchmax is greater than 0, so a non-NULL string is longer.
-        LONG_PTR lpCmp = (LONG_PTR)szStr1 - (LONG_PTR)szStr2;
-
-        if ( lpCmp > 0 )
-        {
-            lCmp = +1;
-        }
-        else if ( lpCmp < 0 )
-        {
-            lCmp = -1;
-        }
-        else
-        {
-            lCmp = 0;
-        }
-    }
-    else if (~ULONG(0) == cchMax )
-    {
-        // Simple path when caller doesn't supply a character count limit.
-        // We don't have to get the string lengths.
-        lCmp = strcmp( szStr1, szStr2 );
+        szStrUsed1 = "";
     }
     else
     {
-        ULONG cch1 = strlen( szStr1 );
-        ULONG cch2 = strlen( szStr2 );
+        szStrUsed1 = szStr1;
+    }
 
-        ULONG cchToCompare = min( max( cch1, cch2 ), cchMax );
-
-        if ( cchToCompare < cchMax )
+    if ( NULL == szStr2 )
+    {
+        szStrUsed2 = "";
+    }
+    else
+    {
+        szStrUsed2 = szStr2;
+    }
+    
+#if 0
+    if ( fIgnoreCase )
+    {
+        if ( cchMax == -1 )
         {
-            // Semi-simple path when the provided strings are both shorter than supplied max.
-            lCmp = strcmp( szStr1, szStr2 );
+            lCmp = _stricmp( szStrUsed1, szStrUsed2 );
         }
         else
         {
-            lCmp = strncmp( szStr1, szStr2, cchToCompare );
+            lCmp = _strnicmp( szStrUsed1, szStrUsed2, cchMax );
+        }
+    }
+    else
+#endif
+    {
+        if ( cchMax == -1 )
+        {
+            lCmp = strcmp( szStrUsed1, szStrUsed2 );
+        }
+        else
+        {
+            lCmp = strncmp( szStrUsed1, szStrUsed2, cchMax );
         }
     }
 
@@ -165,145 +262,186 @@ LONG LOSStrCompareA( _In_ PCSTR const szStr1, _In_ PCSTR const szStr2, _In_ cons
 //  That means byte for byte equality.  If the first string is "less than" the second string, -1
 //  is returned.  If the strings are "equal", 0 is returned.  If the first string is "greater than"
 //  the second string, +1 is returned.
-LONG LOSStrCompareW( _In_ PCWSTR const wszStr1, _In_ PCWSTR const wszStr2, _In_ const ULONG cchMax )
+//
+//  Note the unusual usage.  Most of our string handling uses count of bytes.
+//  Historically, however, string compare is limited by count of characters.
+LONG LOSStrCompareW(
+    _In_ PCWSTR const wszStr1,
+    _In_ PCWSTR const wszStr2,
+    _In_ const ULONG  cchMax )
 {
     LONG lCmp;
+    PCWSTR wszStrUsed1;
+    PCWSTR wszStrUsed2;
+    
     if ( 0 == cchMax )
     {
         // Why are you doing this?
         return 0;
     }
 
-    if ( ( NULL == wszStr1 ) || ( NULL == wszStr2 ) )
+    // We treat NULL pointers as 0 length strings.
+    if ( NULL == wszStr1 )
     {
-        // wcscmp, wcslen, and wcsncmp don't play well with NULLs.
-        // NULLs are treated as 0 length strings, and we're sure that
-        // cchmax is greater than 0, so a non-NULL string is longer.
-        LONG_PTR lpCmp = (LONG_PTR)wszStr1 - (LONG_PTR)wszStr2;
-
-        if ( lpCmp > 0 )
-        {
-            lCmp = 1;
-        }
-        else if ( lpCmp < 0 )
-        {
-            lCmp = -1;
-        }
-        else
-        {
-            lCmp = 0;
-        }
-    }
-    else if (~ULONG(0) == cchMax )
-    {
-        // Simple path when caller doesn't supply a character count limit.
-        // We don't have to get the string lengths.
-        lCmp = wcscmp( wszStr1, wszStr2 );
+        wszStrUsed1 = L"";
     }
     else
     {
-        ULONG cch1 = wcslen( wszStr1 );
-        ULONG cch2 = wcslen( wszStr2 );
+        wszStrUsed1 = wszStr1;
+    }
 
-        ULONG cchToCompare = min( max( cch1, cch2 ), cchMax );
+    if ( NULL == wszStr2 )
+    {
+        wszStrUsed2 = L"";
+    }
+    else
+    {
+        wszStrUsed2 = wszStr2;
+    }
 
-        if ( cchToCompare < cchMax )
+#if 0
+    if ( fIgnoreCase )
+    {
+        if ( cchMax == -1 )
         {
-            // Semi-simple path when the provided strings are both shorter than supplied max.
-            lCmp = wcscmp( wszStr1, wszStr2 );
+            lCmp = _wcsicmp( wszStrUsed1, wszStrUsed2 );
         }
         else
         {
-            lCmp = wcsncmp( wszStr1, wszStr2, cchToCompare );
+            lCmp = _wcsnicmp( wszStrUsed1, wszStrUsed2, cchMax );
+        }
+    }
+    else
+#endif
+    {
+        if ( cchMax == -1 )
+        {
+            lCmp = wcscmp( wszStrUsed1, wszStrUsed2 );
+        }
+        else
+        {
+            lCmp = wcsncmp( wszStrUsed1, wszStrUsed2, cchMax );
         }
     }
 
     return lCmp;
 }
 
-
-
-//  create a formatted string in a given buffer
-void __cdecl OSStrCbVFormatA ( __out_bcount(cbBuffer) PSTR szBuffer, size_t cbBuffer, __format_string PCSTR szFormat, va_list alist )
+ERR ErrOSStrCbCopyA(
+    _In_ PSTR   szDst,
+    _In_ SIZE_T cbDst,
+    _In_ PCSTR  szSrc )
 {
-    HRESULT hr = StringCbVPrintf( szBuffer, cbBuffer, szFormat, alist );
-#ifdef DEBUG
-    CallS( ErrFromStrsafeHr( hr ) );
-#endif
+    return ErrFromStrsafeHr( StringCbCopyA( szDst, cbDst, szSrc ) );
 }
 
-void __cdecl OSStrCbFormatA ( __out_bcount(cbBuffer) PSTR szBuffer, size_t cbBuffer, __format_string PCSTR szFormat, ...)
+ERR ErrOSStrCbCopyW(
+    _In_ PWSTR  wszDst,
+    _In_ SIZE_T cbDst,
+    _In_ PCWSTR wszSrc )
+{
+    return ErrFromStrsafeHr( StringCbCopyW( wszDst, cbDst, wszSrc ) );
+}
+
+ERR ErrOSStrCbAppendA(
+    _In_ PSTR   szDst,
+    _In_ SIZE_T cbDst,
+    _In_ PCSTR  szSrc )
+{
+    return ErrFromStrsafeHr( StringCbCatA( szDst, cbDst, szSrc ) );
+}
+
+ERR ErrOSStrCbAppendW(
+    _In_ PWSTR  wszDst,
+    _In_ SIZE_T cbDst,
+    _In_ PCWSTR wszSrc )
+{
+    return ErrFromStrsafeHr( StringCbCatW( wszDst, cbDst, wszSrc ) );
+}
+
+//  create a formatted string in a given buffer
+ERR __cdecl ErrOSStrCbVFormatA (
+    _Out_writes_bytes_(cbBuffer) PSTR szBuffer,
+    SIZE_T                            cbBuffer,
+    __format_string PCSTR             szFormat,
+    va_list                           alist )
+{
+    HRESULT hr = StringCbVPrintfA( szBuffer, cbBuffer, szFormat, alist );
+    return ErrFromStrsafeHr( hr );
+}
+
+//  create a formatted string in a given buffer
+ERR __cdecl ErrOSStrCbVFormatW (
+    _Out_writes_bytes_(cbBuffer) PWSTR szBuffer,
+    SIZE_T                             cbBuffer,
+    __format_string PCWSTR             szFormat,
+    va_list                            alist )
+{
+    HRESULT hr = StringCbVPrintfW( szBuffer, cbBuffer, szFormat, alist );
+    return ErrFromStrsafeHr( hr );
+}
+
+//  create a formatted string in a given buffer
+ERR __cdecl ErrOSStrCbFormatA (
+    _Out_writes_bytes_(cbBuffer) PSTR szBuffer,
+    SIZE_T                            cbBuffer,
+    __format_string PCSTR             szFormat,
+    ...)
 {
     va_list alist;
     va_start( alist, szFormat );
     HRESULT hr = StringCbVPrintf( szBuffer, cbBuffer, szFormat, alist );
-#ifdef DEBUG
-    CallS( ErrFromStrsafeHr( hr ) );
-#endif
     va_end( alist );
+    return ErrFromStrsafeHr( hr );
 }
 
 //  create a formatted string in a given buffer
-
-void __cdecl OSStrCbFormatW ( __out_bcount(cbBuffer) PWSTR szBuffer, size_t cbBuffer, __format_string PCWSTR szFormat, ...)
+ERR __cdecl ErrOSStrCbFormatW (
+    _Out_writes_bytes_(cbBuffer) PWSTR szBuffer,
+    SIZE_T                             cbBuffer,
+    __format_string PCWSTR             szFormat,
+    ...)
 {
     va_list alist;
     va_start( alist, szFormat );
     HRESULT hr = StringCbVPrintfW( szBuffer, cbBuffer, szFormat, alist );
-#ifdef DEBUG
-    CallS( ErrFromStrsafeHr( hr ) );
-#endif
     va_end( alist );
-}
-
-//  create a formatted string in a given buffer
-
-ERR __cdecl ErrOSStrCbFormatA ( __out_bcount(cbBuffer) PSTR szBuffer, size_t cbBuffer, __format_string PCSTR szFormat, ...)
-{
-    va_list alist;
-    va_start( alist, szFormat );
-    HRESULT hr = StringCbVPrintf( szBuffer, cbBuffer, szFormat, alist );
-    va_end( alist );
-    return( ErrFromStrsafeHr(hr) );
-}
-
-//  create a formatted string in a given buffer
-
-ERR __cdecl ErrOSStrCbFormatW ( __out_bcount(cbBuffer) PWSTR szBuffer, size_t cbBuffer, __format_string PCWSTR szFormat, ...)
-{
-    va_list alist;
-    va_start( alist, szFormat );
-    HRESULT hr = StringCbVPrintfW( szBuffer, cbBuffer, szFormat, alist );
-    va_end( alist );
-    return( ErrFromStrsafeHr(hr) );
+    return  ErrFromStrsafeHr( hr );
 }
 
 //  find the first occurrence of the given character in the given string and
 //  return a pointer to that character.  NULL is returned when the character
 //  is not found.
 
-VOID OSStrCharFindA( _In_ PCSTR const szStr, const char ch, _Outptr_result_maybenull_ PSTR * const pszFound )
+VOID OSStrCharFindA(
+    _In_ PCSTR const                       szStr,
+    const CHAR                             ch,
+    _Outptr_result_maybenull_ PSTR * const pszFound )
 {
-    const char* const szFound = szStr;
+    const CHAR* const szFound = szStr;
     if ( szFound )
     {
-        *pszFound = (char *)strchr( szStr, ch );
+        *pszFound = (CHAR *)strchr( szStr, ch );
     }
     else
     {
         *pszFound = NULL;
     }
 }
-VOID OSStrCharFindW( _In_ PCWSTR const wszStr, const wchar_t wch, _Outptr_result_maybenull_ PWSTR * const pwszFound )
+
+VOID OSStrCharFindW(
+    _In_ PCWSTR const                       wszStr,
+    const WCHAR                             wch,
+    _Outptr_result_maybenull_ PWSTR * const pwszFound )
 {
-    const wchar_t *wszFound = wszStr;
+    const WCHAR *wszFound = wszStr;
     if ( wszFound )
     {
         while ( L'\0' != *wszFound && wch != *wszFound )
         {
             wszFound++;
         }
-        *pwszFound = const_cast< wchar_t *const >( wch == *wszFound ? wszFound : NULL );
+        *pwszFound = const_cast< WCHAR *const >( wch == *wszFound ? wszFound : NULL );
     }
     else
     {
@@ -316,20 +454,27 @@ VOID OSStrCharFindW( _In_ PCWSTR const wszStr, const wchar_t wch, _Outptr_result
 //  return a pointer to that character.  NULL is returned when the character
 //  is not found.
 
-VOID OSStrCharFindReverseA( _In_ PCSTR const szStr, const char ch, _Outptr_result_maybenull_ PSTR * const pszFound )
+VOID OSStrCharFindReverseA(
+    _In_ PCSTR const                       szStr,
+    const CHAR                             ch,
+    _Outptr_result_maybenull_ PSTR * const pszFound )
 {
     Assert( '\0' != ch );
-    const char* const szFound = szStr;
+    const CHAR* const szFound = szStr;
     if ( szFound )
     {
-        *pszFound = (char *)strrchr( szStr, ch );
+        *pszFound = (CHAR *)strrchr( szStr, ch );
     }
     else
     {
         *pszFound = NULL;
     }
 }
-VOID OSStrCharFindReverseW( _In_ PCWSTR const wszStr, const wchar_t wch, _Outptr_result_maybenull_ PWSTR * const pwszFound )
+
+VOID OSStrCharFindReverseW(
+    _In_ PCWSTR const                       wszStr,
+    const WCHAR                             wch,
+    _Outptr_result_maybenull_ PWSTR * const pwszFound )
 {
     ULONG   ich;
     ULONG   cch;
@@ -345,7 +490,7 @@ VOID OSStrCharFindReverseW( _In_ PCWSTR const wszStr, const wchar_t wch, _Outptr
     {
         if ( wch == wszStr[ich] )
         {
-            *pwszFound = const_cast< wchar_t* const >( wszStr + ich );
+            *pwszFound = const_cast< WCHAR* const >( wszStr + ich );
             return;
         }
     }
@@ -354,7 +499,8 @@ VOID OSStrCharFindReverseW( _In_ PCWSTR const wszStr, const wchar_t wch, _Outptr
 
 //  check for a trailing path-delimeter
 
-BOOL FOSSTRTrailingPathDelimiterA( _In_ PCSTR const pszPath )
+BOOL FOSSTRTrailingPathDelimiterA(
+    _In_ PCSTR const pszPath )
 {
     const DWORD cchPath = ( NULL == pszPath ) ? 0 : strlen( pszPath );
 
@@ -364,9 +510,11 @@ BOOL FOSSTRTrailingPathDelimiterA( _In_ PCSTR const pszPath )
     }
     return fFalse;
 }
-BOOL FOSSTRTrailingPathDelimiterW( _In_ PCWSTR const pwszPath )
+
+BOOL FOSSTRTrailingPathDelimiterW(
+    _In_ PCWSTR const pwszPath )
 {
-    const DWORD cchPath = ( NULL == pwszPath ) ? 0 : wcslen( pwszPath );
+    const DWORD cchPath = LOSStrLengthW( pwszPath );
 
     if ( cchPath > 0 )
     {
@@ -375,7 +523,8 @@ BOOL FOSSTRTrailingPathDelimiterW( _In_ PCWSTR const pwszPath )
     return fFalse;
 }
 
-INLINE LOCAL UINT UlCodePageFromOsstrConversion( const OSSTR_CONVERSION osstrConversion )
+INLINE LOCAL UINT UlCodePageFromOsstrConversion(
+    const OSSTR_CONVERSION osstrConversion )
 {
     switch( osstrConversion )
     {
@@ -392,12 +541,13 @@ INLINE LOCAL UINT UlCodePageFromOsstrConversion( const OSSTR_CONVERSION osstrCon
 }
 
 //  convert a byte string to a wide-char string
-
-ERR ErrOSSTRAsciiToUnicode( _In_ PCSTR const    pszIn,
-                            _Out_opt_z_cap_post_count_(cwchOut, *pcwchRequired) PWSTR const     pwszOut,
-                            const size_t            cwchOut,    //  pass in 0 to only return output buffer size in pcwchRequired, JET_errBufferTooSmall will be returned.
-                            size_t * const          pcwchRequired,
-                            const OSSTR_CONVERSION  osstrConversion )
+ERR ErrOSSTRAsciiToUnicode(
+    _In_ PCSTR const        pszIn,
+    _Out_opt_z_cap_post_count_(cwchOut, *pcwchRequired) PWSTR const     pwszOut,
+    const SIZE_T            cwchOut,       //  pass in 0 to only return output buffer size in
+                                           // pcwchRequired, JET_errBufferTooSmall will be returned.
+    SIZE_T * const          pcwchRequired,
+    const OSSTR_CONVERSION  osstrConversion )
 {
 
     //  Make sure out params are consistent ...
@@ -409,12 +559,13 @@ ERR ErrOSSTRAsciiToUnicode( _In_ PCSTR const    pszIn,
 
     //  try the conversion
 
-    const size_t cwchActual = MultiByteToWideChar(  UlCodePageFromOsstrConversion( osstrConversion ),
-                                                MB_ERR_INVALID_CHARS,
-                                                pszIn,
-                                                -1,
-                                                pwszOut,
-                                                cwchOut );
+    const SIZE_T cwchActual = MultiByteToWideChar(
+        UlCodePageFromOsstrConversion( osstrConversion ),
+        MB_ERR_INVALID_CHARS,
+        pszIn,
+        -1,
+        pwszOut,
+        (INT)cwchOut );
     if ( NULL != pcwchRequired )
         *pcwchRequired = cwchActual;
 
@@ -458,8 +609,13 @@ ERR ErrOSSTRAsciiToUnicode( _In_ PCSTR const    pszIn,
             // size 3n, if the caller retries w/ a bigger buffer.
             // note we pay 2n (1n more than necessary) just to fail if the 
             // caller passes pcwchRequired and didn't consume pcwchRequired.
-            *pcwchRequired = MultiByteToWideChar(   UlCodePageFromOsstrConversion( osstrConversion ), MB_ERR_INVALID_CHARS,
-                                                pszIn, -1, NULL, 0 );
+            *pcwchRequired = MultiByteToWideChar(
+                UlCodePageFromOsstrConversion( osstrConversion ),
+                MB_ERR_INVALID_CHARS,
+                pszIn,
+                -1,
+                NULL,
+                0 );
         }
         return ErrERRCheck( JET_errBufferTooSmall );
     }
@@ -506,12 +662,15 @@ ERR ErrOSSTRAsciiToUnicode( _In_ PCSTR const    pszIn,
 
 //  convert a wide-char string to a byte string
 
-ERR ErrOSSTRUnicodeToAscii( _In_ PCWSTR const       pwszIn,
-                            _Out_opt_z_cap_post_count_(cchOut, *pcchRequired) PSTR const                pszOut,
-                            const size_t                cchOut,     //  pass in 0 to only return output buffer size in pcchRequired, JET_errBufferTooSmall will be returned.
-                            size_t * const              pcchRequired,
-                            const OSSTR_LOSSY       fLossy,     // CAUTION: setting this will allow return JET_errSuccess if chars were translated to ?
-                            const OSSTR_CONVERSION  osstrConversion )
+ERR ErrOSSTRUnicodeToAscii(
+    _In_ PCWSTR const       pwszIn,
+    _Out_opt_z_cap_post_count_(cchOut, *pcchRequired) PSTR const                pszOut,
+    const SIZE_T            cchOut,          //  pass in 0 to only return output buffer
+                                             // size in pcchRequired, JET_errBufferTooSmall will be returned.
+    SIZE_T * const          pcchRequired,
+    const OSSTR_LOSSY       fLossy,          // CAUTION: setting this will allow return JET_errSuccess
+                                             // if chars were translated to '?'
+    const OSSTR_CONVERSION  osstrConversion )
 {
 
     Assert( ( pszOut != NULL && cchOut != 0 ) ||
@@ -523,14 +682,15 @@ ERR ErrOSSTRUnicodeToAscii( _In_ PCWSTR const       pwszIn,
     //  try the conversion
     BOOL    fUsedDefaultChar = fTrue; // presume badly behaved API ...
 
-    const size_t cchActual = WideCharToMultiByte(   UlCodePageFromOsstrConversion( osstrConversion ),
-                                                0,
-                                                pwszIn,
-                                                -1,
-                                                pszOut,
-                                                cchOut,
-                                                NULL,
-                                                &fUsedDefaultChar );
+    const SIZE_T cchActual = WideCharToMultiByte(
+        UlCodePageFromOsstrConversion( osstrConversion ),
+        0,
+        pwszIn,
+        -1,
+        pszOut,
+        (INT)cchOut,
+        NULL,
+        &fUsedDefaultChar );
     if ( NULL != pcchRequired )
         *pcchRequired = cchActual;
 
@@ -584,9 +744,15 @@ ERR ErrOSSTRUnicodeToAscii( _In_ PCWSTR const       pwszIn,
             // caller passes pcchRequired and didn't consume pcchRequired.
             //
 #pragma warning(suppress: 38021)
-            *pcchRequired = WideCharToMultiByte(    CP_ACP, 0,
-                                                pwszIn, -1, NULL, 0,
-                                                NULL, &fUsedDefaultChar );
+            *pcchRequired = WideCharToMultiByte(
+                CP_ACP,
+                0,
+                pwszIn,
+                -1,
+                NULL,
+                0,
+                NULL,
+                &fUsedDefaultChar );
         }
         return ErrERRCheck( JET_errBufferTooSmall );
     }
@@ -625,53 +791,24 @@ ERR ErrOSSTRUnicodeToAscii( _In_ PCWSTR const       pwszIn,
 }
 
 
-//  convert a WCHAR string to a _TCHAR string
-
-ERR ErrOSSTRUnicodeToTchar( const wchar_t *const    pwszIn,
-                            __out_ecount(ctchOut) _TCHAR *const         ptszOut,
-                            const INT               ctchOut )
-{
-#ifdef UNICODE
-
-    //  check the input buffer against the output buffer
-
-    const wchar_t cwchIn = wcslen( pwszIn ) + 1;
-    if ( ctchOut < cwchIn )
-    {
-        return ErrERRCheck( JET_errBufferTooSmall );
-    }
-    Assert( ctchOut > 0 );
-
-    //  copy the string
-
-    wcsncpy( ptszOut, pwszIn, ctchOut );
-    return JET_errSuccess;
-
-#else  //  !UNICODE
-
-    return ErrOSSTRUnicodeToAscii( pwszIn, ptszOut, ctchOut );
-
-#endif  //  UNICODE
-}
-
-
 // this is to convert a multi string (double zero terminated)
 // into an existing buffer
 // if there is no buffer, we will return the needed size
 // if there is a buffer but not enough space, we will return error and NOT the actual size
 //
-ERR ErrOSSTRAsciiToUnicodeM( _In_ PCSTR const szzMultiIn,
-    // UNDONE: Exchange prefix continued to complain, to make this right I might need like __success on the return value?
-    //                          __out_ecount_part_z(cchMax, *pcchActual) PSTR const             pszOut,
+// UNDONE: Exchange prefix continued to complain, to make this right I might need like __success on the return value?
+//                          __out_ecount_part_z(cchMax, *pcchActual) PSTR const             pszOut,
+ERR ErrOSSTRAsciiToUnicodeM(
+    _In_ PCSTR const               szzMultiIn,
     __out_ecount_z(cchMax) WCHAR * wszNew,
-    ULONG cchMax,
-    size_t * const pcchActual,
-    const OSSTR_CONVERSION osstrConversion )
+    ULONG                          cchMax,
+    SIZE_T * const                 pcchActual,
+    const OSSTR_CONVERSION         osstrConversion )
 {
     ERR             err             = JET_errSuccess;
-    const char *    szCurrent       = szzMultiIn;
-    size_t          cchActualCurrent = 0;
-    size_t          cchMaxCurrent   = cchMax;
+    const CHAR *    szCurrent       = szzMultiIn;
+    SIZE_T          cchActualCurrent = 0;
+    SIZE_T          cchMaxCurrent   = cchMax;
     WCHAR *         wszNewCurrent   = wszNew;
 
 
@@ -686,9 +823,14 @@ ERR ErrOSSTRAsciiToUnicodeM( _In_ PCSTR const szzMultiIn,
 
     while( szCurrent[0] != '\0' )
     {
-        size_t cchCurrent;
+        SIZE_T cchCurrent;
 
-        err = ErrOSSTRAsciiToUnicode( szCurrent, wszNewCurrent, cchMaxCurrent, &cchCurrent, osstrConversion );
+        err = ErrOSSTRAsciiToUnicode(
+            szCurrent,
+            wszNewCurrent,
+            cchMaxCurrent,
+            &cchCurrent,
+            osstrConversion );
 
         if ( JET_errBufferTooSmall == err )
         {
@@ -742,25 +884,25 @@ ERR ErrOSSTRAsciiToUnicodeM( _In_ PCSTR const szzMultiIn,
     return err;
 }
 
-
 // this is to convert a multi string (double zero terminated)
 // into an existing buffer
 // if there is no buffer, we will return the needed size
 // if there is a buffer but not enough space, we will return error and NOT the actual size
 //
-ERR ErrOSSTRUnicodeToAsciiM( _In_ PCWSTR const wszzMultiIn,
-    // UNDONE: Exchange prefix continued to complain, to make this right I might need like __success on the return value?
-    //                          __out_ecount_part_z(cchMax, *pcchActual) PSTR const             pszOut,
-    __out_ecount_z(cchMax) char * szNew,
-    ULONG cchMax,
-    size_t * const pcchActual,
-    const OSSTR_CONVERSION osstrConversion )
+// UNDONE: Exchange prefix continued to complain, to make this right I might need like __success on the return value?
+//                          __out_ecount_part_z(cchMax, *pcchActual) PSTR const             pszOut,
+ERR ErrOSSTRUnicodeToAsciiM(
+    _In_ PCWSTR const             wszzMultiIn,
+    __out_ecount_z(cchMax) CHAR * szNew,
+    ULONG                         cchMax,
+    SIZE_T * const                pcchActual,
+    const OSSTR_CONVERSION        osstrConversion )
 {
     ERR             err             = JET_errSuccess;
     const WCHAR *   wszCurrent      = wszzMultiIn;
-    size_t          cchActualCurrent = 0;
-    size_t          cchMaxCurrent   = cchMax;
-    char *          szNewCurrent    = szNew;
+    SIZE_T          cchActualCurrent = 0;
+    SIZE_T          cchMaxCurrent   = cchMax;
+    CHAR *          szNewCurrent    = szNew;
 
 
     if ( !wszzMultiIn )
@@ -774,9 +916,15 @@ ERR ErrOSSTRUnicodeToAsciiM( _In_ PCWSTR const wszzMultiIn,
 
     while( wszCurrent[0] != L'\0' )
     {
-        size_t cchCurrent;
+        SIZE_T cchCurrent;
 
-        err = ErrOSSTRUnicodeToAscii( wszCurrent, szNewCurrent, cchMaxCurrent * sizeof(char), &cchCurrent, OSSTR_NOT_LOSSY, osstrConversion );
+        err = ErrOSSTRUnicodeToAscii(
+            wszCurrent,
+            szNewCurrent,
+            cchMaxCurrent * sizeof(CHAR),
+            &cchCurrent,
+            OSSTR_NOT_LOSSY,
+            osstrConversion );
 
         if ( JET_errBufferTooSmall == err )
         {
@@ -828,5 +976,4 @@ ERR ErrOSSTRUnicodeToAsciiM( _In_ PCWSTR const wszzMultiIn,
 
     return err;
 }
-
 

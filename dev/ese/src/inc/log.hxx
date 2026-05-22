@@ -446,7 +446,7 @@ UINT CbLGFixedSizeOfRec( const LR * );
 VOID AssertLRSizesConsistent();
 #endif
 
-ERR ErrLrToLogCsvSimple( CWPRINTFFILE * pcwpfCsvOut, LGPOS lgpos, const LR *plr, LOG * plog );
+ERR ErrLrToLogCsvSimple( CPRINTFFILE * pcpfCsvOutW, LGPOS lgpos, const LR *plr, LOG * plog );
 
 BOOL FLGDebugLogRec( LR *plr );
 
@@ -1285,6 +1285,10 @@ public:
     BOOL FLastLRIsShutdown() const { return m_fLastLRIsShutdown; }
     LGPOS LgposShutDownMark() const { return m_lgposRedoShutDownMarkGlobal; }
 
+    // Note: Generally people should not be interested in lgposRedo, but failure event code has a need to 
+    // know it directly.
+    LGPOS LgposDiagnosticRedoFailedAddress() const { return m_lgposRedo; }
+
     VOID LGRRemoveFucb( FUCB * pfucb );
 
     ERR ErrLGMostSignificantRecoveryWarning( void );
@@ -1524,7 +1528,7 @@ public:
                 FLAG32  m_fSummary          :   1;  //  output the IO summary at end of log dumps
             };
         };
-        CWPRINTFFILE* m_pcwpfCsvOut; // non-NULL indicates do CSV output.
+        CPRINTFFILE* m_pcpfCsvOutW; // non-NULL indicates do CSV output.
     }
     LOGDUMP_OP;
 
@@ -1892,7 +1896,7 @@ private:
     ERR ErrLGRIEndEverySession();
     ERR ErrLGRIEndAllSessions(
             const BOOL              fEndOfLog,
-            const BOOL              fKeepDbAttached,
+                  BOOL              fKeepDbAttached,
             const LE_LGPOS *        plgposRedoFrom,
             BYTE *                  pbAttach );
 
