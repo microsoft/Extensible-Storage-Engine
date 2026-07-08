@@ -2588,7 +2588,14 @@ LOCAL ERR ErrDIRIIRefresh( FUCB * const pfucb )
         bm.key.prefix.Nullify();
         bm.key.suffix = pfucbIdx->kdfCurr.data;
 
-        Call( ErrDIRGotoBookmark( pfucb, bm ) );
+        err = ErrDIRGotoBookmark( pfucb, bm );
+        if ( err < 0 )
+        {
+            //  pfucbIdx is a distinct secondary-index cursor left read-latched by ErrBTDown above;
+            //  release its latch before erroring out so we don't leak the page latch.
+            CallS( ErrBTRelease( pfucbIdx ) );
+            goto HandleError;
+        }
     }
 
     Call( ErrBTRelease( pfucbIdx ) );

@@ -360,7 +360,7 @@ public:
         return fidOld;
     }
 
-    INLINE FID operator+=( const WORD& addend )
+    INLINE FID& operator+=( const WORD& addend )
     {
         m_fidVal = m_fidVal + addend;
         return *this;
@@ -524,7 +524,12 @@ public:
         // all values up to m_fidVal?  For example, if m_fidVal = 0-7, you need
         // 1 byte.  If m_fidVal = 250, you'd need 32 bytes, 1 bit per unique
         // value up to and including 250.
-        return _Omicron( 0, 7, 8 );
+        //
+        // NOTE: The second argument to _Omicron() is a modulo, so it must be 0
+        // here (the identity path) to yield ( m_fidVal + 8 ) / 8.  Passing a
+        // non-zero value (e.g. 7) would incorrectly wrap the count via % and
+        // return a bogus size (e.g. 1 instead of 32 for m_fidVal = 250).
+        return _Omicron( 0, 0, 8 );
     }
     
     INLINE INT IbHash ( ) const
@@ -2208,11 +2213,11 @@ struct INDEXID
 PERSISTED
 struct LOGTIME
 {
-    BYTE    bSeconds;               //  0 - 60
-    BYTE    bMinutes;               //  0 - 60
-    BYTE    bHours;                 //  0 - 24
+    BYTE    bSeconds;               //  0 - 59
+    BYTE    bMinutes;               //  0 - 59
+    BYTE    bHours;                 //  0 - 23
     BYTE    bDay;                   //  1 - 31
-    BYTE    bMonth;                 //  0 - 11
+    BYTE    bMonth;                 //  1 - 12
     BYTE    bYear;                  //  current year - 1900
 
     BYTE    fTimeIsUTC:1;

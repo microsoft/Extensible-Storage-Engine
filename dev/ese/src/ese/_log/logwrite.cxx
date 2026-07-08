@@ -431,8 +431,8 @@ ERR LOG_BUFFER::InitCommit( LONG cBytes )
     {
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
-    Assert( _pbLGCommitStart = _pbLGBufMin );
-    Assert( _pbLGCommitEnd = _pbLGBufMin + roundup( cBytes, OSMemoryPageCommitGranularity() ) - 1 );
+    Assert( _pbLGCommitStart == _pbLGBufMin );
+    Assert( _pbLGCommitEnd == _pbLGBufMin + roundup( cBytes, OSMemoryPageCommitGranularity() ) - 1 );
 
 HandleError:
     return err;

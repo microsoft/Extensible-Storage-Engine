@@ -224,6 +224,7 @@ JET_ERR ErrCheckErrDataErrorsAreInOrder( _In_ const INT cerr )
         if ( abs( perrdataPre->errOrdinal ) >= abs( perrdataPost->errOrdinal ) )
         {
             wprintf( L"\n\tSome errors are not in pre-sorted order ... %d !< %d\n", perrdataPre->errOrdinal, perrdataPost->errOrdinal );
+            return errCodeInconsistency;
         }
     }
 

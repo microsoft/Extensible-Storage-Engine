@@ -91,7 +91,7 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( (void*)0xF0BAAD0D != pdata[2] );
 
     TestCheck( pHeadCtorTest->FEmpty() );
-    TestCheck( 0 == Queue.CElements() );
+    TestCheck( 0 == pHeadCtorTest->CElements() );
     TestCheck( NULL == pHeadCtorTest->RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
 
     //  test single element insertion, removal, etc

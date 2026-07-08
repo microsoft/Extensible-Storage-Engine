@@ -222,7 +222,7 @@ INLINE ERR CCachedBlockChunk::ErrValidate( _In_ const QWORD ib, _In_ const Cache
     //
     //  NOTE:  the lost write may be in the flush map.  in that case its write count will be behind
 
-    if ( cbwc != cbwcUnknown && ( !fUninit && m_le_cbwc != cbwc ) || ( fUninit && cbwc != cbwcNeverWritten ) )
+    if ( cbwc != cbwcUnknown && ( ( !fUninit && m_le_cbwc != cbwc ) || ( fUninit && cbwc != cbwcNeverWritten ) ) )
     {
         Error( ErrERRCheck( JET_errReadLostFlushVerifyFailure ) );
     }

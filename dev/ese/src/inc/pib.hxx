@@ -1108,7 +1108,7 @@ INLINE ERR PIB::ErrSetUserIoPriority( const void* const pvUserFlags, const INT c
     // we've successfully converted all User IoPriority flags into IO QOS flags, so update pib members ...
 
     m_grbitUserIoPriority = *( (JET_GRBIT *) pvUserFlags );
-    m_qosIoPriority |= qosIo;
+    m_qosIoPriority = qosIo;
 
     return JET_errSuccess;
 }

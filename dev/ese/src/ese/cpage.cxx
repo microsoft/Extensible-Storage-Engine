@@ -6992,7 +6992,9 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                 // calculate the expected tag size
                 USHORT usExpectedTagSize = 1; //for the flag byte
                 BYTE fFlagT = 0x1;
-                for ( INT i = 0; i < noderfMax; ++i, fFlagT <<= 1 )
+                //  g_rgcbExternalHeaderSize has noderfMax entries (0..noderfMax-1); i indexes [i+1],
+                //  so stop at noderfMax-1 to avoid reading one past the end on a corrupt flag byte.
+                for ( INT i = 0; i < noderfMax - 1; ++i, fFlagT <<= 1 )
                 {
                     if ( fFlagT & fNodeFlag )
                     {

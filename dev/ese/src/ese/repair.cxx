@@ -7506,8 +7506,16 @@ LOCAL ERR ErrREPAIRICheckInternalLine(
             ++(pbtstats->cnodeCompressed);
         }
         pbtstats->cbDataInternal += kdfCurr.data.Cb();
-        ++(pbtstats->rgckeyInternal[kdfCurr.key.Cb()]);
-        ++(pbtstats->rgckeySuffixInternal[kdfCurr.key.suffix.Cb()]);
+        //  key/suffix lengths come from a (possibly corrupt) persisted node; the histogram
+        //  arrays only have cbKeyAlloc buckets, so bound the index to avoid an OOB write.
+        if ( (ULONG)kdfCurr.key.Cb() < cbKeyAlloc )
+        {
+            ++(pbtstats->rgckeyInternal[kdfCurr.key.Cb()]);
+        }
+        if ( (ULONG)kdfCurr.key.suffix.Cb() < cbKeyAlloc )
+        {
+            ++(pbtstats->rgckeySuffixInternal[kdfCurr.key.suffix.Cb()]);
+        }
 
 HandleTryError:
         ;
@@ -7573,7 +7581,12 @@ LOCAL ERR ErrREPAIRCheckInternal(
     else
     {
         NDGetPtrExternalHeader( csr.Cpage(), &line, noderfWhole );
-        ++(pbtstats->rgckeyPrefixInternal[line.cb]);
+        //  line.cb (prefix size) is bounded only by the page; the histogram has cbKeyAlloc
+        //  buckets, so bound the index to avoid an OOB write on a corrupt page.
+        if ( (ULONG)line.cb < cbKeyAlloc )
+        {
+            ++(pbtstats->rgckeyPrefixInternal[line.cb]);
+        }
     }
     if ( pbtstats->cpageDepth <= 0 )
     {
@@ -7715,8 +7728,16 @@ LOCAL ERR ErrREPAIRICheckLeafLine(
         }
 
         pbtstats->cbDataLeaf += kdfCurr.data.Cb();
-        ++(pbtstats->rgckeyLeaf[kdfCurr.key.Cb()]);
-        ++(pbtstats->rgckeySuffixLeaf[kdfCurr.key.suffix.Cb()]);
+        //  key/suffix lengths come from a (possibly corrupt) persisted node; the histogram
+        //  arrays only have cbKeyAlloc buckets, so bound the index to avoid an OOB write.
+        if ( (ULONG)kdfCurr.key.Cb() < cbKeyAlloc )
+        {
+            ++(pbtstats->rgckeyLeaf[kdfCurr.key.Cb()]);
+        }
+        if ( (ULONG)kdfCurr.key.suffix.Cb() < cbKeyAlloc )
+        {
+            ++(pbtstats->rgckeySuffixLeaf[kdfCurr.key.suffix.Cb()]);
+        }
 
 HandleTryError:
         ;
@@ -7787,7 +7808,12 @@ LOCAL ERR ErrREPAIRCheckLeaf(
     else
     {
         NDGetPtrExternalHeader( csr.Cpage(), &line, noderfWhole );
-        ++(pbtstats->rgckeyPrefixLeaf[line.cb]);
+        //  line.cb (prefix size) is bounded only by the page; the histogram has cbKeyAlloc
+        //  buckets, so bound the index to avoid an OOB write on a corrupt page.
+        if ( (ULONG)line.cb < cbKeyAlloc )
+        {
+            ++(pbtstats->rgckeyPrefixLeaf[line.cb]);
+        }
     }
 
     if ( pbtstats->cpageDepth <= 0 )
@@ -8943,12 +8969,15 @@ LOCAL ERR ErrREPAIRInsertCatalogRecordIntoTempTable(
     BYTE rgbKey[JET_cbKeyMost_OLD];
     kdf.key.CopyIntoBuffer( rgbKey, sizeof( rgbKey ) );
 
+    //  CopyIntoBuffer truncates to sizeof(rgbKey); a corrupt catalog node can have a key longer
+    //  than that, so cap the reported length to what was actually copied to avoid reading past
+    //  the stack buffer.
     Call( ErrDispSetColumn(
                 sesid,
                 tableid,
                 columnidKey,
                 rgbKey,
-                kdf.key.Cb(),
+                min( (ULONG)kdf.key.Cb(), (ULONG)sizeof( rgbKey ) ),
                 0,
                 NULL ) );
 

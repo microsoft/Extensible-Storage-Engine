@@ -1096,25 +1096,17 @@ LOCAL ERR ErrRECIParseColumnReference(
     BYTE*   rgbDatabaseSignature;
     BYTE*   rgbBookmark;
 
+    //  determine the minimum size for the versioned structure and validate that the
+    //  buffer is large enough BEFORE reading any versioned fields.  this avoids an
+    //  out-of-bounds read of a truncated, caller-supplied column reference.
+
     if ( pcrfc->m_crfi == crfiV1 )
     {
         cbReferenceMinExpected = sizeof( CColumnReferenceFormatV1 );
-        cbBookmark = pcrfv1->m_cbBookmark;
-        cbColumnName = pcrfv1->m_cbColumnName;
-        itagSequence = pcrfv1->m_itagSequence;
-        lid = (_LID32)pcrfv1->m_lid;
-        rgbDatabaseSignature = const_cast<BYTE*>( pcrfv1->m_rgbDatabaseSignature );
-        rgbBookmark = const_cast<BYTE*>( pcrfv1->m_rgbBookmark );
     }
     else if ( pcrfc->m_crfi == crfiV2 )
     {
         cbReferenceMinExpected = sizeof( CColumnReferenceFormatV2 );
-        cbBookmark = pcrfv2->m_cbBookmark;
-        cbColumnName = pcrfv2->m_cbColumnName;
-        itagSequence = pcrfv2->m_itagSequence;
-        lid = pcrfv2->m_lid;
-        rgbDatabaseSignature = const_cast<BYTE*>( pcrfv2->m_rgbDatabaseSignature );
-        rgbBookmark = const_cast<BYTE*>( pcrfv2->m_rgbBookmark );
     }
     else
     {
@@ -1124,6 +1116,26 @@ LOCAL ERR ErrRECIParseColumnReference(
     if ( cbReference < cbReferenceMinExpected )
     {
         Error( ErrERRCheck( JET_errInvalidColumnReference ) );
+    }
+
+    if ( pcrfc->m_crfi == crfiV1 )
+    {
+        cbBookmark = pcrfv1->m_cbBookmark;
+        cbColumnName = pcrfv1->m_cbColumnName;
+        itagSequence = pcrfv1->m_itagSequence;
+        lid = (_LID32)pcrfv1->m_lid;
+        rgbDatabaseSignature = const_cast<BYTE*>( pcrfv1->m_rgbDatabaseSignature );
+        rgbBookmark = const_cast<BYTE*>( pcrfv1->m_rgbBookmark );
+    }
+    else
+    {
+        Assert( pcrfc->m_crfi == crfiV2 );
+        cbBookmark = pcrfv2->m_cbBookmark;
+        cbColumnName = pcrfv2->m_cbColumnName;
+        itagSequence = pcrfv2->m_itagSequence;
+        lid = pcrfv2->m_lid;
+        rgbDatabaseSignature = const_cast<BYTE*>( pcrfv2->m_rgbDatabaseSignature );
+        rgbBookmark = const_cast<BYTE*>( pcrfv2->m_rgbBookmark );
     }
     if ( cbBookmark <= 0 || cbBookmark > ( pfucb->u.pfcb->Pidb() ? pfucb->u.pfcb->Pidb()->CbKeyMost() : sizeof( DBK ) ) )
     {
@@ -3895,6 +3907,19 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
         //  emit this column value
 
         Call( ErrRECIStreamRecordsIAppendColumnValue( pcontext, columnid, errData, cbData, pvData ) );
+
+        //  free the per-column-value working buffers before processing the next value so that
+        //  multi-valued columns do not leak all but the last allocation.  the error path frees
+        //  the current iteration's buffers in HandleError.
+
+        delete[] pbDataReference;
+        pbDataReference = NULL;
+        delete[] pbDataDecrypted;
+        pbDataDecrypted = NULL;
+        delete[] pbDataDecompressed;
+        pbDataDecompressed = NULL;
+        delete[] pbDataAdjusted;
+        pbDataAdjusted = NULL;
     }
 
     //  if there were no column values then emit an explicit null column value

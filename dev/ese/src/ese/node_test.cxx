@@ -679,7 +679,7 @@ JETUNITTESTEX ( Node, TestCorruptPrefixCbFullFuzzResilientCodePaths, JetSimpleUn
     // if these are offended, someone has made us stricter (that's good), but consider re-running this test infinitely 
     // to find the new max values for above checks.
     CHECK( cGoodSmall > 100 );  
-    CHECK( cGoodSmall > 125 );
+    CHECK( cGoodLarge > 125 );
 
     // last modification is + 0x10000, which doesn't modify a USHORT, so should have min two successes.
     CHECK( cGoodSmall > 2 );
@@ -787,7 +787,7 @@ JETUNITTESTEX ( Node, TestCorruptSuffixCbFullFuzzResilientCodePaths, JetSimpleUn
     // if these are offended, someone has made us stricter (that's good), but consider re-running this test infinitely 
     // to find the new max values for above checks.
     CHECK( cGoodSmall > 550 );
-    CHECK( cGoodSmall > 450 );
+    CHECK( cGoodLarge > 450 );
 
     // last modification is + 0x10000, which doesn't modify a USHORT, so should have min two successes.
     CHECK( cGoodSmall > 2 );
@@ -1048,7 +1048,7 @@ JETUNITTESTEX ( Node, TestCorruptTagIbFullFuzzResilientCodePaths, JetSimpleUnitT
     // If these are offended, someone has made us stricter (that's good), but consider re-running this test infinitely 
     // to find the new max & min values for this range of checks above and below this comment.
     CHECK( cGoodSmall > 6100 );  
-    CHECK( cGoodSmall > 1500 );
+    CHECK( cGoodLarge > 1500 );
 
     // last modification is + 0x10000, which doesn't modify a USHORT, so should have a min two successes - no matter what.
     CHECK( cGoodSmall > 2 );

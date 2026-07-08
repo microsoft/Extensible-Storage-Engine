@@ -1598,7 +1598,7 @@ LOCAL ERR ErrLVIDecompressAndCompare(
     if ( ( cbDecompressed - ibOffset ) < cbData )
     {
         LVReportAndTrapCorruptedLV( pfucbLV, lid, L"989222f8-ff0d-46a6-a58a-86f5c9cb472a" );
-        return ErrERRCheck( JET_errLVCorrupted );
+        Error( ErrERRCheck( JET_errLVCorrupted ) );
     }
     
     if ( 0 != memcmp( pbData, pbDecompressed + ibOffset, cbData ) )
@@ -1656,6 +1656,7 @@ LOCAL ERR ErrLVIDecompress(
         if( (ULONG)( ibOffset + cbData ) > (ULONG)cbDecompressed )
         {
             LVReportAndTrapCorruptedLV( pfucbLV, lid, L"6c499d75-2c5f-432a-bcf9-6de555ac0d7f" );
+            delete[] pbDecompressed;
             return ErrERRCheck( JET_errLVCorrupted );
         }
         UtilMemCpy( pbData, pbDecompressed+ibOffset, cbData );
@@ -5170,7 +5171,7 @@ ERR ErrRECGetLVSize(
 
         Assert( FIsLVChunkKey( pfucbLV->kdfCurr.key ) );
         *pcbLVDataPhysical  += pfucbLV->kdfCurr.data.Cb();
-        *pcbLVOverhead      += ( CPAGE::cbInsertionOverhead + cbKeyCount + pfucb->kdfCurr.key.Cb() );
+        *pcbLVOverhead      += ( CPAGE::cbInsertionOverhead + cbKeyCount + pfucbLV->kdfCurr.key.Cb() );
 
         ulOffset += pfucb->u.pfcb->Ptdb()->CbLVChunkMost();
     }

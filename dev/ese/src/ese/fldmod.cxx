@@ -2588,12 +2588,14 @@ ERR ErrRECISetFixedColumnInLoadedDataBuffer(
 }
 
 
-INLINE ULONG CbBurstVarDefaults( TDB *ptdb, FUCB *pfucb, FID fidVarLastInRec, FID fidSet, FID *pfidLastDefault )
+INLINE ERR ErrCbBurstVarDefaults( TDB *ptdb, FUCB *pfucb, FID fidVarLastInRec, FID fidSet, FID *pfidLastDefault, _Out_ ULONG * const pcbBurstDefaults )
 {
     ULONG               cbBurstDefaults     = 0;
     const REC * const   precDefault         = ( NULL != ptdb->PdataDefaultRecord() ?
                                                         (REC *)ptdb->PdataDefaultRecord()->Pv() :
                                                         NULL );
+
+    *pcbBurstDefaults = 0;
 
     // Compute space needed to burst default values.
     // Default values may have to be burst if there are default value columns
@@ -2662,7 +2664,8 @@ INLINE ULONG CbBurstVarDefaults( TDB *ptdb, FUCB *pfucb, FID fidVarLastInRec, FI
     Assert( cbBurstDefaults == 0  ||
         ( *pfidLastDefault > fidVarLastInRec && *pfidLastDefault < fidSet ) );
 
-    return cbBurstDefaults;
+    *pcbBurstDefaults = cbBurstDefaults;
+    return JET_errSuccess;
 }
 
 
@@ -2768,12 +2771,19 @@ ERR ErrRECISetVarColumn(
         //  compute space needed for new var column offsets
         //
         const INT   cbNeed = ( fid - fidVarLastInRec ) * sizeof(REC::VAROFFSET);
-        const INT   cbBurstDefaults = CbBurstVarDefaults(
+        ULONG       cbBurstDefaultsT = 0;
+        const ERR   errBurstDefaults = ErrCbBurstVarDefaults(
                                             ptdb,
                                             pfucb,
                                             fidVarLastInRec,
                                             fid,
-                                            &fidLastDefault );
+                                            &fidLastDefault,
+                                            &cbBurstDefaultsT );
+        if ( errBurstDefaults < JET_errSuccess )
+        {
+            return errBurstDefaults;
+        }
+        const INT   cbBurstDefaults = (INT)cbBurstDefaultsT;
 
         if ( cbRec + cbNeed + cbBurstDefaults + cbCopy > REC::CbRecordMost( pfucb ) )
             return ErrERRCheck( JET_errRecordTooBig );

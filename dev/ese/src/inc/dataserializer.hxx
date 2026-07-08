@@ -351,7 +351,7 @@ private:
     static const INT m_ccolumnsMax = 64;
     const char * m_rgszColumns[m_ccolumnsMax];
     JET_COLTYP m_rgcoltyps[m_ccolumnsMax];
-    unique_ptr<BYTE> m_rgpbData[m_ccolumnsMax];
+    unique_ptr<BYTE[]> m_rgpbData[m_ccolumnsMax];
     size_t m_rgcbData[m_ccolumnsMax];
     INT m_ccolumns;
 

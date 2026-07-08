@@ -5959,7 +5959,7 @@ namespace Isam
             _TCHAR * _szName = 0;
             ::JET_TABLEID _tableid;
 
-            tableid = *(new MJET_TABLEID());
+            tableid = MJET_TABLEID();
             try
             {
                 _szName = GetUnmanagedString( name );

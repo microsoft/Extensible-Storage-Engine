@@ -61,7 +61,7 @@ ERR SyncPerformsFAtomicIncrementMaxOnDword::ErrTest()
     TestCheck( fFalse == FAtomicIncrementMax( &dw, &dwI, 4 ) );
     TestCheck( dwI == 3 );
     TestCheck( fFalse == FAtomicIncrementMax( &dw, &dwI, 4 ) );
-    TestCheck( dwI == 3 )
+    TestCheck( dwI == 3 );
 
     dw = 0x7ffffffe;
     TestCheck( fTrue == FAtomicIncrementMax( &dw, &dwI, 0x80000002 ) );

@@ -6493,7 +6493,7 @@ LOCAL ERR ErrCATIBuildFIELDArray(
         if ( fFixedColumn )
         {
             Assert( FidOfColumnid( columnid ) >= ptdb->FidFixedFirst() );
-            Assert( FidOfColumnid( columnid ) <= ptdb->FidTaggedLast() );
+            Assert( FidOfColumnid( columnid ) <= ptdb->FidFixedLast() );
         }
 
         if ( !FNegTest( fInvalidAPIUsage ) && FFIELDFinalize( field.ffield ) && !s_fLimitFinalizeFfieldNyi )
@@ -15402,9 +15402,17 @@ ERR ErrCATGetNextRootObject(
     {
         // Retrieve the object name.
         Call( ErrRECIRetrieveVarColumn( pfcbNil, pfucbCatalog->u.pfcb->Ptdb(), fidMSO_Name, pfucbCatalog->kdfCurr.data, &dataField ) );
-        Assert( ( dataField.Cb() / sizeof( szObjectNameT[ 0 ] ) ) < _countof( szObjectNameT ) );
-        UtilMemCpy( szObjectNameT, dataField.Pv(), dataField.Cb() );
-        szObjectNameT[ dataField.Cb() / sizeof( szObjectNameT[0] ) ] = '\0';
+        const INT cbObjectName = dataField.Cb();
+        if ( cbObjectName < 0 || cbObjectName > JET_cbNameMost )
+        {
+            //  the persisted name length is untrusted; reject a corrupt catalog rather than
+            //  overrun the fixed-size stack buffer (matches the other fidMSO_Name readers).
+            AssertSz( fFalse, "Invalid fidMSO_Name column in catalog." );
+            OSUHAEmitFailureTag( PinstFromPfucb( pfucbCatalog ), HaDbFailureTagCorruption, L"7d2c1f8a-6b34-4e05-9c1a-3f8e2d6b40a9" );
+            Error( ErrERRCheck( JET_errCatalogCorrupted ) );
+        }
+        UtilMemCpy( szObjectNameT, dataField.Pv(), cbObjectName );
+        szObjectNameT[ cbObjectName ] = '\0';
     }
 
 HandleError:

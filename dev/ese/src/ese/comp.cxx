@@ -1240,6 +1240,13 @@ LOCAL ERR ErrCMPCopyTable(
         const ULONG cpgUsed = rgcpgExtent[0] - rgcpgExtent[1];
         Assert( cpgUsed > 0 );
 
+        //  a (corrupt) space tree reporting AvailExt == OwnExt would make cpgUsed 0 and divide by
+        //  zero below; treat it as corruption so the meter progression is suppressed instead.
+        if ( 0 == cpgUsed )
+        {
+            fCorruption = fTrue;
+        }
+
         pstatus->cbRawData = 0;
         pstatus->cbRawDataLV = 0;
         pstatus->cLeafPagesTraversed = 0;

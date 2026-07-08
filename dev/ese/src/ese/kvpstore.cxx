@@ -248,7 +248,7 @@ ERR CKVPStore::ErrKVPIInitICreateTable( PIB * ppib, const IFMP ifmp, const CHAR 
     Assert( m_cidKey == rgcolumncreateKVPTable[0].columnid );
     Assert( m_cidType == rgcolumncreateKVPTable[1].columnid );
     Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_type == kvpvtSchemaValueType );
-    Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_cid = rgcolumncreateKVPTable[2].columnid );
+    Assert( m_rgDataTypeInfo[kvpvtSchemaValueType].m_cid == rgcolumncreateKVPTable[2].columnid );
 
     //  first time we've used this table, initialize the schema elements for Internal version numbers.
     //

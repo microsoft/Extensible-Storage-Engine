@@ -1733,6 +1733,8 @@ CDBMScanFollower::CDBMScanFollower()
     m_pstate = NULL;
     m_pscanobsFileCheck = NULL;
     m_pscanobsLgriEvents = NULL;
+    m_pscanobsPerfmon = NULL;
+    m_cFollowerSkipsPrePass = 0;
 }
 
 CDBMScanFollower::~CDBMScanFollower()
@@ -3981,7 +3983,7 @@ ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr, DBMObjectC
 
                 // Extract the bookmark
                 // Call ErrBTDelete
-                unique_ptr<BYTE> pbBookmark( new BYTE[kdf.key.Cb()] );
+                unique_ptr<BYTE[]> pbBookmark( new BYTE[kdf.key.Cb()] );
                 Alloc( pbBookmark.get() );
                 kdf.key.CopyIntoBuffer( pbBookmark.get(), kdf.key.Cb() );
                 

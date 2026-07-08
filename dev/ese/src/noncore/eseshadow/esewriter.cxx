@@ -413,7 +413,7 @@ EseRecoveryWriter::OnPostSnapshot(
     if ( g_eseRecoveryWriterConfig.m_szSystemDirectory == NULL )
     {
         // If the system path wasn't specified, then copy the log full path.
-        StringCchCopyW( szSystemPath, _countof( szLogPath ), szLogPath );
+        StringCchCopyW( szSystemPath, _countof( szSystemPath ), szLogPath );
     }
     else
     {

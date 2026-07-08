@@ -625,7 +625,9 @@ INLINE ULONG UlRECICountTaggedColumnInstances(
     if ( dataRec.Cb() < REC::cbRecordMin || dataRec.Cb() > REC::CbRecordMostCHECK( g_rgfmp[ pfcb->Ifmp() ].CbPage() ) )
     {
         FireWall( "RECICountTaggedColInstsRecTooBig15.1" );
-        return ErrERRCheck( JET_errDatabaseCorrupted );
+        //  this returns a ULONG count, so an ERR cannot be propagated (a negative ERR would be
+        //  reinterpreted as a huge instance count); report zero instances on the corruption path.
+        return 0;
     }
 
     if ( FCOLUMNIDTemplateColumn( columnid ) )
@@ -1373,7 +1375,9 @@ ComputeItag:
                 {
                     for ( ichOffset = pidb->IchTuplesStart() + pidb->CchTuplesIncrement(), ulTuple = 1; ulTuple < pidb->IchTuplesToIndexMax(); ichOffset += pidb->CchTuplesIncrement(), ulTuple++ )
                     {
-                        CallR( ErrRECRetrieveKeyFromRecord(
+                        //  use Call (not CallR) so an error routes through HandleError, which frees
+                        //  pbKeyRes (RESKEY pool); a bare return here would leak the key buffer.
+                        Call( ErrRECRetrieveKeyFromRecord(
                                     pfucb,
                                     pidb,
                                     &keyT,
@@ -1774,7 +1778,10 @@ ERR VTAPI ErrIsamRetrieveColumn(
             Call( ErrERRCheck( JET_errInvalidTableId ) );
         }
         
-        *pcbActual = sizeof(PGNO);
+        if ( pcbActual )
+        {
+            *pcbActual = sizeof(PGNO);
+        }
         if ( !pv || sizeof(PGNO) > cbMax )
         {
             Call( ErrERRCheck( JET_errBufferTooSmall ) );
@@ -1800,7 +1807,10 @@ ERR VTAPI ErrIsamRetrieveColumn(
             Call( ErrERRCheck( JET_errInvalidTableId ) );
         }
         
-        *pcbActual = sizeof(ULONG);
+        if ( pcbActual )
+        {
+            *pcbActual = sizeof(ULONG);
+        }
         if ( !pv || sizeof(ULONG) > cbMax )
         {
             Call( ErrERRCheck( JET_errBufferTooSmall ) );
@@ -2461,7 +2471,7 @@ LOCAL ERR ErrRECRetrieveColumns(
             
             //  no ibLongValue since that logical concept cannot be compbined with JET_bitRetrievePhysicalSize, and no cbData since no data returned
             //
-            if ( pretcol->cbData || pretcol->ibLongValue )
+            if ( pretcolT->cbData || pretcolT->ibLongValue )
             {
                 Call( ErrERRCheck( JET_errInvalidParameter ) );
             }
@@ -2783,7 +2793,7 @@ LOCAL ERR ErrRECRetrieveColumns(
         else
         {
             Assert( wrnRECLongField != err );       //  obsolete error code
-            Assert( !(grbit & JET_bitRetrievePhysicalSize ) || pretcol->ibLongValue == 0 );
+            Assert( !(grbit & JET_bitRetrievePhysicalSize ) || pretcolT->ibLongValue == 0 );
 
             switch ( err )
             {
@@ -3231,11 +3241,13 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
             //  column is visible to us
             if( !fCountOnly )
             {
+                //  when the current column comes from the default-values iterator it exists only
+                //  as a default (the record iterator takes precedence on ties), so flag it as such.
                 RECIAddTaggedColumnListEntry(
                     rgtagcolinfo + centriesCurr,
                     pIteratorCur,
                     ptdb,
-                    fFalse );
+                    ( pIteratorCur == pdefaultValuesIterator ) );
             }
             ++centriesCurr;
             if( centriesMax == centriesCurr )

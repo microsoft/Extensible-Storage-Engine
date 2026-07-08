@@ -7675,7 +7675,7 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
         }
 
         // Force a write to the output structure (but don't actually modify the value).
-        OnDebug( AtomicCompareExchange( &pidxcreate->err, pidxcreate->err, pidxcreate->err ) );
+        OnDebug( AtomicCompareExchange( &pidxcreateT->err, pidxcreateT->err, pidxcreateT->err ) );
 
         if ( fLazyCommit && !( pidxcreateT->grbit & JET_bitIndexLazyFlush ) )
         {
@@ -7688,7 +7688,7 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
         pfcb->GetAPISpaceHints( &jsphIndex );
         if ( pidxcreateT->pSpacehints )
         {
-            jsphIndex = *(pidxcreate->pSpacehints);
+            jsphIndex = *(pidxcreateT->pSpacehints);
         }
         if ( ( (ULONG)g_cbPage * cpgInitialTreeDefault ) == jsphIndex.cbInitial )
         {
@@ -8349,7 +8349,7 @@ ERR VTAPI ErrIsamCreateIndex(
         {
             Assert( sizeof(JET_INDEXCREATE3_A) == pindexcreateT->cbStruct );
 
-            if ( pindexcreate->grbit & JET_bitIndexDeferredPopulateProcess )
+            if ( pindexcreateT->grbit & JET_bitIndexDeferredPopulateProcess )
             {
                 // Trying to continue processing a deferred-populate index.
 
@@ -8368,12 +8368,12 @@ ERR VTAPI ErrIsamCreateIndex(
                     Error( ErrERRCheck( JET_errIllegalOperation ) );
                 }
 
-                Call( ErrFILEIProcessDeferredPopulateIndex( ppib, pfucbTable, pindexcreate ) );
+                Call( ErrFILEIProcessDeferredPopulateIndex( ppib, pfucbTable, pindexcreateT ) );
             }
             else
             {
                 // Trying to create a single index, deferred-populate or not.
-                if ( pindexcreate->grbit & JET_bitIndexDeferredPopulateCreate )
+                if ( pindexcreateT->grbit & JET_bitIndexDeferredPopulateCreate )
                 {
                     // Trying to create a single deferred-populate index.
                     if ( !fAllowDeferred )
@@ -8391,7 +8391,7 @@ ERR VTAPI ErrIsamCreateIndex(
                     Assert ( pfmp->PkvpsMSysDeferredPopulateKeys() );
                 }
 
-                Call( ErrFILEICreateIndex( ppib, pfucbTable, pindexcreate ) );
+                Call( ErrFILEICreateIndex( ppib, pfucbTable, pindexcreateT ) );
             }
             fLazyCommit = fLazyCommit && ( pindexcreateT->grbit & JET_bitIndexLazyFlush );
         }

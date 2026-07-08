@@ -1198,7 +1198,10 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
             {
                 Call( ErrERRCheck( JET_errInvalidPath ) );
             }
-            OSStrCbCopyW( wszBackupPath, cbBackupPath, wszAtomicOld );
+            //  append the "old" subdirectory onto the (already normalized) base backup path rather
+            //  than overwriting it -- the length check above sums both lengths, and the full-backup
+            //  branch below likewise appends its subdirectory.
+            OSStrCbAppendW( wszBackupPath, cbBackupPath, wszAtomicOld );
             CallS( m_pinst->m_pfsapi->ErrPathFolderNorm( wszBackupPath, cbBackupPath ) );
         }
         else

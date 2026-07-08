@@ -223,7 +223,7 @@ ERR SegmentedHistogramTest::ErrTest()
 
     BYTE rgHisto2[CbCSegmentedHistogram( rgThreeCoveringSegments )];
 
-    pSHS = new (rgHisto) CSegmentedHistogram( rgThreeCoveringSegments, _countof( rgThreeCoveringSegments ), rgHisto2, sizeof(rgHisto2) );
+    pSHS = new (rgHisto2) CSegmentedHistogram( rgThreeCoveringSegments, _countof( rgThreeCoveringSegments ), rgHisto2, sizeof(rgHisto2) );
 
     CallTest( pSHS->ErrAddSample( 0 ) );
     for ( ULONG i = 0; i < 30; i++ )

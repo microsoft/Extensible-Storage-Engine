@@ -1603,6 +1603,10 @@ public:
             {
                 free( rgcNewNotes );
             }
+            if ( szNewNote )
+            {
+                free( szNewNote );
+            }
             dprintf( "Out of memory, couldn't defer print warning note: %s\n", szWarningMessage );
             return;
         }

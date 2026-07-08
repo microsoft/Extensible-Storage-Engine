@@ -2151,7 +2151,7 @@ LOCAL ERR ErrInfoGetTableColumnInfoList(
 
     Assert( fidFixedFirst.FFixed() || ( ( pfcbNil != ptdb->PfcbTemplateTable() ) && fidFixedFirst.FFixedNoneFull() ) );
     Assert( fidVarFirst.FVar() || ( ( pfcbNil != ptdb->PfcbTemplateTable() ) && fidVarFirst.FVarNoneFull() ) );
-    Assert( fidTaggedFirst.FTagged() || ( (pfcbNil != ptdb->PfcbTemplateTable() ) && fidVarFirst.FTaggedNoneFull() ) );
+    Assert( fidTaggedFirst.FTagged() || ( (pfcbNil != ptdb->PfcbTemplateTable() ) && fidTaggedFirst.FTaggedNoneFull() ) );
 
     Assert( fidFixedLast.FFixedNone() || fidFixedLast.FFixed() );
     Assert( fidVarLast.FVarNone() || fidVarLast.FVar() );

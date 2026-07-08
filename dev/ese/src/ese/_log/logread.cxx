@@ -1071,8 +1071,16 @@ LOG_VERIFY_STATE::ErrVerifyHeader( INST * pinst, IFileAPI * pfapi, __deref_in_bc
     {
         m_state = LogVerifyLogSegments;
         m_cbSeg = plgfilehdr->lgfilehdr.le_cbSec;
-        *ppb += plgfilehdr->lgfilehdr.le_csecHeader * m_cbSeg;
-        *pcb -= plgfilehdr->lgfilehdr.le_csecHeader * m_cbSeg;
+        //  le_cbSec / le_csecHeader are persisted (untrusted) header fields; a zero sector size or a
+        //  header span larger than the buffer would underflow *pcb and walk past the buffer in
+        //  ErrVerifyLogSegments below.
+        const QWORD cbHeaderSpan = (QWORD)plgfilehdr->lgfilehdr.le_csecHeader * m_cbSeg;
+        if ( m_cbSeg == 0 || cbHeaderSpan > *pcb )
+        {
+            Error( ErrERRCheck( JET_errLogReadVerifyFailure ) );
+        }
+        *ppb += (DWORD)cbHeaderSpan;
+        *pcb -= (DWORD)cbHeaderSpan;
         m_iSeg = plgfilehdr->lgfilehdr.le_csecHeader;
     }
 
@@ -2337,8 +2345,11 @@ ERR LOG_READ_BUFFER::ErrLGIGetRecordAtPbNext( BYTE **ppbLR, BOOL fPreread, BOOL 
                     Error( ErrERRCheck( JET_errLogFileCorrupt ) );
                 }
                 else if ( CbLGFixedSizeOfRec( (LR *)pbCurrent ) > (DWORD)( pbSegment + m_pLogStream->CbSec() - pbCurrent ) ||
-                        CbLGSizeOfRec( (LR *)pbCurrent ) > (DWORD)( pbSegment + m_pLogStream->CbSec() - pbCurrent ) )
+                        CbLGSizeOfRec( (LR *)pbCurrent ) > (DWORD)( pbSegment + m_pLogStream->CbSec() - pbCurrent ) ||
+                        0 == CbLGSizeOfRec( (LR *)pbCurrent ) )
                 {
+                    //  a zero-size record (e.g. an obsolete/unknown in-range lrtyp) would not advance
+                    //  pbCurrent below, causing the caller to loop forever -- treat it as corruption.
                     AssertSz( FNegTest( fCorruptingLogFiles ), "Corrupt size of LR (%d,%d) past rest of segment (%d).",
                                     CbLGFixedSizeOfRec( (LR *)pbCurrent ),
                                     CbLGSizeOfRec( (LR *)pbCurrent ),

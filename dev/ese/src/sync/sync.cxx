@@ -6100,7 +6100,7 @@ static void OSSYNCAPI OSSyncICleanup()
         g_piprintfPerfData = NULL;
     }
 
-    if ( NULL != g_piprintfPerfData )
+    if ( NULL != g_pfprintfPerfData )
     {
         ((CFPrintF*)g_pfprintfPerfData)->~CFPrintF();
         LocalFree( g_pfprintfPerfData );

@@ -661,6 +661,11 @@ EseShadowCreateShadow(
         // Get the directory name by duping the string, and overwriting the last backslash.
         // I don't think _splitpath works with 'unconventional' paths.
         g_eseRecoveryWriterConfig.m_szDatabasePath = WcsDupNew( g_eseRecoveryWriterConfig.m_szDatabaseFileFullPath );
+        if ( g_eseRecoveryWriterConfig.m_szDatabasePath == NULL )
+        {
+            hr = E_OUTOFMEMORY;
+            goto Cleanup;
+        }
 
         wchar_t* pchLastBackslash = const_cast<wchar_t*>( wcsrchr( g_eseRecoveryWriterConfig.m_szDatabasePath, L'\\' ) );
         if ( pchLastBackslash != NULL )
@@ -797,6 +802,11 @@ EseShadowCreateSimpleShadow(
         // Get the directory name by duping the string, and overwriting the last backslash.
         // I don't think _splitpath works with 'unconventional' paths.
         g_eseRecoveryWriterConfig.m_szDatabasePath = WcsDupNew( g_eseRecoveryWriterConfig.m_szDatabaseFileFullPath );
+        if ( g_eseRecoveryWriterConfig.m_szDatabasePath == NULL )
+        {
+            hr = E_OUTOFMEMORY;
+            goto Cleanup;
+        }
 
         wchar_t* pchLastBackslash = const_cast<wchar_t*>( wcsrchr( g_eseRecoveryWriterConfig.m_szDatabasePath, L'\\' ) );
         if ( pchLastBackslash != NULL )

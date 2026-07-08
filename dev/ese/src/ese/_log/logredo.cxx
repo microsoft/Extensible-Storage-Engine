@@ -237,6 +237,14 @@ LOCAL ERR ErrReplacePageImageHeaderTrailer(
                                 const DBTIME dbtimeBefore )
 {
 
+    //  cbHeader/cbTrailer come from a persisted (possibly corrupt) log record; reject a record
+    //  that would overrun the g_cbPage rebuild buffer (and underflow the memset in
+    //  RebuildPageImageHeaderTrailer) before touching the buffer.
+    if ( cbHeader < 0 || cbTrailer < 0 || cbHeader > g_cbPage || cbTrailer > g_cbPage || cbHeader + cbTrailer > g_cbPage )
+    {
+        return ErrERRCheck( JET_errLogFileCorrupt );
+    }
+
     VOID * pvBuffer;
     BFAlloc( bfasTemporary, &pvBuffer );
 
@@ -8076,6 +8084,13 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     {
         const INT   cbKeyParent = plrsplit->le_cbKeyParent;
 
+        //  cbKeyParent is from a persisted (possibly corrupt) log record; bound it to the
+        //  RESBOOKMARK buffer capacity before copying to avoid a heap overflow.
+        if ( cbKeyParent > cbBookmarkAlloc )
+        {
+            Error( ErrERRCheck( JET_errLogCorrupted ) );
+        }
+
         psplit->kdfParent.key.suffix.SetPv( RESBOOKMARK.PvRESAlloc() );
         Alloc( psplit->kdfParent.key.suffix.Pv() );
 
@@ -8093,6 +8108,13 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     {
         const INT   cbPrefix = plrsplit->le_cbPrefixSplitOld;
 
+        //  cbPrefix is from a persisted (possibly corrupt) log record; bound it to the
+        //  RESBOOKMARK buffer capacity before copying to avoid a heap overflow.
+        if ( cbPrefix > cbBookmarkAlloc )
+        {
+            Error( ErrERRCheck( JET_errLogCorrupted ) );
+        }
+
         psplit->prefixSplitOld.SetPv( RESBOOKMARK.PvRESAlloc() );
         Alloc( psplit->prefixSplitOld.Pv() );
 
@@ -8106,6 +8128,13 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     if ( plrsplit->le_cbPrefixSplitNew > 0 )
     {
         const INT   cbPrefix = plrsplit->le_cbPrefixSplitNew;
+
+        //  cbPrefix is from a persisted (possibly corrupt) log record; bound it to the
+        //  RESBOOKMARK buffer capacity before copying to avoid a heap overflow.
+        if ( cbPrefix > cbBookmarkAlloc )
+        {
+            Error( ErrERRCheck( JET_errLogCorrupted ) );
+        }
 
         psplit->prefixSplitNew.SetPv( RESBOOKMARK.PvRESAlloc() );
         Alloc( psplit->prefixSplitNew.Pv() );
@@ -8460,6 +8489,13 @@ ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
     if ( plrmerge->le_cbKeyParentSep > 0 )
     {
         const INT   cbKeyParentSep = plrmerge->le_cbKeyParentSep;
+
+        //  cbKeyParentSep is from a persisted (possibly corrupt) log record; bound it to the
+        //  RESBOOKMARK buffer capacity before copying to avoid a heap overflow.
+        if ( cbKeyParentSep > cbBookmarkAlloc )
+        {
+            Error( ErrERRCheck( JET_errLogCorrupted ) );
+        }
 
         pmerge->kdfParentSep.key.suffix.SetPv( RESBOOKMARK.PvRESAlloc() );
         Alloc( pmerge->kdfParentSep.key.suffix.Pv() );
@@ -10590,8 +10626,12 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
 
                     // Copy new data.
                     const USHORT cbData = plrseh->CbData();
-                    Assert( cbData == sizeof( prmc->sphNew ) );
-                    Assert( cbData == prmc->dataSphNew.Cb() );
+                    //  cbData is from a persisted (possibly corrupt) log record; the destination
+                    //  is a fixed-size SPACE_HEADER, so reject a mismatched length.
+                    if ( cbData != sizeof( prmc->sphNew ) )
+                    {
+                        Error( ErrERRCheck( JET_errLogCorrupted ) );
+                    }
                     UtilMemCpy( prmc->dataSphNew.Pv(), plrseh->rgbData, cbData );
                 }
             }

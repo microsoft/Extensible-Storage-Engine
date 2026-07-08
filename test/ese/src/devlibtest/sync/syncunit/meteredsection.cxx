@@ -283,7 +283,7 @@ ERR CMeteredSectionConcurrentBashTest::ErrTest()
     g_cbashphase = 1;
 
     C_ASSERT( _countof(g_rgtbMscb) == 3 );  //  too lazy
-    while( g_rgtbMscb[0].cUnderflowNegTwo == 0 || g_rgtbMscb[0].cUnderflowNegTwo == 0 || g_rgtbMscb[0].cUnderflowNegTwo == 0 )
+    while( g_rgtbMscb[0].cUnderflowNegTwo == 0 || g_rgtbMscb[1].cUnderflowNegTwo == 0 || g_rgtbMscb[2].cUnderflowNegTwo == 0 )
     {
         Sleep( g_tickPhaseWait );
     }
@@ -308,11 +308,11 @@ ERR CMeteredSectionConcurrentBashTest::ErrTest()
     ULONG ithread = 0;
     while( g_rgtbMscb[ithread].cbashphase != g_cbasephaseDone || ithread++ < _countof(g_rgtbMscb) )
     {
-        wprintf( L"\t\tGot quit of [%d] .. (%#x)\n", ithread, g_rgtbMscb[ithread].cbashphase );
         if ( ithread >= _countof(g_rgtbMscb) )
         {
             break;
         }
+        wprintf( L"\t\tGot quit of [%d] .. (%#x)\n", ithread, g_rgtbMscb[ithread].cbashphase );
         Sleep( g_tickPhaseWait );
     }
 

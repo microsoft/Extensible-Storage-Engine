@@ -626,6 +626,16 @@ ERR ErrRECSetCursorFilter(
     DWORD   cbNeeded    = sizeof(NORMALIZED_FILTER_COLUMN) * cFilters;
     for ( DWORD i = 0; i < cFilters; i++ )
     {
+        //  no supported filter column can hold more than JET_cbColumnMost bytes, so a larger
+        //  filter value is invalid.  Reject it here so that the buffer-size accumulation below
+        //  (a 32-bit DWORD) cannot be made to overflow, which would under-allocate the buffer
+        //  and cause a heap overflow when the filter value is copied in later.
+        //
+        if ( rgFilters[i].cb > JET_cbColumnMost )
+        {
+            Error( ErrERRCheck( JET_errInvalidParameter ) );
+        }
+
         //  add an extra byte in case the filter value needs to be normalised
         //  (because a prefix/header byte will be pre-pended to the normalised
         //  value)
@@ -2605,7 +2615,7 @@ HandleError:
     Expected( err >= JET_errSuccess || *ppKey == NULL );
     if ( err < JET_errSuccess )
     {
-        delete *ppKey;
+        delete[] *ppKey;
         *ppKey = NULL;
         *pcKey = 0;
     }
@@ -3050,7 +3060,7 @@ ERR ErrIsamIPrereadIndexRanges(
     {
         if ( grbit & JET_bitPrereadNormalizedKey )
         {
-            if ( rgIndexRanges[iindexrangeT].cStartColumns != 1 &&
+            if ( rgIndexRanges[iindexrangeT].cStartColumns != 1 ||
                  rgIndexRanges[iindexrangeT].cEndColumns > 1 )
             {
                 Error( ErrERRCheck( JET_errInvalidParameter ) );

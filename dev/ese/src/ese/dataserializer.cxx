@@ -903,8 +903,12 @@ ERR MemoryDataStore::ErrStoreDataToColumn( const char * const szColumn, const vo
     else
     {
         BYTE * pb = new BYTE[cb];
+        if ( pb == NULL )
+        {
+            return ErrERRCheck( JET_errOutOfMemory );
+        }
         memcpy( pb, pv, cb );
-        m_rgpbData[i] = unique_ptr<BYTE>( pb );
+        m_rgpbData[i] = unique_ptr<BYTE[]>( pb );
         m_rgcbData[i] = cb;
         return JET_errSuccess;
     }

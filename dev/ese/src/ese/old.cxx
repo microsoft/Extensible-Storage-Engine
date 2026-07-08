@@ -1051,9 +1051,11 @@ ERR RECCHECKFINALIZE<TDelta>::operator()( const KEYDATAFLAGS& kdf, const PGNO pg
         return JET_errSuccess;
     }
 
-    //  Currently all finalizable columns are ULONGs
-    const ULONG ulColumn        = *(UnalignedLittleEndian< ULONG > *)((BYTE *)prec + m_ibRecordOffset );
-    if ( 0 == ulColumn )
+    //  Finalizable columns are 32-bit and 64-bit signed types (see FINALIZETASK<TDelta>).
+    //  Read the full column width: a 64-bit escrow value whose low 32 bits happen to be zero
+    //  (but which is non-zero overall) must not be mistaken for zero.
+    const TDelta tColumn        = *(UnalignedLittleEndian< TDelta > *)((BYTE *)prec + m_ibRecordOffset );
+    if ( 0 == tColumn )
     {
         BOOKMARK bm;
         bm.key = kdf.key;

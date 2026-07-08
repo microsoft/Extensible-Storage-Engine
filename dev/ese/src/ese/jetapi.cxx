@@ -8387,8 +8387,10 @@ void CAutoINDEXCREATE3To3_T< JET_INDEXCREATE3_T_FROM, JET_INDEXCREATE3_T_TO >::R
         if ( 0 == ( m_rgindexcreateEngine[iIdx].grbit & JET_bitIndexImmutableStructure ) )
         {
             pidxcreateFromAPI->err = m_rgindexcreateEngine[iIdx].err;
-            pidxcreateFromAPI = (JET_INDEXCREATE3_T_FROM *)( ((BYTE*)pidxcreateFromAPI) + pidxcreateFromAPI->cbStruct );
         }
+        //  Advance unconditionally so the client pointer stays in sync with iIdx even when
+        //  some structures are immutable -- only the write-back is skipped, not the walk.
+        pidxcreateFromAPI = (JET_INDEXCREATE3_T_FROM *)( ((BYTE*)pidxcreateFromAPI) + pidxcreateFromAPI->cbStruct );
     }
 }
 template< class JET_INDEXCREATE3_T_FROM, class JET_INDEXCREATE3_T_TO >
@@ -14966,6 +14968,10 @@ void CAutoIDXCREATE3::Result( )
     {
         m_pindexcreate2W->err = m_pindexcreate->err;
     }
+    else if ( m_pindexcreate && m_pindexcreate3W )
+    {
+        m_pindexcreate3W->err = m_pindexcreate->err;
+    }
 }
 
 CAutoIDXCREATE3::~CAutoIDXCREATE3()
@@ -16417,6 +16423,9 @@ LOCAL JET_ERR JetCreateIndexEx2W(
     //
     for( iIndexCreate = 0 ; iIndexCreate < cIndexCreate; iIndexCreate++ )
     {
+        //  the engine wrote each per-index result into the separate engine array, so copy it
+        //  back into the converter before Result() propagates it to the client structure.
+        ((JET_INDEXCREATE2_A*)(rgindexcreateauto[iIndexCreate]))->err = rgindexcreateEngine[iIndexCreate].err;
         rgindexcreateauto[iIndexCreate].Result( );
     }
 
@@ -16486,6 +16495,9 @@ LOCAL JET_ERR JetCreateIndexEx1W(
     //
     for( iIndexCreate = 0 ; iIndexCreate < cIndexCreate; iIndexCreate++ )
     {
+        //  the engine wrote each per-index result into the separate engine array, so copy it
+        //  back into the converter before Result() propagates it to the client structure.
+        ((JET_INDEXCREATE2_A*)(rgindexcreateauto[iIndexCreate]))->err = rgindexcreateEngine[iIndexCreate].err;
         rgindexcreateauto[iIndexCreate].Result( );
     }
 
@@ -16534,6 +16546,9 @@ LOCAL JET_ERR JetCreateIndexEx3W(
     //
     for( iIndexCreate = 0 ; iIndexCreate < cIndexCreate; iIndexCreate++ )
     {
+        //  the engine wrote each per-index result into the separate engine array, so copy it
+        //  back into the converter before Result() propagates it to the client structure.
+        ((JET_INDEXCREATE3_A*)(rgindexcreateauto[iIndexCreate]))->err = rgindexcreateEngine[iIndexCreate].err;
         rgindexcreateauto[iIndexCreate].Result( );
     }
 

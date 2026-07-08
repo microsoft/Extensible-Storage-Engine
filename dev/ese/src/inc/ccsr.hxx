@@ -820,7 +820,7 @@ INLINE VOID CSR::CopyPage( const VOID* pvPage, const ULONG cbPage )
     m_cpage.CopyPage( pvPage, cbPage );
 
     //  set members
-    Assert( m_pgno = m_cpage.PgnoThis() );  // pgno can't change
+    Assert( m_pgno == m_cpage.PgnoThis() );  // pgno can't change
     m_dbtimeSeen = m_cpage.Dbtime();
     m_pagetrimState = pagetrimNormal;
 }

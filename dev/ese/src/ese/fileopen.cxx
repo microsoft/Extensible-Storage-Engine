@@ -2700,6 +2700,13 @@ ERR ErrIDBSetIdxSeg(
         return JET_errSuccess;
     }
 
+    //  cidxseg is derived from a persisted catalog column length; a corrupt value larger than
+    //  the fixed rgidxseg[] stack array would overflow it in the conversion loop below.
+    if ( cidxseg > _countof( rgidxseg ) )
+    {
+        return ErrERRCheck( JET_errCatalogCorrupted );
+    }
+
     //  If it is on little endian machine, we still copy it into
     //  the stack array which is aligned.
     //  If it is on big endian machine, we always need to convert first.
@@ -2800,6 +2807,13 @@ ERR ErrIDBSetIdxSegFromOldFormat(
     TCIB        tcibTemplateTable           = { FID( ptdb->FidFixedFirst()-1 ),
                                                 FID( ptdb->FidVarFirst()-1 ),
                                                 FID( ptdb->FidTaggedFirst()-1 ) };
+
+    //  cidxseg is derived from a persisted catalog column length; a corrupt value larger than
+    //  the fixed rgidxseg[] stack array would overflow it in SetIdxSegFromOldFormat below.
+    if ( cidxseg > _countof( rgidxseg ) )
+    {
+        return ErrERRCheck( JET_errCatalogCorrupted );
+    }
 #ifdef DEBUG
     if ( ptdb->FDerivedTable() )
     {

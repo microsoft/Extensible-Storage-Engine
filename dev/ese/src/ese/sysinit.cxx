@@ -251,7 +251,7 @@ ERR INST::ErrINSTInit( )
 
     // initialize SCB
 
-    CallJ( ErrSCBInit( this ), TermPIB );
+    CallJ( ErrSCBInit( this ), TermPRL );
 
     CallJ( ErrFUCBInit( this ), TermSCB );
 
@@ -321,6 +321,11 @@ TermFUCB:
 
 TermSCB:
     SCBTerm( this );
+
+TermPRL:
+    //  cancel outstanding patch requests and free the patch request list
+    //  (initialized above by PagePatching::ErrPRLInit)
+    PagePatching::TermInst( this );
 
 TermPIB:
     PIBTerm( this );

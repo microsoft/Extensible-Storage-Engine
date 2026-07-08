@@ -2540,6 +2540,13 @@ ERR LOCAL ErrNDISetExternalHeader( _In_ FUCB* const pfucb, _In_ const IFMP ifmp,
     const SIZE_T cbPostcedingStoredFields = (BYTE*)line.pv + line.cb - pbCursorSrc;
     if ( cbPostcedingStoredFields > 0 )
     {
+        //  cbPostcedingStoredFields derives from the persisted external-header size (line.cb) and
+        //  can be corrupt-large, or underflow to ~SIZE_MAX if a bad flag byte walked pbCursorSrc
+        //  past the tag; bound it to the remaining stack buffer like the two copies above.
+        if ( cbPostcedingStoredFields > (SIZE_T)( _countof(pbBuffer) - (ULONG)( pbCursorDst - (BYTE*)pbBuffer ) ) )
+        {
+            Error( ErrERRCheck( JET_errInvalidBufferSize ) );
+        }
         UtilMemCpy( pbCursorDst, pbCursorSrc, cbPostcedingStoredFields );
         pbCursorDst += cbPostcedingStoredFields;
         AssertRTL( pbCursorDst - (BYTE*)pbBuffer <= _countof(pbBuffer) );

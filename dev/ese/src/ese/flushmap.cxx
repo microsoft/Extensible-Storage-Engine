@@ -439,6 +439,10 @@ ERR CFlushMap::ErrAttachFlushMap_()
                 Assert( cfmpgActual >= 0 ); // the flush map may have zero data pages if we crashed before completing the first full
                                             // write of the map to persistent storage.
                 cfmpgActual = max( cfmpgActual, 1 );
+                //  the page count derives from the (untrusted) persisted flush-map file size; clamp it
+                //  to the maximum a valid flush map can require so a crafted over-large file cannot
+                //  overflow the 32-bit descriptor-capacity arithmetic in ErrAllocateDescriptorsCapacity_.
+                cfmpgActual = min( cfmpgActual, CfmpgGetRequiredFmDataPageCount_( pgnoSysMax ) );
 
                 if ( !m_fDumpMode )
                 {

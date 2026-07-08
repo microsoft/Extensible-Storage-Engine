@@ -344,7 +344,7 @@ ERR RBSCleanerTestIOOperator::ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSR
 ERR RBSCleanerTestIOOperator::ErrRBSAbsRootDirPathToUse( __out_bcount( cbDirPath ) WCHAR* wszRBSAbsRootDirPath, LONG cbDirPath, BOOL fBackupDir )
 {
    // doesn't matter what we return for test here as it doesn't affect the values we return in the current usage.
-   ErrOSStrCbCopyW( wszRBSAbsRootDirPath, sizeof( wszRBSAbsRootDirPath ), wszRBSBackupDir );
+   ErrOSStrCbCopyW( wszRBSAbsRootDirPath, cbDirPath, wszRBSBackupDir );
    return JET_errSuccess;
 }
 

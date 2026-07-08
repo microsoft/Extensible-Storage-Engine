@@ -193,7 +193,7 @@ ERR ErrGetDesiredVersion( _In_ const INST * const pinstStaging, _In_ JET_ENGINEF
         return JET_errSuccess;
     }
 
-    for ( ULONG i = g_ifmtversLastFeature; i >= 0; i-- )
+    for ( INT i = g_ifmtversLastFeature; i >= 0; i-- )
     {
         if ( g_rgfmtversEngine[i].efv == efvDesired )
         {

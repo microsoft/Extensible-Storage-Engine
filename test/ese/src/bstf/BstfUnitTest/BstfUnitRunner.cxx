@@ -234,6 +234,7 @@ static ERR ErrRunSelectedTests( const char * szTestSpec )
     if ( fSuffixMatch )
         {
         szTestSpec++;
+        cchTestSpec--;
         }
 
     ULONG cTestsRun = 0;
@@ -247,7 +248,7 @@ static ERR ErrRunSelectedTests( const char * szTestSpec )
                 ( 0 == _strnicmp( szTestSpec, punittest->SzName(), cchTestSpec ) ) ) ||
             ( fSuffixMatch && 
                 ( cchCurrTestName >= cchTestSpec ) && 
-                ( 0 == _stricmp( szTestSpec, &(punittest->SzName()[ cchCurrTestName - cchTestSpec + 1 ]) ) ) ) )
+                ( 0 == _stricmp( szTestSpec, &(punittest->SzName()[ cchCurrTestName - cchTestSpec ]) ) ) ) )
             {
             TestCall( ErrRunTest( punittest ) );
             cTestsRun++;

@@ -939,7 +939,7 @@ BOOL LOG::FRstmapCheckDuplicateSignature(  )
 
         for ( irstmapSearch = irstmap + 1; irstmapSearch < m_irstmapMac; irstmapSearch++ )
         {
-            if ( !m_rgrstmap[irstmap].wszNewDatabaseName )
+            if ( !m_rgrstmap[irstmapSearch].wszNewDatabaseName )
                 continue;
 
             if ( 0 == memcmp(   &m_rgrstmap[irstmap].signDatabase,

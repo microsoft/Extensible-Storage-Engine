@@ -74,7 +74,9 @@ VOID LOCAL DUMPRBSHeaderStandard( INST *pinst, _In_ const DB_HEADER_READER* cons
 
     DUMPPrintF( "Snapshot Attach Infos:\n" );
 
-    for( const BYTE * pbT = prbsfilehdr->rgbAttach; 0 != *pbT; pbT += sizeof( RBSATTACHINFO ) )
+    for( const BYTE * pbT = prbsfilehdr->rgbAttach;
+         pbT + sizeof( RBSATTACHINFO ) <= prbsfilehdr->rgbAttach + cbRBSAttach && 0 != *pbT;
+         pbT += sizeof( RBSATTACHINFO ) )
     {
         RBSATTACHINFO* prbsattachinfo = (RBSATTACHINFO*) pbT;
 
@@ -230,7 +232,9 @@ VOID RBSRecToSz( const RBSRecord *prbsrec, __out_bcount(cbRBSRec) PSTR szRBSRec,
 
             RBSDbPageRecord* prbsdbpgrec = ( RBSDbPageRecord* ) prbsrec;
             dataImage.SetPv( prbsdbpgrec->m_rgbData );
-            dataImage.SetCb( prbsrec->m_usRecLength - sizeof(RBSDbPageRecord) );
+            dataImage.SetCb( prbsrec->m_usRecLength >= sizeof( RBSDbPageRecord )
+                                ? prbsrec->m_usRecLength - sizeof( RBSDbPageRecord )
+                                : 0 );
 
             if ( prbsdbpgrec->m_fFlags )
             {
@@ -554,6 +558,10 @@ ERR ErrDUMPRBSPage( INST *pinst, _In_ PCWSTR wszRBS, PGNO pgnoFirst, PGNO pgnoLa
     }
 
     prbs = new CRevertSnapshot( pinst );
+    if ( prbs == NULL )
+    {
+        Error( ErrERRCheck( JET_errOutOfMemory ) );
+    }
     Call ( prbs->ErrSetRBSFileApi( pfapirbs ) );
     Call ( prbs->ErrSetReadBuffer( pgnoFirst ) );
     prbs->SetIsDumping();

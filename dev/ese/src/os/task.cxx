@@ -73,6 +73,7 @@ ERR CTaskManager::ErrTMInit(    const ULONG                     cThread,
     //  allocate THREAD handles
 
     m_cThread = 0;
+    m_cThreadMax = cThread;
     Alloc( m_rgThreadContext = new THREADCONTEXT[cThread] );
     memset( m_rgThreadContext, 0, sizeof( THREADCONTEXT ) * cThread );
 
@@ -98,7 +99,6 @@ ERR CTaskManager::ErrTMInit(    const ULONG                     cThread,
     }
 
     Assert( cThread < 1000 );
-    m_cThreadMax = cThread;
 
     //  prepare the thread context
 
@@ -144,6 +144,7 @@ VOID CTaskManager::TMTerm()
 
     m_critActivateThread.Enter();
     m_cTasksThreshold   = 0xffffffff;
+    const ULONG cThreadNodeMax = m_cThreadMax;
     m_cThreadMax        = 0;
     m_critActivateThread.Leave();
 
@@ -246,7 +247,7 @@ VOID CTaskManager::TMTerm()
 
     if ( m_rgpTaskNode )
     {
-        for ( iThread = 0; iThread < m_cThread; iThread++ )
+        for ( iThread = 0; iThread < cThreadNodeMax; iThread++ )
         {
             delete m_rgpTaskNode[iThread];
         }

@@ -8641,13 +8641,13 @@ ERR ErrSPCaptureSpaceTreePages( FUCB* const pfucbParent, FCB* pfcb, CPG* pcpgSna
     Assert( rgNonLeafPgnos[cpgNonLeafPgnos - 1] == pgnoNull );
 
     cpgno   = cpgLeafPgnos + cpgNonLeafPgnos - 2;
-    rgPgnos = new PGNO[cpgno];
+    Alloc( rgPgnos = new PGNO[cpgno] );
 
     // Ignore the pgnoNull
     memcpy( rgPgnos, rgNonLeafPgnos, ( cpgNonLeafPgnos - 1 ) * sizeof( PGNO ) );
     memcpy( rgPgnos + cpgNonLeafPgnos - 1, rgLeafPgnos, ( cpgLeafPgnos - 1 ) * sizeof( PGNO ) );
 
-    std::sort( rgPgnos, rgPgnos + cpgno - 1, CmpPgno );
+    std::sort( rgPgnos, rgPgnos + cpgno, CmpPgno );
 
     // Find if there is any continuous extent in space tree. Also capture preimage if needed.
     for ( LONG ipg = 0; ipg < cpgno; ++ipg )
@@ -14623,15 +14623,17 @@ LOCAL ERR ErrSPIAddExtentInfo(
     if ( *pcextMac >= *pcextMax )
     {
         Assert( *pcextMac == *pcextMax );
-        //  Reallocate ...
-        BTREE_SPACE_EXTENT_INFO * prgextToFree = *pprgext;
+        //  Reallocate into a temporary first, so that an OOM failure here leaves the caller's
+        //  existing array pointer intact (so the caller can still free it) rather than nulling it.
+        BTREE_SPACE_EXTENT_INFO * prgextNew = NULL;
         const ULONG cextNewSize = (*pcextMax) * 2;
-        Alloc( *pprgext = new BTREE_SPACE_EXTENT_INFO[cextNewSize] );
+        Alloc( prgextNew = new BTREE_SPACE_EXTENT_INFO[cextNewSize] );
+        memset( prgextNew, 0, sizeof(BTREE_SPACE_EXTENT_INFO)*cextNewSize );
+        C_ASSERT( sizeof(*prgextNew) == 16 );    // just double checking got level of indirection correct
+        memcpy( prgextNew, *pprgext, *pcextMac * sizeof(*prgextNew) );
+        delete [] *pprgext;
+        *pprgext = prgextNew;
         *pcextMax = cextNewSize;
-        memset( *pprgext, 0, sizeof(BTREE_SPACE_EXTENT_INFO)*(*pcextMax) );
-        C_ASSERT( sizeof(**pprgext) == 16 );    // just double checking got level of indirection correct
-        memcpy( *pprgext, prgextToFree, *pcextMac * sizeof(**pprgext) );
-        delete [] prgextToFree;
     }
     Assert( *pcextMac < *pcextMax );
     AssumePREFAST( *pcextMac < *pcextMax );
@@ -16541,6 +16543,13 @@ ERR ErrSPGetExtentInfo(
     }
 
 HandleError:
+
+    //  on failure the extent array was not handed to the caller (that only happens on success),
+    //  so free it here to avoid leaking it on OOM / mid-enumeration errors.
+    if ( err < JET_errSuccess )
+    {
+        delete [] prgext;
+    }
 
     Expected( pfucbNil != pfucbT ); //  codepaths up to (inclusive) opening the cursor return immediately (i.e., no HandleError cleanup).
 

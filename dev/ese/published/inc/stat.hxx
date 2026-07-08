@@ -775,7 +775,7 @@ public:
         {
             return ERR::wrnOutOfSamples;
         }
-        else if ( m_iValueLastQuery > 1 &&
+        else if ( m_iValueLastQuery > 0 &&
                     qwValue < m_pValues[m_iValueLastQuery-1] )
         {
             return ERR::errInvalidParameter;
@@ -1276,7 +1276,7 @@ class CSegmentedHistogram : public CStats {
             {
                 return ERR::wrnOutOfSamples;
             }
-            else if ( m_iValueLastQuery > 1 &&
+            else if ( m_iValueLastQuery > 0 &&
                         qwValue < m_pValues[m_iValueLastQuery-1] )
             {
                 return ERR::errInvalidParameter;

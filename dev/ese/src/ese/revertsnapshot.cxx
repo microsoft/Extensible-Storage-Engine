@@ -4553,6 +4553,10 @@ ERR CRBSDatabaseRevertContext::ErrAddRootPageRecord( BOOL fDeleteOperation, PGNO
     if ( m_rgrootpagerec == NULL )
     {
         m_rgrootpagerec = new CArray< CRootPageRecord >( 32 );
+        if ( m_rgrootpagerec == NULL )
+        {
+            return ErrERRCheck( JET_errOutOfMemory );
+        }
     }
 
     errArray = m_rgrootpagerec->ErrSetEntry( m_rgrootpagerec->Size(), rootpagerec );
@@ -4604,6 +4608,10 @@ ERR CRBSDatabaseRevertContext::ErrCapturePageFDPDeleteState( const LONG lRBSGen,
 
     CArray< CPageFDPDeleteState >* rgpagefdpdeletestate = new CArray< CPageFDPDeleteState >();
     PagesFDPDeleteState            pagesFDPDeleteState;
+    if ( rgpagefdpdeletestate == NULL )
+    {
+        Error( ErrERRCheck( JET_errOutOfMemory ) );
+    }
     errArray = rgpagefdpdeletestate->ErrSetCapacity( cpgRootMove );
 
     if ( errArray != CArray< CPageFDPDeleteState >::ERR::errSuccess )
@@ -4786,6 +4794,10 @@ ERR CRBSDatabaseRevertContext::ErrRBSInitRootPageDeleteState( const LONG lRBSGen
     }
 
     rgpagefdpdeletestate = new CArray< CPageFDPDeleteState >();
+    if ( rgpagefdpdeletestate == NULL )
+    {
+        Error( ErrERRCheck( JET_errOutOfMemory ) );
+    }
     errArray = rgpagefdpdeletestate->ErrLoadEntries( pagesFDPDeleteState->m_rgbPageFDPDeleteState, pagesFDPDeleteState->le_cPagesCaptured * sizeof( CPageFDPDeleteState ) );
 
     if ( errArray != CArray< CPageFDPDeleteState >::ERR::errSuccess )
@@ -4922,6 +4934,7 @@ ERR CRBSDatabaseRevertContext::ErrRBSApplyRootPageRecords( const USHORT cbDbPage
 
                     // Allocate memory for storing src page data.
                     pvPage = PvOSMemoryPageAlloc( cbDbPageSize, NULL );
+                    Alloc( pvPage );
 
                     // Set it on the source pages since after the revert the page would have been on the src of the move.
                     Call( ErrAddPage( pvPage, rootpagerec.PgnoSrc(), fTrue, fFalse, fTrue, fTrue, cbDbPageSize, &fPageAddedToCache ) );
@@ -4930,6 +4943,13 @@ ERR CRBSDatabaseRevertContext::ErrRBSApplyRootPageRecords( const USHORT cbDbPage
                 {
                     *pcpgRootPageCreateMoves = *pcpgRootPageCreateMoves + 1;
                 }
+            }
+            else
+            {
+                //  the destination page's FDP-delete flag is not set, so we do not add
+                //  this page image to the revert context; free the buffer we allocated.
+                OSMemoryPageFree( pvPage );
+                pvPage = NULL;
             }
         }
 
@@ -6464,7 +6484,7 @@ ERR CRBSRevertContext::ErrRemoveRBSAfterRevert()
     ERR     err         = JET_errSuccess;
 
     // Backup all the RBS generations we have applied in case we need them for investigation later.
-    for ( LONG rbsGenToBackup = m_lRBSMaxGenToApply; rbsGenToBackup >= m_lRBSMaxGenToApply; --rbsGenToBackup )
+    for ( LONG rbsGenToBackup = m_lRBSMaxGenToApply; rbsGenToBackup >= m_lRBSMinGenToApply; --rbsGenToBackup )
     {
         if ( m_fRevertCancelled )
         {

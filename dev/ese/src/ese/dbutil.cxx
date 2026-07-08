@@ -1137,7 +1137,7 @@ LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
         {
             return ErrERRCheck( JET_errInvalidParameter );
         }
-        const PGNO pgnoNext = strtoul( rgszCommand[2], NULL, 0 );
+        const PGNO pgnoNext = strtoul( rgszCommand[2], &pchEnd, 0 );
         if( 0 != *pchEnd )
         {
             return ErrERRCheck( JET_errInvalidParameter );
@@ -1155,7 +1155,7 @@ LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
         {
             return ErrERRCheck( JET_errInvalidParameter );
         }
-        const PGNO pgnoPrev = strtoul( rgszCommand[2], NULL, 0 );
+        const PGNO pgnoPrev = strtoul( rgszCommand[2], &pchEnd, 0 );
         if( 0 != *pchEnd )
         {
             return ErrERRCheck( JET_errInvalidParameter );
@@ -1173,7 +1173,7 @@ LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
         {
             return ErrERRCheck( JET_errInvalidParameter );
         }
-        const ULONG fFlags = strtoul( rgszCommand[2], NULL, 0 );
+        const ULONG fFlags = strtoul( rgszCommand[2], &pchEnd, 0 );
         if( 0 != *pchEnd )
         {
             return ErrERRCheck( JET_errInvalidParameter );

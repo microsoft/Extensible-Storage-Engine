@@ -102,6 +102,8 @@ LOCAL ERR ErrNORMGetLcidInfo( const LCID lcid, const LCTYPE lctype, __deref_out 
         Assert( 0 == cbT || cbT == cbNeeded );
         if ( 0 == cbT )
         {
+            delete[] *psz;
+            *psz = NULL;
             Call( ErrERRCheck( JET_errInternalError ) );
         }
     }
@@ -127,6 +129,8 @@ LOCAL ERR ErrNORMGetLocaleNameInfo( PCWSTR wszLocaleName, const LCTYPE lctype, _
         Assert( 0 == cbT || cbT == cbNeeded );
         if ( 0 == cbT )
         {
+            delete[] *psz;
+            *psz = NULL;
             Call( ErrERRCheck( JET_errInternalError ) );
         }
     }

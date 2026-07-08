@@ -1045,8 +1045,8 @@ Xpress9DecoderFetchDecompressedData (
                     "Buffer too small to DirectDecode, uBytesNeeded=%Iu, uBytesToCopy=%Iu, uDecodePosition=%Iu, uBufferDataSize=%Iu",
                     uBytesNeeded,
                     uBytesToCopy,
-                    pDecoder->m_DecodeData.m_uDecodePosition
-                    pDecoder->m_BufferData.m_uBufferDataSize,
+                    pDecoder->m_DecodeData.m_uDecodePosition,
+                    pDecoder->m_BufferData.m_uBufferDataSize
                 );
                 goto Failure;
             }

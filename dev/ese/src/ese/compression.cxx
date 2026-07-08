@@ -2096,7 +2096,7 @@ ERR CDataCompressor::ErrCompressLz4_(
     Assert( cbCompressedActual <= cbDataCompressedMax - cbReserved );
 
     PERFOpt( pstats->AddUncompressedBytes( data.Cb() ) );
-    PERFOpt( pstats->AddCompressedBytes( *pcbDataCompressedActual ) );
+    PERFOpt( pstats->AddCompressedBytes( cbCompressedActual + cbReserved ) );
     PERFOpt( pstats->IncCompressionCalls() );
     PERFOpt( pstats->AddCompressionDhrts( HrtHRTCount() - hrtStart ) );
 

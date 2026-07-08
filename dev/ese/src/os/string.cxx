@@ -701,7 +701,7 @@ ERR ErrOSSTRAsciiToUnicodeM( _In_ PCSTR const szzMultiIn,
         }
         CallR( err );
 
-        szCurrent += LOSStrLengthA( szCurrent );
+        szCurrent += LOSStrLengthA( szCurrent ) + 1;
         if ( cchMaxCurrent > cchCurrent )
         {
             cchMaxCurrent -= cchCurrent;
